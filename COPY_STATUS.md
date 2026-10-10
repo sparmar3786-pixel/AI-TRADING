@@ -19,7 +19,7 @@ Last updated: 2026-10-11
 
 ## Upstream import status
 
-- `vendor/TradingAgents/` — all 83 source files under upstream `tradingagents/` imported and checked against the upstream recursive Git tree. Also retained Apache-2.0 LICENSE, README, packaging metadata, requirements pointer and logo. Not a full clone of every upstream repository item; not runtime-integrated or end-to-end tested.
+- `vendor/TradingAgents/` — all 208 tracked files from the upstream recursive Git tree imported and checked, including all 83 package source files, CLI, tests, metadata, docs, templates and image assets. Apache-2.0 license retained. Not runtime-integrated or end-to-end tested.
 - `vendor/FinGPT/` — selected ForexIntelligence and Forecaster files imported, including application entry point, market data pipeline, sentiment/symbol configuration, training and Docker files. Partial import; MIT license retained.
 - `vendor/FinRobot/` — selected agent/data/analysis modules and upstream README retained; partial import under Apache-2.0.
 - `vendor/Qlib/` — selected backtesting, strategy/order generation, cost-control, portfolio evaluation and risk/reporting modules imported. Partial import under MIT.
