@@ -10,6 +10,15 @@ This file distinguishes source files actually committed from projects that are o
 - `vendor/FinGPT/`: 56 files
 - `vendor/qlib/`: 19 files
 - `vendor/financial-agent/`: 15 files
+- `vendor/intelligent-trading-bot/`: 64 files
+- `vendor/Sebacaraballo-Trading-Bot/`: 66 files
+- `vendor/LLM_trader/`: 40 files
+- `vendor/awesome-systematic-trading/`: 16 files
+- `vendor/awesome-ai-in-finance/`: 10 files
+- `vendor/hftbacktest/`: 15 files
+- `vendor/qtpylib/`: 5 files
+- `vendor/llm-tradebot/`: 14 files
+- `vendor/FinLLM-Leaderboard/`: 2 files
 
 These are destination file counts, not proof that every upstream file was imported.
 
