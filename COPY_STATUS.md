@@ -20,9 +20,9 @@ Last updated: 2026-10-11
 ## Upstream import status
 
 - `vendor/TradingAgents/` — all 83 source files under upstream `tradingagents/` imported and checked against the upstream recursive Git tree. Also retained Apache-2.0 LICENSE, README, packaging metadata, requirements pointer and logo. Not a full clone of every upstream repository item; not runtime-integrated or end-to-end tested.
-- `vendor/FinGPT/` — selected ForexIntelligence and Forecaster files imported, including the application entry point, market data pipeline, sentiment/symbol configuration, training and Docker files. Partial import; not the complete FinGPT repository. MIT license retained.
-- `vendor/FinRobot/` — selected agent/data/analysis modules; partial import.
-- `vendor/Qlib/` — selected backtest/strategy modules; partial import.
+- `vendor/FinGPT/` — selected ForexIntelligence and Forecaster files imported, including application entry point, market data pipeline, sentiment/symbol configuration, training and Docker files. Partial import; MIT license retained.
+- `vendor/FinRobot/` — selected agent/data/analysis modules and upstream README retained; partial import under Apache-2.0.
+- `vendor/Qlib/` — selected backtesting, strategy/order generation, cost-control, portfolio evaluation and risk/reporting modules imported. Partial import under MIT.
 
 Each vendor directory should retain applicable license/notice files and import notes. Dependencies, model/API keys, data sources and configuration must be installed and validated separately.
 
