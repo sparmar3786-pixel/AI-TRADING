@@ -1,31 +1,30 @@
 # Code integration status — AI-TRADING
 
 Destination: https://github.com/sparmar3786-pixel/AI-TRADING
-Last updated: 2026-10-10
+Last updated: 2026-10-11
 
 ## Original project modules
 
 | Path | What it provides | Status |
 |---|---|---|
 | `strategies/technical.py` | SMA, EMA, RSI, ATR, EMA crossover and RSI reversion | Existing original implementation |
-| `strategies/advanced.py` | Bollinger bands/re-entry, MACD, Donchian channels/breakout and VWAP | Added in this change; original code |
+| `strategies/advanced.py` | Bollinger bands/re-entry, MACD, Donchian channels/breakout and VWAP | Original code |
 | `strategy_engine.py` | Explainable confluence diagnostics | Existing original implementation |
 | `risk/position_sizing.py` | Equity-risk sizing and ATR stop/target helpers | Existing original implementation |
-| `risk/controls.py` | Fail-closed proposed-order risk gate | Added in this change; no order execution |
-| `backtesting/engine.py` | One-bar-delayed close-to-close backtest, fee/slippage estimates and drawdown metrics | Added in this change; starter simulator |
-| `tests/test_research_strategies.py` | Existing indicator/sizing tests | Existing |
-| `tests/test_advanced_strategies.py` | Tests for advanced strategy/backtest/risk modules | Added in this change |
-| `.github/workflows/python-tests.yml` | Python unit-test CI | Added in this change |
-| `INTEGRATION_GUIDE.md` | How to use modules and understand limitations | Added in this change |
+| `risk/controls.py` | Fail-closed proposed-order risk gate | Original code; no order execution |
+| `backtesting/engine.py` | One-bar-delayed close-to-close backtest, fee/slippage estimates and drawdown metrics | Starter simulator |
+| `tests/` | Indicator, sizing, strategy, backtest and risk checks | Source files present; execution not confirmed in this pass |
+| `.github/workflows/python-tests.yml` | Python unit-test CI | Workflow file present |
+| `INTEGRATION_GUIDE.md` | How to use modules and understand limitations | Guide present |
 
-## Partial upstream imports
+## Upstream import status
 
-- `vendor/TradingAgents/` — selected multi-agent research modules; not complete.
-- `vendor/FinGPT/` — selected finance NLP/forecasting modules; not complete.
-- `vendor/FinRobot/` — selected agent/data/analysis modules; not complete.
-- `vendor/Qlib/` — selected backtest/strategy modules; not complete.
+- `vendor/TradingAgents/` — all 83 source files under upstream `tradingagents/` imported and checked against the upstream recursive Git tree. Also retained upstream Apache-2.0 LICENSE, README, packaging metadata, requirements pointer and logo. This is the package source tree, not a full clone of every upstream repo item. It is not yet runtime-integrated or tested end-to-end.
+- `vendor/FinGPT/` — selected finance NLP/forecasting modules; partial import.
+- `vendor/FinRobot/` — selected agent/data/analysis modules; partial import.
+- `vendor/Qlib/` — selected backtest/strategy modules; partial import.
 
-Each vendor directory includes import notes and applicable license/notice files. These packages are not automatically runnable as-is: dependencies, model/API keys, data sources and configuration must be installed and validated separately.
+Each vendor directory should retain applicable license/notice files and import notes. Dependencies, model/API keys, data sources and configuration must be installed and validated separately.
 
 ## Remaining upstream work
 
@@ -34,11 +33,11 @@ The repositories in `UPSTREAM_REPOSITORIES.md` are not all copied. Most remain r
 ## Not done / not claimed
 
 - No live Angel One authentication, market-data connection or live order execution is enabled by these strategy modules.
-- No Railway variables or deployment were changed by this strategy pass.
+- No Railway variables or deployment were changed by this source-import pass.
 - No profit, win-rate or production-readiness guarantee is made.
-- The test workflow must finish successfully for the new branch before merge; paper/out-of-sample validation remains necessary.
+- Tests have not been run as part of this import pass. Paper/out-of-sample validation remains necessary.
 
-Run tests with:
+Run the project tests from the repository root with:
 
 ```bash
 python -m unittest discover -s tests -v
