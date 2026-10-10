@@ -57,7 +57,7 @@ These are destination file counts, not proof that every upstream file was import
 
 #### qrak/LLM_trader
 - Upstream branch: master; license: MIT.
-- Files imported under `vendor/LLM_trader/`: license/readme/notices, dependency files, example configuration, risk/reward and trend validation, technical/market metrics, sentiment analysis, pattern scoring and selected indicator modules.
+- Files imported under `vendor/LLM_trader/`: license/readme/notices, dependency files, example configuration, analyzer/data fetcher, prompt and market formatters, risk/reward and trend validation, technical/market metrics, sentiment analysis, pattern scoring, selected indicator modules and selected tests.
 - Partial import only; this large repository has many remaining modules and tests. No AI provider keys or real credentials were added.
 
 #### wangzhe3224/awesome-systematic-trading
