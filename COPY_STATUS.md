@@ -63,3 +63,9 @@ Additional file-level imports were committed to the **AI-TRADING** repository (n
 - `fsaavedra0003/Agentic-AI-Trading-Bot-with-LLM-reasoning-sentiment-analysis`, `ItsKillionaire/TradeSignalFlux`, `studiogangster/next-gen-algo-trading-bot`, `DevGohil411/Trading-bot`, `Gifted87/TradingBot`, `TradingGoose/TradingGoose.github.io`, and `paperswithbacktest/awesome-systematic-trading`: do not treat these as imported. Repository-level license metadata was absent for several of them, so their code must not be redistributed until a license/permission is verified. The TradingGoose repository is AGPL-3.0 and needs separate compatibility review before app integration.
 - GitHub topic pages such as `quantitative-finance`, `trade-analysis` and `tradingbot2026` are discovery pages, not repositories to copy wholesale.
 - These vendor imports are **source archives only**. They have not been wired into the APK UI or the active strategy engine, dependencies have not been resolved, and no Python tests, broker API, live-data or Railway deployment checks are claimed by this continuation.
+
+
+### Further continuation commits
+
+- `vendor/LLM_trader/`: additional MIT-licensed app/config, dashboard, sentiment and statistical-indicator files added in commits `b89b80527765f70c0e0e24fc8e69ed6d85e02b62` and `53eab0c4d1668f74f5101d83193fe8f8dbd7bc72`. The directory now has additional source beyond the earlier 75-file count; still partial and not wired into the app.
+- The above imports are kept isolated under `vendor/` to avoid accidentally overriding the active AI-TRADING backend or APK frontend. Do not assume these vendored modules are called by the live app.
