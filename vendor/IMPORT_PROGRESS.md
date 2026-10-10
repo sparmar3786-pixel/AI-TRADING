@@ -121,3 +121,15 @@ These are destination file counts, not proof that every upstream file was import
 
 ## Important
 Upstream source is retained in separate vendor folders to avoid overwriting the project's own code. Dependencies, environment variables, license obligations, security, API routes, data providers and execution behavior must be reviewed before enabling copied code. No claim is made that the application is production-ready or connected to live brokerage APIs.
+
+
+## Work resumed on 2026-10-11 — latest verified commit batch
+
+The following new commits were made on `main` after resuming this task:
+- `25707a1c0cdf990dbf314cbb1adb090c4bcca698`, `436ef64705a4d4e2d8d151ad024b285d29b67136`, `6de46300702768e674607137f453e5e26f91d378`, `7a3ff03921273ad9cf3dcce29587e9b643ee76d4`, `db5e9aebe85f92e3aa47897aa7e776f0843a0ef7`: additional MIT `qrak/LLM_trader` docs, chart-generation and indicator-pattern modules copied into `vendor/LLM_trader/`.
+- `b9bfdd96e9214293d5182b444ff101550d1e40aa`, `5ff1dd5fef9fab1066c5c61b3fb83517c4788630`: additional Apache-2.0 `qtpylib` package and broker/tool modules copied into `vendor/qtpylib/`.
+- `b9217326576efdf2d3bd4dba01efe93afcffe2f6`, `21cdd2aa3a88d53916c98dd0d682b1c06c96bfad`: additional MIT HFTBacktest binding and market-data utility modules copied into `vendor/hftbacktest/`.
+
+Latest tree query reported 664 destination files total; verified vendor folder counts at that query were: intelligent-trading-bot 64, Sebacaraballo Trading-Bot 66, LLM_trader 48, awesome-systematic-trading 16, awesome-ai-in-finance 10, hftbacktest 22, qtpylib 14, llm-tradebot 14, TradingAgents 210, backtesting.py 46, FinGPT 56, qlib 19, and financial-agent 15. Counts are destination files, not complete-upstream coverage; some tree queries count directories separately in the UI, so only blob files are counted here.
+
+**Still not done:** these source files are not yet wired into the main strategy registry or APK UI. No Python test suite or APK build was run. The agentic-trading repo, other license-unverified repos, and the license-unconfirmed paperswithbacktest strategy collection remain on hold pending license review. Do not treat vendor imports as production-ready trading advice or live execution integration.
