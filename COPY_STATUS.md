@@ -44,3 +44,22 @@ python -m unittest discover -s tests -v
 ```
 
 Do not commit API keys, passwords, MPINs, TOTP seeds, JWTs, feed tokens or other account secrets.
+
+
+## Continuation update — 2026-10-11
+
+Additional file-level imports were committed to the **AI-TRADING** repository (not Fresh-Apk):
+
+- `vendor/hftbacktest/` — added 8 additional Python data utilities in commits `0c68ad67a73a5144cd94135a448493fb1754a9f8` and `4850e80f670ad13029f82ca0d592d6c8c0cde22a`. This vendor tree remains partial (30 files currently present versus a much larger upstream project); MIT license applies.
+- `vendor/qtpylib/` — added SMS, TA-Lib indicators, indicator tests and workflow modules in commit `d094be7f359fcbe07f31b76d2be3d89120b7627f`. This vendor tree remains partial; upstream is archived and Apache-2.0 licensed.
+- `vendor/LLM_trader/` — added app/config and dashboard/router modules in commits `ed5e563decf732696b67d1f573f03fa0c8787ab2`, `39346768b9f9eabe940f24e11339a5e1fc28036c` and `ba3842d185e542c4b49369153c9802ff07d86ae7`. This tree remains partial (75 files currently present versus 316 upstream files); MIT license retained.
+- `vendor/intelligent-trading-bot/` currently contains 64 text/source files; upstream has 66 tracked files, with binary/document assets not all imported.
+- `vendor/Sebacaraballo-Trading-Bot/` currently contains 66 files; upstream has 73 tracked files. This is not a claim that every upstream file was imported.
+- `vendor/awesome-systematic-trading/` and `vendor/awesome-ai-in-finance/` retain their licensed reference/source files.
+- `vendor/llm-tradebot/` and `vendor/FinLLM-Leaderboard/` were already present in part; neither is confirmed as a complete upstream import.
+
+### Explicitly pending / licensing safeguards
+
+- `fsaavedra0003/Agentic-AI-Trading-Bot-with-LLM-reasoning-sentiment-analysis`, `ItsKillionaire/TradeSignalFlux`, `studiogangster/next-gen-algo-trading-bot`, `DevGohil411/Trading-bot`, `Gifted87/TradingBot`, `TradingGoose/TradingGoose.github.io`, and `paperswithbacktest/awesome-systematic-trading`: do not treat these as imported. Repository-level license metadata was absent for several of them, so their code must not be redistributed until a license/permission is verified. The TradingGoose repository is AGPL-3.0 and needs separate compatibility review before app integration.
+- GitHub topic pages such as `quantitative-finance`, `trade-analysis` and `tradingbot2026` are discovery pages, not repositories to copy wholesale.
+- These vendor imports are **source archives only**. They have not been wired into the APK UI or the active strategy engine, dependencies have not been resolved, and no Python tests, broker API, live-data or Railway deployment checks are claimed by this continuation.
