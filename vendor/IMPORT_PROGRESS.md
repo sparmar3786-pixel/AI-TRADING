@@ -95,5 +95,20 @@ These are destination file counts, not proof that every upstream file was import
 - Angel One API, Railway backend, NSE MCP, live market data, and the app's frontend are not confirmed integrated by these vendor imports.
 - Python tests and integration tests have not been run as part of this import work.
 
+
+### Remaining items from the user's latest list (not yet fully imported)
+- `qrak/LLM_trader`: MIT partial import is underway; many upstream source modules, website files, and tests remain.
+- `FalconTrading06/llm-tradebot`: MIT partial import; many research/scripts and support files remain.
+- `nkaz001/hftbacktest`: MIT partial import; full package/build tree and examples remain.
+- `ranaroussi/qtpylib`: Apache-2.0 partial import; repository is archived and remaining dependencies/broker assumptions need review.
+- `paperswithbacktest/awesome-systematic-trading`: license metadata was not confirmed in the audit; do not bulk-copy its strategy files until their reuse terms are confirmed.
+- `fsaavedra0003/Agentic-AI-Trading-Bot-with-LLM-reasoning-sentiment-analysis`, `ItsKillionaire/TradeSignalFlux`, `studiogangster/next-gen-algo-trading-bot`, `DevGohil411/Trading-bot`, and `Gifted87/TradingBot`: license permission was not confirmed in the audit. Source redistribution is on hold rather than silently copying code with unclear terms. The agentic repo tree also contains a checked-in `venv/`; do not import vendored third-party runtime packages wholesale.
+- `TradingGoose/TradingGoose.github.io`: AGPL-3.0, but it is a website project rather than a clearly isolated strategy engine; evaluate its relevance and AGPL obligations before importing more than notices/docs.
+- GitHub topic URLs such as `topics/quantitative-finance`, `topics/trade-analysis`, and `topics/tradingbot2026` are discovery pages, not single repositories or source trees to copy.
+
+### Safety and execution boundary
+- The new vendor folders are source archives only. No APK bundle, frontend navigation, backend API route, Railway deployment, Angel One session, NSE MCP, or live execution was changed/verified by these commits.
+- No tests were executed during these source-copy commits. Run the host project's CI/tests and validate each vendor project in an isolated environment before integration.
+
 ## Important
 Upstream source is retained in separate vendor folders to avoid overwriting the project's own code. Dependencies, environment variables, license obligations, security, API routes, data providers and execution behavior must be reviewed before enabling copied code. No claim is made that the application is production-ready or connected to live brokerage APIs.
