@@ -3,41 +3,41 @@
 Destination: https://github.com/sparmar3786-pixel/AI-TRADING
 Last updated: 2026-10-10
 
-## Committed project code in this pass
+## Added on branch `integrate-trading-research-20261010`
 
-| Path | What it provides | Origin |
+| Path | What it provides | Origin/status |
 |---|---|---|
-| `strategies/technical.py` | SMA, EMA, RSI, ATR, EMA crossover and RSI reversion signals | New original implementation; not copied verbatim from an upstream repository |
-| `risk/position_sizing.py` | Equity-risk position sizing and ATR stop/target calculations | New original implementation |
-| `tests/test_research_strategies.py` | Unit tests for the new indicators and risk helpers | New original implementation |
+| `strategies/technical.py` | SMA, EMA, RSI, ATR, EMA crossover and RSI reversion | Existing original implementation |
+| `strategies/advanced.py` | Bollinger bands/re-entry, MACD, Donchian breakout/channels and VWAP | New original implementation, not verbatim copied |
+| `strategy_engine.py` | Explainable indicator/option evidence confluence | Existing original implementation |
+| `risk/position_sizing.py` | Equity-risk position sizing and ATR stop/target helpers | Existing original implementation |
+| `risk/controls.py` | Fail-closed risk gate for proposed orders | New original implementation; no order execution |
+| `backtesting/engine.py` | Starter close-to-close backtest, one-bar signal delay, fee/slippage estimate and drawdown | New original implementation |
+| `tests/test_research_strategies.py` | Indicator and sizing tests | Existing original tests |
+| `tests/test_advanced_strategies.py` | Advanced strategy/backtest/risk tests | New original tests |
+| `.github/workflows/python-tests.yml` | Run unittest suite on pushes and PRs | New CI workflow |
+| `INTEGRATION_GUIDE.md` | How to run/use modules and limitations | New docs |
+| `UPSTREAM_REPOSITORIES.md` | Full source-reference inventory from chat | References only; not copied source |
+| `UPSTREAM_AUDIT.md` | Repository access checks and exact integration scope | Audit notes |
 
 ## Upstream source status
 
-The repositories supplied in chat are tracked in `UPSTREAM_REPOSITORIES.md`. A repository URL or readable root listing is not evidence that its source code has been copied. No complete upstream repository has been imported into this destination yet.
+**No complete third-party repository tree has been imported.** The upstream list includes projects that are huge, written in different languages, aimed at crypto exchanges, frontend UI libraries, research frameworks or broker gateways. Copying every file into one project without reviewing license terms, dependency compatibility and execution behavior would be unsafe and could break the project. The code added here is original functionality implementing useful research patterns rather than a claim that upstream files were copied.
 
-Initial public root listings were readable for:
-- `TauricResearch/TradingAgents`
-- `schen9999/financial-agent`
-- `microsoft/qlib`
-- `kernc/backtesting.py`
-- `angel-one/smartapi-python`
+Selected upstream repository metadata/default branches were checked. Detailed file/license/security review remains pending for most sources. See `UPSTREAM_AUDIT.md`.
 
-License note: MIT license text was found for `schen9999/financial-agent` and `microsoft/qlib`; Apache-2.0 license text was found for `TauricResearch/TradingAgents`. The Angel One Python repository's root listing did not show a LICENSE file, so permission must be confirmed before copying its implementation. The backtesting.py license file exists, but its terms need review before vendoring.
+## Not done / not claimed
 
-The first attempt to read `AI4Finance-Foundation/FinGPT` and `AI4Finance-Foundation/FinRobot` using the branch name `main` returned 404 ("No commit found for the ref main"). This is not enough to conclude the repositories are inaccessible; their default branches need separate discovery.
+- No broker authentication or live order execution was implemented by this strategy pass.
+- No live Angel One data was pulled into the tests.
+- No Railway variables or deployment were changed.
+- No claim of profitability, win rate or production readiness is made.
+- Tests have not yet been confirmed passing by a completed CI run; the workflow was added to run them.
 
-## Not yet done
+## Test
 
-- No complete third-party repository source tree has been copied.
-- No Angel One live order path has been enabled by these commits.
-- No backend/API wiring or Railway deployment changes were made in this pass.
-- The unit tests have been committed but have not been executed in a Python environment during this GitHub-only operation.
+```bash
+python -m unittest discover -s tests -v
+```
 
-## Safe next steps
-
-1. Discover each upstream repository's actual default branch and license.
-2. Import permitted code into clearly separated vendor folders with license/notice files, or use a submodule/fork where importing whole projects is unsuitable.
-3. Integrate only the needed modules with this project's Python environment and API contracts.
-4. Run tests and paper-trading validation before connecting any strategy to live orders.
-
-Do not commit API keys, broker passwords, TOTP seeds, access tokens, or account secrets.
+Do not commit API keys, passwords, MPINs, TOTP seeds, JWTs, feed tokens or other account secrets.
