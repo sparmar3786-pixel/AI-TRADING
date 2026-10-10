@@ -78,6 +78,17 @@ These are destination file counts, not proof that every upstream file was import
 - License, README, indicators, algo module and strategy example imported under `vendor/qtpylib/`.
 - Partial import only; archived code/dependencies and broker assumptions need review.
 
+
+#### FalconTrading06/llm-tradebot
+- Upstream branch: main; license: MIT.
+- Selected entry points, backtesting/strategy-comparison, research workflow, and signal-analysis files imported under `vendor/llm-tradebot/`.
+- Partial import only; remaining repository files and dependencies are not all copied or tested.
+
+#### Open-Finance-Lab/FinLLM-Leaderboard
+- Upstream branch: main; license: MIT.
+- Requested `docs/source/demos_of_finagents/trading_agent.rst` and LICENSE imported under `vendor/FinLLM-Leaderboard/`.
+- This is the requested demo document, not the entire leaderboard repository.
+
 ## Still incomplete
 - Other repositories in `UPSTREAM_REPOSITORIES.md` still need individual access, default-branch and license checks and source imports.
 - FinRobot, other listed trading/backtesting/broker/risk/UI/deployment projects have not been fully imported.
