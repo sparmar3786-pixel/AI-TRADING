@@ -1,37 +1,31 @@
-# AI-TRADING — Angel One Strategy Research
+# AI-TRADING — Strategy Research Workspace
 
-This repository is being used as a clean research/strategy workspace for the Fresh-Apk Android client and its Angel One backend.
+This repository is a research workspace for systematic strategies and an eventual server-side broker/data integration. It contains original strategy/backtest/risk helpers and partial upstream imports. It is not a live trading service and does not guarantee returns.
 
-## Requested upstream research repositories
+## Start here
 
-These projects are kept as upstream references rather than blindly vendored wholesale:
+- [Integration guide](INTEGRATION_GUIDE.md) — modules, example, test command and safety boundaries.
+- [Upstream repository inventory](UPSTREAM_REPOSITORIES.md) — trading-related GitHub sources collected for review.
+- [Upstream audit](UPSTREAM_AUDIT.md) — what has been checked and imported.
+- [Copy status](COPY_STATUS.md) — exact files and remaining work.
 
-- https://github.com/wangzhe3224/awesome-systematic-trading — MIT-licensed curated systematic-trading resource list.
-- https://github.com/paperswithbacktest/awesome-systematic-trading — curated research/resource list; check its current license and each linked strategy's license before copying implementation code.
-- https://github.com/georgezouq/awesome-ai-in-finance — CC0-1.0 resource list.
-- https://github.com/nkaz001/hftbacktest — MIT; high-fidelity tick/order-book backtesting and latency/queue modeling. Its examples target crypto venues (not Angel One).
-- https://github.com/ranaroussi/qtpylib — Apache-2.0; archived and designed around Interactive Brokers, not Angel One.
+## Original research components
 
-## Integration policy
+- `strategies/technical.py`: SMA, EMA, RSI, ATR, EMA crossover and RSI reversion.
+- `strategies/advanced.py`: Bollinger bands/re-entry, MACD, Donchian breakout/channels and VWAP.
+- `strategy_engine.py`: explainable confluence diagnostics.
+- `backtesting/engine.py`: a simple delayed-signal close-to-close backtest.
+- `risk/position_sizing.py` and `risk/controls.py`: sizing, ATR levels and fail-closed proposed-order checks.
+- `vendor/`: partial imports of TradingAgents, FinGPT, FinRobot and Qlib with per-project import notes/licenses.
 
-The resource lists are catalogs, not installable trading engines. Importing every listed project would introduce unrelated broker integrations, heavy dependencies, incompatible licenses, and unnecessary APK size. This repo therefore starts with an original, broker-neutral confluence module. It is intended to run in the server-side Python backend, not inside the Android APK itself.
+## Run tests
 
-The APK should call the hosted backend over HTTPS. Angel One credentials and AI keys must remain server-side and must not be packaged in the APK.
+```bash
+python -m unittest discover -s tests -v
+```
 
-## Strategy flow
+## Security and integration boundaries
 
-1. Require fresh, timestamped Angel One index and option-chain data.
-2. Evaluate deterministic trend/momentum and multi-timeframe confluence.
-3. Check option quote spread/liquidity and OI context.
-4. Ask configured AI to audit the strategy plan, never to fabricate missing prices or override risk guards.
-5. Require a separate live validation gate before exposing BUY/SELL as validated.
-6. Return WAIT/NO TRADE if inputs are stale, missing, contradictory, or risk checks fail.
-7. Validate with out-of-sample walk-forward backtests including fees, slippage, spread and latency assumptions before any live use.
+The Android app should call a backend over HTTPS. Angel One credentials, MPIN, TOTP seeds, JWT/feed tokens and AI keys must remain server-side and must never be embedded in an APK or committed to GitHub. No code in the strategy modules authenticates Angel One or submits live orders.
 
-## Signal terminology
-
-- `CALL BUY`: bullish option-side setup; validated market direction is `BUY`.
-- `PUT BUY`: bearish option-side setup; validated market direction is `SELL` (this means buying a put, not selling an uncovered option).
-- Missing/failed validation: `WAIT`.
-
-No strategy guarantees profit. Do not turn a backtest score or AI confidence into a claimed win probability.
+Not every upstream repository is copied; many are references pending detailed license, dependency and security review. Validate strategy results with realistic costs, spread, slippage, out-of-sample data and paper trading before considering live use.
