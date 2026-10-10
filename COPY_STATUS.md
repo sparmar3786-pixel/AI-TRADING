@@ -7,20 +7,20 @@ Last updated: 2026-10-11
 
 | Path | What it provides | Status |
 |---|---|---|
-| `strategies/technical.py` | SMA, EMA, RSI, ATR, EMA crossover and RSI reversion | Existing original implementation |
-| `strategies/advanced.py` | Bollinger bands/re-entry, MACD, Donchian channels/breakout and VWAP | Original code |
-| `strategy_engine.py` | Explainable confluence diagnostics | Existing original implementation |
-| `risk/position_sizing.py` | Equity-risk sizing and ATR stop/target helpers | Existing original implementation |
+| `strategies/technical.py` | SMA, EMA, RSI, ATR, EMA crossover and RSI reversion | Original implementation |
+| `strategies/advanced.py` | Bollinger bands/re-entry, MACD, Donchian channels/breakout and VWAP | Original implementation |
+| `strategy_engine.py` | Explainable confluence diagnostics | Original implementation |
+| `risk/position_sizing.py` | Equity-risk sizing and ATR stop/target helpers | Original implementation |
 | `risk/controls.py` | Fail-closed proposed-order risk gate | Original code; no order execution |
 | `backtesting/engine.py` | One-bar-delayed close-to-close backtest, fee/slippage estimates and drawdown metrics | Starter simulator |
-| `tests/` | Indicator, sizing, strategy, backtest and risk checks | Source files present; execution not confirmed in this pass |
+| `tests/` | Indicator, sizing, strategy, backtest and risk checks | Test source files present; execution not confirmed in this pass |
 | `.github/workflows/python-tests.yml` | Python unit-test CI | Workflow file present |
 | `INTEGRATION_GUIDE.md` | How to use modules and understand limitations | Guide present |
 
 ## Upstream import status
 
-- `vendor/TradingAgents/` — all 83 source files under upstream `tradingagents/` imported and checked against the upstream recursive Git tree. Also retained upstream Apache-2.0 LICENSE, README, packaging metadata, requirements pointer and logo. This is the package source tree, not a full clone of every upstream repo item. It is not yet runtime-integrated or tested end-to-end.
-- `vendor/FinGPT/` — selected finance NLP/forecasting modules; partial import.
+- `vendor/TradingAgents/` — all 83 source files under upstream `tradingagents/` imported and checked against the upstream recursive Git tree. Also retained Apache-2.0 LICENSE, README, packaging metadata, requirements pointer and logo. Not a full clone of every upstream repository item; not runtime-integrated or end-to-end tested.
+- `vendor/FinGPT/` — selected ForexIntelligence and Forecaster files imported, including the application entry point, market data pipeline, sentiment/symbol configuration, training and Docker files. Partial import; not the complete FinGPT repository. MIT license retained.
 - `vendor/FinRobot/` — selected agent/data/analysis modules; partial import.
 - `vendor/Qlib/` — selected backtest/strategy modules; partial import.
 
@@ -28,16 +28,16 @@ Each vendor directory should retain applicable license/notice files and import n
 
 ## Remaining upstream work
 
-The repositories in `UPSTREAM_REPOSITORIES.md` are not all copied. Most remain reference-only/pending detailed file-level license, security and compatibility review. Huge frameworks, crypto-only engines, UI projects and broker gateways should not be flattened into one runtime without review. Angel One SmartAPI code remains reference-only until its redistribution permissions and broker terms are confirmed.
+The repositories in `UPSTREAM_REPOSITORIES.md` are not all copied. Most remain reference-only/pending detailed file-level license, security and compatibility review. Large frameworks, crypto-only engines, UI projects and broker gateways should not be flattened into one runtime without review. Angel One SmartAPI code remains reference-only until its redistribution permissions and broker terms are confirmed.
 
 ## Not done / not claimed
 
-- No live Angel One authentication, market-data connection or live order execution is enabled by these strategy modules.
+- No live Angel One authentication, market-data connection or live order execution is enabled by these source imports.
 - No Railway variables or deployment were changed by this source-import pass.
 - No profit, win-rate or production-readiness guarantee is made.
 - Tests have not been run as part of this import pass. Paper/out-of-sample validation remains necessary.
 
-Run the project tests from the repository root with:
+Run project tests from the repository root with:
 
 ```bash
 python -m unittest discover -s tests -v
