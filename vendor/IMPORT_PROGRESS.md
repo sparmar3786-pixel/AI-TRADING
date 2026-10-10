@@ -1,6 +1,6 @@
 # Upstream Import Progress
 
-Last verified: 2026-10-11
+Last verified: 2026-10-11 (continued imports to main branch)
 
 This file distinguishes source files actually committed from projects that are only inventoried. Vendored code is not automatically integrated into the main application.
 
@@ -42,6 +42,41 @@ These are destination file counts, not proof that every upstream file was import
 ### schen9999/financial-agent
 - 15 destination files imported into `vendor/financial-agent/`, including the license, README, agent core/graph/grounding modules, tools, tracing and API entry point.
 - This is a partial import; the complete upstream repository and dependency setup have not been imported or tested.
+
+### Additional requested repositories — files actually imported in this pass
+
+#### asavinov/intelligent-trading-bot
+- Upstream branch: master; license: MIT.
+- Text/source files were imported under `vendor/intelligent-trading-bot/`: ML classifiers, feature and label generation, signals, backtesting helpers, data collectors, notifier/trader adapters, scripts, service files, tests, configs, README and LICENSE.
+- Non-text image assets were not copied. This is a source import, not a host-app integration or test result.
+
+#### Sebacaraballo/Trading-Bot
+- Upstream branch: main; license: MIT.
+- Files imported under `vendor/Sebacaraballo-Trading-Bot/`: LLM analysis/prompt pipeline, backtest engine/store, API, data fetcher/market client/SEC client, main entry point, dependency manifest, dashboard UI components and snapshot JSON data.
+- This import is partial. Dashboard assets and remaining upstream files still need comparison. Local credential-bearing settings and secret files were intentionally excluded.
+
+#### qrak/LLM_trader
+- Upstream branch: master; license: MIT.
+- Files imported under `vendor/LLM_trader/`: license/readme/notices, dependency files, example configuration, risk/reward and trend validation, technical/market metrics, sentiment analysis, pattern scoring and selected indicator modules.
+- Partial import only; this large repository has many remaining modules and tests. No AI provider keys or real credentials were added.
+
+#### wangzhe3224/awesome-systematic-trading
+- Upstream branch: master; license: MIT.
+- Text/code files imported under `vendor/awesome-systematic-trading/`, including the license, reading lists, and sample Go/Python/Rust implementations. Verify any downstream data/library terms before use.
+
+#### georgezouq/awesome-ai-in-finance
+- Upstream branch: main; license: CC0-1.0.
+- Reading-list/docs files imported under `vendor/awesome-ai-in-finance/`. This is primarily an index of resources, not a trading engine.
+
+#### nkaz001/hftbacktest
+- Upstream branch: master; license: MIT.
+- License, README, selected exchange examples, core package initializer, data validation, order/recorder and performance-metrics files imported under `vendor/hftbacktest/`.
+- Partial import. This high-frequency backtesting framework requires additional package/build components and market-by-order data; it is not yet runnable in this project.
+
+#### ranaroussi/qtpylib
+- Upstream branch: main; license: Apache-2.0; upstream repository is archived.
+- License, README, indicators, algo module and strategy example imported under `vendor/qtpylib/`.
+- Partial import only; archived code/dependencies and broker assumptions need review.
 
 ## Still incomplete
 - Other repositories in `UPSTREAM_REPOSITORIES.md` still need individual access, default-branch and license checks and source imports.
