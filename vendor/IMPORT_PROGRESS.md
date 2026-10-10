@@ -42,3 +42,9 @@ This file distinguishes source files actually committed from projects that are o
 
 ## Important
 Upstream source is retained in separate vendor folders to avoid overwriting the project's own code. Dependencies, environment variables, license obligations, security, API routes, data providers and execution behavior must be reviewed before enabling any copied code.
+
+
+### schen9999/financial-agent
+- Upstream license: MIT.
+- Partial source import committed under `vendor/financial-agent/`: core agent/graph/grounding/numeric checks, LLM ledger, news/SEC/stock tools, tracing, API entrypoint, README and LICENSE.
+- This is a curated subset of a much larger upstream repository, not a complete import. The upstream `agent/tools/__init__.py` file was blocked by the import tool; remaining tools/dependencies and tests are not imported.
