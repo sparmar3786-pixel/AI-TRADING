@@ -1,0 +1,136 @@
+# Daily data refresh: the full pipeline (SEC ingestion -> LLM scoring ->
+# backtest) runs on a stateless runner. State persists in the repo itself:
+# the job restores a database from scripts/demo_data.json, does incremental
+# work, re-exports, and commits only when the data actually changed. A push
+# triggers the Vercel deploy, so the live demo tracks real filings.
+#
+# Cost bounds: only unanalyzed filings are scored, non-earnings 8-Ks are
+# marked once and never re-checked, and each run spends at most 10 LLM calls
+# (see --max-llm). The ANTHROPIC_API_KEY secret is scoped to the one step
+# that needs it. The spend ceiling lives in the Anthropic Console workspace
+# limit, not here.
+
+name: Daily data refresh
+
+on:
+  schedule:
+    # 02:47 UTC Tue-Sat = Mon-Fri evening ET, after the close and the
+    # after-hours 8-K dump. The odd minute is deliberate: GitHub delays or
+    # drops schedules on congested :00/:30 slots (the 02:30 slot was
+    # silently skipped on this repo's first scheduled night).
+    - cron: "47 2 * * 2-6"
+  workflow_dispatch:
+
+concurrency:
+  group: daily-data
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DB_PATH: ci.db
+      TICKERS: AAPL NVDA MSFT GOOGL AMZN META TSLA NFLX AMD JPM
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore database from committed dataset
+        run: python scripts/seed_demo.py
+
+      - name: Ingest new SEC filings
+        run: |
+          for ticker in $TICKERS; do
+            python main.py "$ticker" --filings 5 --db "$DB_PATH" \
+              || echo "::warning::ingestion failed for $ticker (continuing)"
+          done
+
+      - name: Count signals before scoring
+        id: before
+        run: |
+          count=$(python -c "import sqlite3; print(sqlite3.connect('$DB_PATH').execute('SELECT COUNT(*) FROM signals').fetchone()[0])")
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+      - name: Score new filings with the LLM (max 10 calls)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::ANTHROPIC_API_KEY secret is not set"
+            exit 1
+          fi
+          python main.py --analyze --max-llm 10 --db "$DB_PATH"
+
+      - name: Count signals after scoring
+        id: after
+        run: |
+          count=$(python -c "import sqlite3; print(sqlite3.connect('$DB_PATH').execute('SELECT COUNT(*) FROM signals').fetchone()[0])")
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+      - name: Decide whether to re-run the backtest
+        id: flags
+        run: |
+          # Saturday UTC run = Friday evening ET: the weekly refresh that
+          # picks up trades maturing without any new signals.
+          weekly=$([ "$(date -u +%u)" = "6" ] && echo true || echo false)
+          echo "weekly=$weekly" >> "$GITHUB_OUTPUT"
+
+      - name: Re-run backtest
+        id: backtest
+        if: steps.after.outputs.count != steps.before.outputs.count || steps.flags.outputs.weekly == 'true'
+        run: |
+          python main.py --backtest --db "$DB_PATH" \
+            || echo "::warning::backtest failed; keeping the previous run"
+
+      - name: Validate the new backtest run
+        if: steps.backtest.outcome == 'success'
+        run: |
+          # A run with trades but no SPY benchmark means yfinance failed
+          # mid-run; drop it so junk never enters the permanent run history.
+          python - <<'EOF'
+          import os, sqlite3
+          con = sqlite3.connect(os.environ["DB_PATH"])
+          row = con.execute(
+              "SELECT id, total_trades, spy_return_pct FROM backtest_runs "
+              "ORDER BY id DESC LIMIT 1"
+          ).fetchone()
+          if row and row[1] and not row[2]:
+              con.execute("DELETE FROM backtest_runs WHERE id = ?", (row[0],))
+              con.commit()
+              print(f"::warning::Dropped backtest run {row[0]}: SPY benchmark missing")
+          else:
+              print("Latest backtest run looks valid")
+          EOF
+
+      - name: Export dataset and snapshot
+        run: python scripts/export_demo_data.py
+
+      - name: Regenerate README results section
+        run: python scripts/update_readme_results.py
+
+      - name: Commit and push if the data changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/demo_data.json dashboard/public/snapshot README.md
+          if git diff --cached --quiet; then
+            echo "No data changes; nothing to commit."
+          else
+            git commit -m "data: automated daily refresh ($(date -u +%Y-%m-%d))"
+            git pull --rebase origin main
+            git push origin main
+          fi

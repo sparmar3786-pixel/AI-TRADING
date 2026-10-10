@@ -1,0 +1,40 @@
+# Environment
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Database (contains real API responses — don't commit)
+*.db
+*.sqlite
+*.sqlite3
+# SQLite sidecar files (WAL mode) — transient, never commit
+*.db-wal
+*.db-shm
+*.db-journal
+
+# Node
+dashboard/node_modules/
+dashboard/dist/
+dashboard/.vite/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# Deploy/demo scripts are intentionally tracked (guard against wildcards above)
+!scripts/
+!scripts/*.py
+
+# Playwright MCP verification artifacts
+.playwright-mcp/
