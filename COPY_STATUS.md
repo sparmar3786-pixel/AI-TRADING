@@ -13,7 +13,7 @@ Last updated: 2026-10-10
 
 ## Upstream source status
 
-The repositories supplied in chat are tracked in `UPSTREAM_REPOSITORIES.md`. A repository URL or readable root listing is not evidence that its source code has been copied. TradingAgents has now been partially vendored under `vendor/TradingAgents/` (see `vendor/TradingAgents/IMPORT_NOTES.md`). This is not a complete import of that upstream repository.
+The repositories supplied in chat are tracked in `UPSTREAM_REPOSITORIES.md`. A repository URL or readable root listing is not evidence that its source code has been copied. TradingAgents has been partially vendored under `vendor/TradingAgents/` (see `vendor/TradingAgents/IMPORT_NOTES.md`). FinGPT has also been partially vendored under `vendor/FinGPT/` (see `vendor/FinGPT/IMPORT_NOTES.md`). Neither is a complete import of its upstream repository.
 
 Initial public root listings were readable for:
 - `TauricResearch/TradingAgents`
@@ -28,7 +28,7 @@ The first attempt to read `AI4Finance-Foundation/FinGPT` and `AI4Finance-Foundat
 
 ## Not yet done
 
-- TradingAgents import is partial; remaining upstream modules and package dependencies are not yet all present.
+- TradingAgents and FinGPT imports are partial; remaining upstream modules and package dependencies are not yet all present.
 - No Angel One live order path has been enabled by these commits.
 - No backend/API wiring or Railway deployment changes were made in this pass.
 - The unit tests have been committed but have not been executed in a Python environment during this GitHub-only operation.
