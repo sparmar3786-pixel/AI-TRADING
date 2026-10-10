@@ -1,0 +1,651 @@
+"""
+Chart generator utility for creating static PNG images optimized for AI pattern analysis.
+Generates candlestick charts with OHLC data and annotations for visual pattern recognition.
+"""
+import io
+import math
+import os
+import threading
+from collections.abc import Callable
+from datetime import datetime, timezone
+from typing import Any, NamedTuple
+
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+from src.logger.logger import Logger
+from src.utils.profiler import profile_performance
+
+
+class ChartGenerator:
+    """Generates interactive charts and static images for market data with OHLCV and RSI."""
+
+    def __init__(self, logger: Logger | None = None, config: Any | None = None, formatter: Callable | None = None, format_utils=None):
+        """Initialize the chart generator."""
+        self.logger = logger
+        self.config = config
+        self.format_utils = format_utils
+
+        self.formatter: Callable = formatter or self._default_formatter
+
+        self.ai_colors = {
+            "background": "#000000",
+            "grid": "#555555",
+            "text": "#ffffff",
+            "candle_up": "#00ff00",
+            "candle_down": "#ff0000",
+            "volume": "#0080ff",
+            "volume_up": "#00aa00",
+            "volume_down": "#aa0000",
+            "rsi": "#ffff00",
+            "sma_50": "#ff8c00",
+            "sma_200": "#9932cc",
+            "cmf": "#00ffff",
+            "obv": "#ff00ff",
+            "rsi_oversold": "#00ff00",
+            "rsi_overbought": "#ff0000"
+        }
+        self.ai_candle_limit = config.AI_CHART_CANDLE_LIMIT if config is not None else 200
+
+    def _default_formatter(self, val, _precision=8):
+        """Default formatter for price values when no formatter is provided."""
+        if isinstance(val, (int, float)) and not math.isnan(val):
+            if abs(val) < 0.00001:
+                return f"{val:.8f}"
+            if abs(val) < 0.01:
+                return f"{val:.6f}"
+            if abs(val) < 10:
+                return f"{val:.4f}"
+            return f"{val:.2f}"
+        return "N/A"
+
+    def _image_export_with_timeout(self, fig: go.Figure, img_format: str, width: int, height: int, scale: int, timeout: int = 30) -> bytes:
+        """Export the figure to image bytes under a hard timeout (TimeoutError)."""
+        result: dict[str, object] = {"img_bytes": None, "exception": None}
+
+        def export_worker():
+            try:
+                result["img_bytes"] = fig.to_image(format=img_format, width=width, height=height, scale=scale)
+            except Exception as e:  # noqa: BLE001
+                result["exception"] = e
+
+        thread = threading.Thread(target=export_worker, daemon=True)
+        thread.start()
+        thread.join(timeout=timeout)
+
+        if thread.is_alive():
+            raise TimeoutError(f"Image export timed out after {timeout} seconds (kaleido may be hanging)")
+
+        exc = result["exception"]
+        if exc is not None:
+            raise exc  # type: ignore
+
+        return result["img_bytes"]  # type: ignore[return-type]
+
+    async def _retry_image_export(self, fig: go.Figure, img_format: str, width: int, height: int, scale: int, max_retries: int = 3, timeout: int = 30) -> bytes:
+        """Export with exponential-backoff retries (kaleido/choreographer flakiness)."""
+        import asyncio
+        last_exception = None
+
+        for attempt in range(max_retries):
+            try:
+                if self.logger and attempt > 0:
+                    self.logger.debug("Retry attempt %s/%s for image export", attempt + 1, max_retries)
+
+                img_bytes = await asyncio.to_thread(self._image_export_with_timeout, fig, img_format, width, height, scale, timeout)
+
+                if self.logger and attempt > 0:
+                    self.logger.info("Image export succeeded on retry attempt %s", attempt + 1)
+
+                return img_bytes
+
+            except Exception as e:  # noqa: BLE001
+                last_exception = e
+                if self.logger:
+                    self.logger.warning("Image export attempt %s/%s failed: %s", attempt + 1, max_retries, str(e))
+
+                if attempt < max_retries - 1:
+                    wait_time = (2 ** attempt) * 0.5
+                    if self.logger:
+                        self.logger.debug("Waiting %ss before retry...", wait_time)
+                    await asyncio.sleep(wait_time)
+
+        if last_exception is not None:
+            raise last_exception
+        raise RuntimeError("Image export failed after all retries")
+
+    @profile_performance
+    async def create_chart_image(
+        self,
+        ohlcv: np.ndarray,
+        technical_history: dict[str, np.ndarray] | None = None,
+        pair_symbol: str = "",
+        timeframe: str = "1h",
+        height: int = 1080,
+        width: int = 1920,
+        save_to_disk: bool = False,
+        output_path: str | None = None,
+        simple_mode: bool = True,
+        timestamps: list | None = None
+    ) -> io.BytesIO | str:
+        """Create a PNG chart image optimized for AI pattern analysis.
+        Returns:
+            BytesIO object containing PNG image data, or file path if saved to disk
+        """
+        try:
+            import asyncio
+            fig = await asyncio.to_thread(
+                self._create_simple_candlestick_chart,
+                ohlcv, pair_symbol, timeframe, height, width, timestamps, technical_history
+            )
+
+            img_bytes = await self._retry_image_export(fig, img_format="png", width=width, height=height, scale=1)
+
+            if save_to_disk:
+                if output_path is None:
+                    if self.format_utils:
+                        timestamp = self.format_utils.format_current_time("%Y%m%d_%H%M%S")
+                    else:
+                        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+                    chart_type = "simple" if simple_mode else "full"
+                    base_path = self.config.DEBUG_CHART_SAVE_PATH if self.config else "test_images"
+
+                    filename = f"{pair_symbol.replace('/', '')}_{timeframe}_{chart_type}_AI_analysis_{timestamp}.png"
+                    output_path = os.path.join(os.getcwd(), base_path, filename)
+
+
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+                with open(output_path, "wb") as f:  # noqa: ASYNC230
+                    f.write(img_bytes)
+
+                if self.logger:  # noqa: SIM102
+                    if len(ohlcv) > 0:
+                        if self.format_utils:
+                            first_time_dt = self.format_utils.parse_timestamp_ms(ohlcv[0][0])
+                            last_time_dt = self.format_utils.parse_timestamp_ms(ohlcv[-1][0])
+                        else:
+                            first_time_dt = datetime.fromtimestamp(ohlcv[0][0] / 1000)  # noqa: DTZ006
+                            last_time_dt = datetime.fromtimestamp(ohlcv[-1][0] / 1000)  # noqa: DTZ006
+
+                        first_time = first_time_dt.strftime("%Y-%m-%d %H:%M") if first_time_dt else "N/A"
+                        last_time = last_time_dt.strftime("%Y-%m-%d %H:%M") if last_time_dt else "N/A"
+                        current_price = ohlcv[-1][4]
+                        self.logger.info("📈 Data range: %s to %s | Current price: %s", first_time, last_time, current_price)
+
+                return output_path
+            img_buffer = io.BytesIO(img_bytes)
+            img_buffer.seek(0)
+
+            if self.logger:
+                self.logger.debug("Generated chart image for %s (%s bytes)", pair_symbol, len(img_bytes))
+
+            return img_buffer
+
+        except Exception as e:
+            if self.logger:
+                self.logger.error("Error generating chart image: %s", str(e))
+            raise
+
+    def _create_simple_candlestick_chart(
+        self,
+        ohlcv: np.ndarray,
+        pair_symbol: str,
+        timeframe: str,
+        height: int,
+        width: int,
+        timestamps: list | None = None,
+        technical_history: dict[str, np.ndarray] | None = None
+    ) -> go.Figure:
+        """Create a multi-panel chart with price, RSI, Volume, and CMF/OBV for AI pattern analysis.
+        Returns:
+            Plotly figure object with 4 subplots
+        """
+        series = self._chart_series(ohlcv, timestamps, technical_history)
+
+        fig = make_subplots(
+            rows=4, cols=1,
+            shared_xaxes=True,
+            vertical_spacing=0.03,
+            row_heights=[0.55, 0.15, 0.15, 0.15],
+            specs=[
+                [{"secondary_y": False}],
+                [{"secondary_y": False}],
+                [{"secondary_y": False}],
+                [{"secondary_y": True}]
+            ]
+        )
+
+        self._add_price_and_indicator_traces(fig, series, width)
+        self._apply_chart_layout(fig, series, pair_symbol, timeframe, height, width)
+        self._add_swing_annotations(fig, series, width)
+        self._add_price_grid_lines(fig, series, width)
+        self._add_ohlc_and_volume_labels(fig, series)
+        self._add_legends(fig, series)
+
+        return fig
+
+    def _chart_series(
+        self,
+        ohlcv: np.ndarray,
+        timestamps: list | None,
+        technical_history: dict[str, np.ndarray] | None,
+    ) -> "ChartSeries":
+        """Slice the candle window and prepare price/indicator series for plotting."""
+        chosen_limit = int(self.ai_candle_limit)
+        original_len = len(ohlcv)
+        if chosen_limit and original_len > chosen_limit:
+            ohlcv = ohlcv[-chosen_limit:]
+            if timestamps is not None and len(timestamps) > chosen_limit:
+                timestamps = timestamps[-chosen_limit:]
+
+        if timestamps is not None:
+            timestamps_py = timestamps
+        else:
+            timestamps = pd.to_datetime(ohlcv[:, 0], unit="ms")  # type: ignore[assignment]
+            timestamps_py = timestamps.to_pydatetime().tolist()  # type: ignore[union-attr]
+
+        opens = ohlcv[:, 1].astype(float)
+        highs = ohlcv[:, 2].astype(float)
+        lows = ohlcv[:, 3].astype(float)
+        closes = ohlcv[:, 4].astype(float)
+        volumes = ohlcv[:, 5].astype(float) if ohlcv.shape[1] > 5 else np.zeros(len(ohlcv))
+
+        def slice_indicator(arr: np.ndarray | None) -> np.ndarray | None:
+            if arr is None or len(arr) == 0:
+                return None
+            if len(arr) > len(ohlcv):
+                return arr[-len(ohlcv):]
+            return arr
+
+        rsi_data = slice_indicator(technical_history.get("rsi")) if technical_history else None
+        sma_50_data = slice_indicator(technical_history.get("sma_50")) if technical_history else None
+        sma_200_data = slice_indicator(technical_history.get("sma_200")) if technical_history else None
+        cmf_data = slice_indicator(technical_history.get("cmf")) if technical_history else None
+        obv_data = slice_indicator(technical_history.get("obv")) if technical_history else None
+        return ChartSeries(
+            chosen_limit=chosen_limit,
+            timestamps_py=timestamps_py,
+            opens=opens,
+            highs=highs,
+            lows=lows,
+            closes=closes,
+            volumes=volumes,
+            rsi_data=rsi_data,
+            sma_50_data=sma_50_data,
+            sma_200_data=sma_200_data,
+            cmf_data=cmf_data,
+            obv_data=obv_data,
+        )
+
+    def _add_price_and_indicator_traces(self, fig: go.Figure, series: "ChartSeries", width: int) -> None:
+        """Draw the candlestick, SMA overlay, RSI, volume, CMF and OBV traces."""
+        candle = go.Candlestick(
+            x=series.timestamps_py,
+            open=series.opens,
+            high=series.highs,
+            low=series.lows,
+            close=series.closes,
+            name="Price",
+            increasing_line_color=self.ai_colors["candle_up"],
+            decreasing_line_color=self.ai_colors["candle_down"],
+            increasing_line_width=1.2,
+            decreasing_line_width=1.2,
+            line={"width": 0.8}
+        )
+        fig.add_trace(candle, row=1, col=1)
+
+        if series.sma_50_data is not None and len(series.sma_50_data) == len(series.timestamps_py):
+            fig.add_trace(go.Scatter(
+                x=series.timestamps_py,
+                y=series.sma_50_data,
+                mode="lines",
+                name="SMA 50",
+                line={"color": self.ai_colors["sma_50"], "width": 1.5},
+                hoverinfo="name+y"
+            ), row=1, col=1)
+
+        if series.sma_200_data is not None and len(series.sma_200_data) == len(series.timestamps_py):
+            fig.add_trace(go.Scatter(
+                x=series.timestamps_py,
+                y=series.sma_200_data,
+                mode="lines",
+                name="SMA 200",
+                line={"color": self.ai_colors["sma_200"], "width": 1.5},
+                hoverinfo="name+y"
+            ), row=1, col=1)
+
+        if series.rsi_data is not None and len(series.rsi_data) == len(series.timestamps_py):
+            fig.add_trace(go.Scatter(
+                x=series.timestamps_py,
+                y=series.rsi_data,
+                mode="lines",
+                name="RSI (14)",
+                line={"color": self.ai_colors["rsi"], "width": 1.5},
+                hoverinfo="name+y"
+            ), row=2, col=1)
+            fig.add_hline(y=70, row=2, col=1, line={"color": self.ai_colors["rsi_overbought"], "width": 1, "dash": "dash"})  # type: ignore[arg-type]
+            fig.add_hline(y=30, row=2, col=1, line={"color": self.ai_colors["rsi_oversold"], "width": 1, "dash": "dash"})  # type: ignore[arg-type]
+            fig.add_hline(y=50, row=2, col=1, line={"color": "#666666", "width": 0.5, "dash": "dot"})  # type: ignore[arg-type]
+
+        volume_colors = [self.ai_colors["volume_up"] if series.closes[i] >= series.opens[i] else self.ai_colors["volume_down"] for i in range(len(series.closes))]
+        fig.add_trace(go.Bar(
+            x=series.timestamps_py,
+            y=series.volumes,
+            name="Volume",
+            marker_color=volume_colors,
+            opacity=0.7
+        ), row=3, col=1)
+
+        if series.cmf_data is not None and len(series.cmf_data) == len(series.timestamps_py):
+            fig.add_trace(go.Scatter(
+                x=series.timestamps_py,
+                y=series.cmf_data,
+                mode="lines",
+                name="CMF (20)",
+                fill="tozeroy",
+                line={"color": self.ai_colors["cmf"], "width": 1},
+                fillcolor="rgba(0, 255, 255, 0.3)",
+                hoverinfo="name+y"
+            ), row=4, col=1, secondary_y=False)
+            fig.add_hline(y=0, row=4, col=1, line={"color": "#888888", "width": 1, "dash": "dash"})  # type: ignore[arg-type]
+
+        if series.obv_data is not None and len(series.obv_data) == len(series.timestamps_py):
+            fig.add_trace(go.Scatter(
+                x=series.timestamps_py,
+                y=series.obv_data,
+                mode="lines",
+                name="OBV",
+                line={"color": self.ai_colors["obv"], "width": 1.5},
+                hoverinfo="name+y"
+            ), row=4, col=1, secondary_y=True)
+
+    def _apply_chart_layout(self, fig: go.Figure, series: "ChartSeries", pair_symbol: str, timeframe: str, height: int, width: int) -> None:
+        """Apply price tick formatting, the 4-panel layout, shared axes and the last-price line."""
+        current_price = float(series.closes[-1])
+        current_price_formatted = self.formatter(current_price)
+
+        abs_price = abs(current_price) if current_price != 0 else 0.0
+        if abs_price == 0:
+            decimals = 2
+        elif abs_price < 1e-6:
+            decimals = 9
+        elif abs_price < 1e-5:
+            decimals = 8
+        elif abs_price < 1e-4:
+            decimals = 7
+        elif abs_price < 1e-3:
+            decimals = 6
+        elif abs_price < 1e-2:
+            decimals = 5
+        elif abs_price < 1e-1 or abs_price < 1:
+            decimals = 4
+        elif abs_price < 10:
+            decimals = 3
+        else:
+            decimals = 2
+        y_tickformat = f".{decimals}f"
+
+        fig.update_layout(
+            title={
+                "text": f"{pair_symbol} - {timeframe} (Last {series.chosen_limit} Closed Candles) | Price: {current_price_formatted}",
+                "font": {"size": 28}
+            },
+            template="plotly_dark",
+            height=height,
+            width=width,
+            font={"family": "Arial, sans-serif", "size": 22, "color": self.ai_colors["text"]},
+            paper_bgcolor=self.ai_colors["background"],
+            plot_bgcolor=self.ai_colors["background"],
+            margin={"l": 80, "r": 120, "t": 80, "b": 80},
+            showlegend=True,
+            legend={
+                "orientation": "h",
+                "yanchor": "bottom",
+                "y": 1.01,
+                "xanchor": "right",
+                "x": 1,
+                "font": {"size": 18},
+                "bgcolor": "rgba(0,0,0,0.7)"
+            },
+            xaxis_rangeslider_visible=False
+        )
+
+        if len(series.timestamps_py) > 1:
+            delta = series.timestamps_py[-1] - series.timestamps_py[-2]
+            x_range = [series.timestamps_py[0], series.timestamps_py[-1] + (delta * 2)]
+        else:
+            x_range = None
+
+        common_xaxis = {
+            "showgrid": True,
+            "gridwidth": 1.0,
+            "gridcolor": self.ai_colors["grid"],
+            "zeroline": False,
+            "tickformat": "%m/%d %H:%M",
+            "tickangle": -45,
+            "dtick": 12*60*60*1000,
+            "type": "date",
+            "range": x_range,
+            "tickfont": {"size": 18},
+            "showline": True,
+            "linewidth": 1,
+            "linecolor": self.ai_colors["grid"]
+        }
+        fig.update_xaxes(**common_xaxis, showticklabels=False, row=1, col=1)
+        fig.update_xaxes(**common_xaxis, showticklabels=True, row=2, col=1)
+        fig.update_xaxes(**common_xaxis, showticklabels=True, row=3, col=1)
+        fig.update_xaxes(**common_xaxis, showticklabels=True, title_text="Date/Time", row=4, col=1)
+
+        common_yaxis = {
+            "showgrid": True,
+            "gridwidth": 1.0,
+            "gridcolor": self.ai_colors["grid"],
+            "zeroline": False,
+            "side": "right",
+            "tickfont": {"size": 20}
+        }
+        fig.update_yaxes(**common_yaxis, title_text="Price", tickformat=y_tickformat, dtick=500, row=1, col=1)
+        fig.update_yaxes(**common_yaxis, title_text="RSI", range=[0, 100], nticks=5, row=2, col=1)
+        fig.update_yaxes(**common_yaxis, title_text="Vol", nticks=4, row=3, col=1)
+        fig.update_yaxes(
+            showgrid=True, gridwidth=1.0, gridcolor=self.ai_colors["grid"],
+            zeroline=False, tickfont={"size": 20},
+            title_text="CMF", nticks=4, side="left", row=4, col=1, secondary_y=False
+        )
+        fig.update_yaxes(**common_yaxis, title_text="OBV", nticks=4, row=4, col=1, secondary_y=True)
+
+        fig.add_hline(y=float(series.closes[-1]), row=1, col=1, line={"color": "#666666", "width": 1, "dash": "dot"})  # type: ignore[arg-type]
+
+    def _add_swing_annotations(self, fig: go.Figure, series: "ChartSeries", width: int) -> None:
+        """Annotate the candle date range, the swing high/low, and the recent window."""
+        if len(series.timestamps_py) > 1:
+            for i in range(1, len(series.timestamps_py)):
+                if series.timestamps_py[i].day != series.timestamps_py[i-1].day:
+                    fig.add_vline(
+                        x=series.timestamps_py[i],
+                        line={"color": "rgba(80, 80, 80, 0.5)", "width": 1, "dash": "longdash"}
+                    )
+
+        window = 8
+        if len(series.highs) > window * 2:
+            for i in range(window, len(series.highs) - window):
+                if series.highs[i] == max(series.highs[i-window:i+window+1]):
+                    fig.add_annotation(
+                        x=series.timestamps_py[i], y=series.highs[i],
+                        text=self.formatter(series.highs[i]),
+                        showarrow=True, arrowhead=2, arrowsize=0.6, arrowwidth=1,
+                        ax=0, ay=-30,
+                        font={"size": 16, "color": "#aaaaaa"},
+                        row=1, col=1
+                    )
+                if series.lows[i] == min(series.lows[i-window:i+window+1]):
+                    fig.add_annotation(
+                        x=series.timestamps_py[i], y=series.lows[i],
+                        text=self.formatter(series.lows[i]),
+                        showarrow=True, arrowhead=2, arrowsize=0.6, arrowwidth=1,
+                        ax=0, ay=30,
+                        font={"size": 16, "color": "#aaaaaa"},
+                        row=1, col=1
+                    )
+
+        idx_high = int(np.argmax(series.highs))
+        idx_low = int(np.argmin(series.lows))
+        fig.add_annotation(
+            x=series.timestamps_py[idx_high], y=float(series.highs[idx_high]),
+            text=f"MAX: {self.formatter(float(series.highs[idx_high]))}",
+            showarrow=True, arrowhead=2, arrowsize=0.8, arrowwidth=1.0,
+            ax=0, ay=-50,
+            font={"size": 20, "color": self.ai_colors["text"], "weight": "bold"},
+            bgcolor="rgba(0,0,0,0.5)", bordercolor=self.ai_colors["candle_up"], borderwidth=1,
+            row=1, col=1
+        )
+        fig.add_annotation(
+            x=series.timestamps_py[idx_low], y=float(series.lows[idx_low]),
+            text=f"MIN: {self.formatter(float(series.lows[idx_low]))}",
+            showarrow=True, arrowhead=2, arrowsize=0.8, arrowwidth=1.0,
+            ax=0, ay=50,
+            font={"size": 20, "color": self.ai_colors["text"], "weight": "bold"},
+            bgcolor="rgba(0,0,0,0.5)", bordercolor=self.ai_colors["candle_down"], borderwidth=1,
+            row=1, col=1
+        )
+
+    def _add_price_grid_lines(self, fig: go.Figure, series: "ChartSeries", width: int) -> None:
+        """Draw horizontal price grid lines at round levels."""
+        price_min, price_max = float(np.min(series.lows)), float(np.max(series.highs))
+        if price_max > 10000:
+            round_interval = 2000
+        elif price_max > 1000:
+            round_interval = 500
+        elif price_max > 100:
+            round_interval = 50
+        elif price_max > 10:
+            round_interval = 5
+        else:
+            round_interval = 1
+        start_level = int(price_min // round_interval) * round_interval
+        end_level = int(price_max // round_interval + 1) * round_interval
+        for level in range(start_level, end_level + round_interval, round_interval):
+            if price_min <= level <= price_max:
+                fig.add_hline(
+                    y=level, row=1, col=1,  # type: ignore
+                    line={"color": "rgba(100, 100, 100, 0.6)", "width": 1, "dash": "dash"},
+                    annotation_text=f"${level:,}",
+                    annotation_position="left",
+                    annotation_font={"size": 14, "color": "#888888"}
+                )
+
+    def _add_ohlc_and_volume_labels(self, fig: go.Figure, series: "ChartSeries") -> None:
+        """Label sampled OHLC values and the highest-volume candles."""
+        price_min, price_max = float(np.min(series.lows)), float(np.max(series.highs))
+        ohlc_interval = max(12, len(series.closes) // 10)
+        for i in range(ohlc_interval, len(series.closes) - 5, ohlc_interval):
+            o, h, low, c = series.opens[i], series.highs[i], series.lows[i], series.closes[i]
+            is_bullish = c >= o
+            y_pos = h + (price_max - price_min) * 0.02 if is_bullish else low - (price_max - price_min) * 0.02
+            ay_offset = -40 if is_bullish else 40
+            ohlc_text = f"O:{self.formatter(o)}<br>H:{self.formatter(h)}<br>L:{self.formatter(low)}<br>C:{self.formatter(c)}"
+            fig.add_annotation(
+                x=series.timestamps_py[i], y=y_pos,
+                text=ohlc_text,
+                showarrow=True, arrowhead=1, arrowsize=0.5, arrowwidth=1,
+                ax=0, ay=ay_offset,
+                font={"size": 12, "color": "#cccccc"},
+                bgcolor="rgba(0,0,0,0.8)",
+                bordercolor="#555555", borderwidth=1,
+                align="left",
+                row=1, col=1
+            )
+
+        vol_threshold = np.percentile(series.volumes, 85)
+        vol_labeled_count = 0
+        for i in range(len(series.volumes)):
+            if series.volumes[i] >= vol_threshold and vol_labeled_count < 5:
+                vol_val = series.volumes[i]
+                if vol_val >= 1_000_000:
+                    vol_str = f"{vol_val/1_000_000:.1f}M"
+                elif vol_val >= 1_000:
+                    vol_str = f"{vol_val/1_000:.0f}K"
+                else:
+                    vol_str = f"{vol_val:.0f}"
+                fig.add_annotation(
+                    x=series.timestamps_py[i], y=series.volumes[i],
+                    text=vol_str,
+                    showarrow=False,
+                    font={"size": 11, "color": "#ffffff"},
+                    yshift=12,
+                    row=3, col=1
+                )
+                vol_labeled_count += 1
+
+    def _add_legends(self, fig: go.Figure, series: "ChartSeries") -> None:
+        """Add the SMA, RSI, CMF and OBV legend annotations."""
+        sma_legend = []
+        if series.sma_50_data is not None:
+            sma_legend.append(f"<span style='color:{self.ai_colors['sma_50']}'>━</span> SMA 50 (Short-term trend)")
+        if series.sma_200_data is not None:
+            sma_legend.append(f"<span style='color:{self.ai_colors['sma_200']}'>━</span> SMA 200 (Long-term trend)")
+        if sma_legend:
+            if series.sma_50_data is not None and series.sma_200_data is not None:
+                sma_legend.append("<b>Golden Cross:</b> SMA50 crosses above SMA200 = Bullish")
+                sma_legend.append("<b>Death Cross:</b> SMA50 crosses below SMA200 = Bearish")
+            fig.add_annotation(
+                xref="paper", yref="paper", x=0.01, y=0.99,
+                xanchor="left", yanchor="top",
+                text="<br>".join(sma_legend),
+                showarrow=False,
+                font={"size": 18, "family": "Arial", "color": "#cccccc"},
+                bgcolor="rgba(0,0,0,0.8)",
+                bordercolor="#444444",
+                borderwidth=1,
+                align="left"
+            )
+
+        if series.rsi_data is not None:
+            current_rsi = series.rsi_data[-1] if not math.isnan(series.rsi_data[-1]) else 0
+            fig.add_annotation(
+                xref="x2 domain", yref="y2 domain", x=0.01, y=0.95,
+                xanchor="left", yanchor="top",
+                text=f"RSI: {current_rsi:.1f} | <span style='color:{self.ai_colors['rsi_overbought']}'>70=Overbought</span> | <span style='color:{self.ai_colors['rsi_oversold']}'>30=Oversold</span>",
+                showarrow=False,
+                font={"size": 16, "color": "#cccccc"},
+                bgcolor="rgba(0,0,0,0.7)"
+            )
+
+        cmf_obv_legend = []
+        if series.cmf_data is not None:
+            current_cmf = series.cmf_data[-1] if not math.isnan(series.cmf_data[-1]) else 0
+            cmf_status = "Buying Pressure" if current_cmf > 0 else "Selling Pressure"
+            cmf_obv_legend.append(f"<span style='color:{self.ai_colors['cmf']}'>CMF: {current_cmf:.3f}</span> ({cmf_status})")
+        if series.obv_data is not None:
+            cmf_obv_legend.append(f"<span style='color:{self.ai_colors['obv']}'>OBV</span>: Trend Confirmation (rising=accumulation, falling=distribution)")
+        if cmf_obv_legend:
+            fig.add_annotation(
+                xref="x4 domain", yref="y4 domain", x=0.01, y=0.95,
+                xanchor="left", yanchor="top",
+                text=" | ".join(cmf_obv_legend),
+                showarrow=False,
+                font={"size": 16, "color": "#cccccc"},
+                bgcolor="rgba(0,0,0,0.7)"
+            )
+
+
+class ChartSeries(NamedTuple):
+    """Prepared chart inputs: the sliced window plus every plotted series."""
+
+    chosen_limit: int
+    timestamps_py: list[Any]
+    opens: np.ndarray
+    highs: np.ndarray
+    lows: np.ndarray
+    closes: np.ndarray
+    volumes: np.ndarray
+    rsi_data: np.ndarray | None
+    sma_50_data: np.ndarray | None
+    sma_200_data: np.ndarray | None
+    cmf_data: np.ndarray | None
+    obv_data: np.ndarray | None
+
