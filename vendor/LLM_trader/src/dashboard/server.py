@@ -1,0 +1,569 @@
+"""FastAPI server for the Trading Dashboard."""
+
+import asyncio
+import hashlib
+import os
+import time as time_module
+from collections import defaultdict
+from contextlib import asynccontextmanager, nullcontext
+
+import uvicorn
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
+from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
+
+from ..config.writable_config import WritableConfig
+from .auth import AdminAuthMiddleware, init_auth
+from .console_buffer import ConsoleBuffer
+from .dashboard_state import DashboardState
+from .log_stream import LogStreamManager
+from .routers import brain, monitor, performance, visuals, ws_router
+from .routers.admin import AdminRouter
+from .routers.console import ConsoleRouter
+
+
+class DashboardServer:
+    """Main application server combining all API routers."""
+
+    # pylint: disable=too-many-instance-attributes,too-many-arguments,too-many-positional-arguments
+    def __init__(
+        self,
+        brain_service,
+        vector_memory,
+        analysis_engine,
+        config,
+        logger,
+        unified_parser=None,
+        persistence=None,
+        exchange_manager=None,
+        host="0.0.0.0",
+        port=8000,
+        force_analysis_event=None,
+        config_path=None,
+        admin_credentials=None,
+        post_mortem_repo=None,
+        connection_manager=None,
+    ):
+        self.brain_service = brain_service
+        self.vector_memory = vector_memory
+        self.analysis_engine = analysis_engine
+        self.config = config
+        self.logger = logger
+        self.unified_parser = unified_parser
+        self.persistence = persistence
+        self.exchange_manager = exchange_manager
+        self.post_mortem_repo = post_mortem_repo
+        self.host = host
+        self.port = port
+        self.server_task = None
+        self._server = None
+        self.dashboard_state = DashboardState(connection_manager=connection_manager)
+
+        self._force_analysis_event = force_analysis_event
+        _config_path = config_path or os.path.join(
+            os.path.dirname(__file__), "..", "..", "config", "config.ini"
+        )
+        self.writable_config = WritableConfig(_config_path)
+        self.log_stream_manager = LogStreamManager()
+        self.console_buffer = ConsoleBuffer(max_days=7, max_lines_per_day=10000)
+
+        if admin_credentials:
+            init_auth(
+                signing_key=admin_credentials.get("signing_key", ""),
+                admin_username=admin_credentials.get("username", ""),
+                admin_password_hash=admin_credentials.get("password_hash", ""),
+            )
+
+        self.app = self._create_app()
+
+    def _create_app(self) -> FastAPI:
+        """Create and configure the FastAPI application."""
+        @asynccontextmanager
+        async def lifespan(_app: FastAPI):
+            print(f"DTO: Dashboard live at http://localhost:{self.port}")
+
+            self.log_stream_manager.attach_to_logger(self.logger)
+            _sid, _queue = self.log_stream_manager.handler.subscribe()
+            _consumer_task = asyncio.create_task(
+                self.console_buffer.consume_queue(_queue),
+                name="console_buffer_consumer",
+            )
+
+            yield
+
+            self.log_stream_manager.handler.unsubscribe(_sid)
+            _consumer_task.cancel()
+            try:
+                await _consumer_task
+            except asyncio.CancelledError:
+                pass
+            print("DTO: Dashboard shutting down...")
+
+        app = FastAPI(title="LLM Trader Brain", lifespan=lifespan)
+
+        app.add_middleware(GZipMiddleware, minimum_size=500)
+        _register_cache_and_security_middleware(app)
+        request_counts = _register_rate_limit_middleware(app)
+        self._add_cors_middleware(app)
+        self._wire_app_state(app, request_counts)
+        self._register_routers(app)
+        self._register_pages(app)
+
+        return app
+
+    def _add_cors_middleware(self, app: FastAPI) -> None:
+        """Add CORS middleware when the dashboard config enables it."""
+        enable_cors = self.config.DASHBOARD_ENABLE_CORS
+
+        if enable_cors:
+            allowed_origins = self.config.DASHBOARD_CORS_ORIGINS
+
+            if not allowed_origins:
+                print(
+                    "WARNING: CORS enabled but no origins specified. CORS will effectively be disabled."
+                )
+
+            app.add_middleware(
+                CORSMiddleware,
+                allow_origins=allowed_origins,
+                allow_credentials=False,
+                allow_methods=["GET"],
+                allow_headers=["*"],
+            )
+
+    def _wire_app_state(self, app: FastAPI, request_counts: dict[str, list[float]]) -> None:
+        """Publish the shared services on app.state for routers and tests."""
+        app.state.brain_service = self.brain_service
+        app.state.vector_memory = self.vector_memory
+        app.state.analysis_engine = self.analysis_engine
+        app.state.config = self.config
+        app.state.logger = self.logger
+        app.state.unified_parser = self.unified_parser
+        app.state.persistence = self.persistence
+        app.state.exchange_manager = self.exchange_manager
+        app.state.dashboard_state = self.dashboard_state
+        app.state.writable_config = self.writable_config
+        app.state.log_stream_manager = self.log_stream_manager
+        app.state.request_counts = request_counts
+
+    def _register_routers(self, app: FastAPI) -> None:
+        """Build every dashboard router and mount it (plus the admin auth middleware)."""
+        brain_router = brain.BrainRouter(
+            config=self.config,
+            logger=self.logger,
+            dashboard_state=self.dashboard_state,
+            vector_memory=self.vector_memory,
+            unified_parser=self.unified_parser,
+            persistence=self.persistence,
+            exchange_manager=self.exchange_manager,
+            post_mortem_repo=self.post_mortem_repo,
+        )
+        try:
+            rag_engine = self.brain_service.rag_engine if self.brain_service else None
+        except AttributeError:
+            rag_engine = None
+
+        monitor_router = monitor.MonitorRouter(
+            config=self.config,
+            logger=self.logger,
+            dashboard_state=self.dashboard_state,
+            analysis_engine=self.analysis_engine,
+            rag_engine=rag_engine,
+        )
+        performance_router = performance.PerformanceRouter(
+            config=self.config,
+            logger=self.logger,
+            dashboard_state=self.dashboard_state,
+            persistence=self.persistence,
+        )
+        visuals_router = visuals.VisualsRouter(analysis_engine=self.analysis_engine)
+        websocket_router = ws_router.WebSocketRouter(
+            manager_instance=self.dashboard_state.connection_manager,
+            config=self.config,
+            dashboard_state=self.dashboard_state,
+        )
+
+        app.include_router(brain_router.router)
+        app.include_router(monitor_router.router)
+        app.include_router(visuals_router.router)
+        app.include_router(performance_router.router)
+        app.include_router(websocket_router.router)
+
+        admin_router = AdminRouter(
+            writable_config=self.writable_config,
+            log_stream_manager=self.log_stream_manager,
+            config=self.config,
+            logger=self.logger,
+            brain_service=self.brain_service,
+            analysis_engine=self.analysis_engine,
+            exchange_manager=self.exchange_manager,
+            dashboard_state=self.dashboard_state,
+            force_analysis_event=self._force_analysis_event,
+        )
+        app.include_router(admin_router.router)
+        app.state.admin_router = admin_router
+
+        console_router = ConsoleRouter(
+            buffer=self.console_buffer,
+            log_stream_handler=self.log_stream_manager.handler,
+        )
+        app.include_router(console_router.router)
+
+        app.add_middleware(AdminAuthMiddleware)
+
+    def _register_pages(self, app: FastAPI) -> None:
+        """Serve the story/landing pages and mount the static frontend."""
+        @app.get("/story", include_in_schema=False)
+        async def story_page():
+            story_path = os.path.abspath(
+                os.path.join(
+                    os.path.dirname(__file__),
+                    "..",
+                    "..",
+                    "website",
+                    "dist",
+                    "story",
+                    "index.html",
+                )
+            )
+            if os.path.exists(story_path):
+                return FileResponse(story_path, media_type="text/html")
+            return PlainTextResponse("Story page not found. Run 'npm run build' inside website/ directory.", status_code=404)
+
+        @app.get("/landing", include_in_schema=False)
+        async def landing_page():
+            landing_path = os.path.join(
+                os.path.dirname(__file__), "static", "landing.html"
+            )
+            if os.path.exists(landing_path):
+                return FileResponse(landing_path, media_type="text/html")
+            return PlainTextResponse("Landing page not found", status_code=404)
+
+
+        static_dir = os.path.join(os.path.dirname(__file__), "static")
+        if os.path.exists(static_dir):
+            app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
+        else:
+            print(f"WARNING: Static directory not found at {static_dir}")
+
+
+    async def start(self):
+        """Start the uvicorn server in an asyncio loop."""
+        if self.server_task and not self.server_task.done():
+            return self.server_task
+
+        config = uvicorn.Config(
+            app=self.app,
+            host=self.host,
+            port=self.port,
+            log_level="warning",
+            loop="asyncio",
+            ws="wsproto",
+            proxy_headers=True,
+            timeout_graceful_shutdown=5,
+            forwarded_allow_ips=(
+                "173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,"
+                "141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,"
+                "197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/13,"
+                "104.24.0.0/14,172.64.0.0/13,131.0.72.0/22,2400:cb00::/32,"
+                "2606:4700::/32,2803:f800::/32,2405:b500::/32,2405:8100::/32,"
+                "2a06:98c0::/29,2c0f:f248::/32"
+            ),
+        )
+        self._server = uvicorn.Server(config)
+
+        self._server.capture_signals = nullcontext  # type: ignore
+
+        import logging as _logging
+
+        for _name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+            _uv_logger = _logging.getLogger(_name)
+            _uv_logger.handlers = [_logging.NullHandler()]
+            _uv_logger.propagate = False
+
+        self.server_task = asyncio.create_task(self._run_server())
+        return self.server_task
+
+    async def _run_server(self):
+        """Run uvicorn server with exception handling."""
+        try:
+            await self._server.serve()  # type: ignore[reportOptionalMemberAccess]
+        except asyncio.CancelledError:
+            pass
+
+    async def stop(self):
+        """Stop the dashboard server gracefully.
+
+        Signals uvicorn to exit, then waits for the server task to finish
+        so the socket is fully released before returning.
+        """
+        if not self._server and not self.server_task:
+            return
+
+        if self._server:
+            self._server.should_exit = True
+
+        if self.server_task and not self.server_task.done():
+            try:
+                await asyncio.wait_for(self.server_task, timeout=5.0)
+            except asyncio.TimeoutError:
+                self.server_task.cancel()
+                try:
+                    await self.server_task
+                except asyncio.CancelledError:
+                    pass
+
+        self._server = None
+        self.server_task = None
+
+
+def _set_cache_headers(response, browser_policy, edge_policy):
+    response.headers["Cache-Control"] = browser_policy
+    response.headers["CDN-Cache-Control"] = edge_policy
+    response.headers["Cloudflare-CDN-Cache-Control"] = edge_policy
+
+def _is_no_store_response(response):
+    cache_control = response.headers.get("Cache-Control", "")
+    edge_control = response.headers.get("Cloudflare-CDN-Cache-Control", "")
+    return "no-store" in cache_control or "no-store" in edge_control
+
+def _build_etag(request, response, path):
+    try:
+        body = response.body
+    except AttributeError:
+        body = b""
+    if body:
+        digest = hashlib.sha256(body).hexdigest()
+        return f'W/"{digest}"'
+
+    if path.startswith("/api/"):
+        bucket_seconds = 15
+    elif path.endswith(".html") or path == "/":
+        bucket_seconds = 30
+    else:
+        return None
+
+    bucket = int(time_module.time() // bucket_seconds)
+    seed = f"{path}?{request.url.query}|{bucket}|{response.headers.get('Content-Type', '')}"
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
+    return f'W/"{digest}"'
+
+def _is_not_modified(if_none_match_header, etag):
+    if not if_none_match_header or not etag:
+        return False
+    if if_none_match_header.strip() == "*":
+        return True
+    candidates = [part.strip() for part in if_none_match_header.split(",")]
+    return etag in candidates
+
+def _is_static_asset(path):
+    return path.endswith(
+        (
+            ".css",
+            ".js",
+            ".mjs",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".svg",
+            ".webp",
+            ".ico",
+            ".gif",
+            ".woff",
+            ".woff2",
+            ".ttf",
+            ".eot",
+        )
+    )
+
+def _api_cache_policies(path, query_params):
+    """Return browser/edge cache policy pair for API routes."""
+    if path.endswith("/refresh-price"):
+        return (
+            "no-store, no-cache, must-revalidate, proxy-revalidate",
+            "no-store",
+        )
+
+    if path.endswith(("/brain/refresh", "/brain/lifecycle")):
+        return (
+            "no-store, no-cache, must-revalidate, proxy-revalidate",
+            "no-store",
+        )
+
+    if path.endswith("/vectors") and query_params.get("query"):
+        return (
+            "no-store, no-cache, must-revalidate, proxy-revalidate",
+            "no-store",
+        )
+
+    if path.endswith("/status/countdown"):
+        return (
+            "public, max-age=5",
+            "public, max-age=15, stale-while-revalidate=10, stale-if-error=60",
+        )
+
+    if path.startswith("/api/visuals/"):
+        # Charts are a few hundred kB and only change when an analysis runs;
+        # a long edge TTL keeps the pollers off the origin box.
+        return (
+            "public, max-age=60, stale-while-revalidate=300",
+            "public, max-age=300, stale-while-revalidate=60, stale-if-error=600",
+        )
+
+    return (
+        "public, max-age=15",
+        "public, max-age=60, stale-while-revalidate=30, stale-if-error=300",
+    )
+
+def _register_cache_and_security_middleware(app: FastAPI) -> None:
+    """Install the security-header plus HTTP cache-policy middleware stack."""
+
+    @app.middleware("http")
+    async def add_security_headers(request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+
+        if (
+            request.url.scheme == "https"
+            or request.headers.get("x-forwarded-proto") == "https"
+        ):
+            response.headers["Strict-Transport-Security"] = (
+                "max-age=31536000; includeSubDomains"
+            )
+
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = (
+            "geolocation=(), microphone=(), camera=()"
+        )
+
+        csp = (
+            "default-src 'self'; "
+            "frame-ancestors 'none'; "
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com "
+            "https://cdn.tailwindcss.com "
+            "https://*.cloudflare.com https://ajax.cloudflare.com "
+            "https://static.cloudflareinsights.com; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "img-src 'self' data: https:; "
+            "connect-src 'self' https://*.cloudflare.com https://unpkg.com "
+            "https://cdn.jsdelivr.net;"
+        )
+        response.headers["Content-Security-Policy"] = csp
+        path = request.url.path
+
+        if request.method not in ("GET", "HEAD"):
+            _set_cache_headers(
+                response,
+                "no-store, no-cache, must-revalidate, proxy-revalidate",
+                "no-store",
+            )
+            return response
+
+        if _is_static_asset(path):
+            if request.query_params.get("v"):
+                _set_cache_headers(
+                    response,
+                    "public, max-age=31536000, immutable",
+                    "public, max-age=31536000, stale-while-revalidate=86400, stale-if-error=604800",
+                )
+            else:
+                _set_cache_headers(
+                    response,
+                    "public, max-age=3600",
+                    "public, max-age=86400, stale-while-revalidate=3600, stale-if-error=86400",
+                )
+        elif path.startswith("/api/"):
+            browser_policy, edge_policy = _api_cache_policies(
+                path, request.query_params
+            )
+            _set_cache_headers(
+                response,
+                browser_policy,
+                edge_policy,
+            )
+        elif path.endswith(".html") or path == "/":
+            _set_cache_headers(
+                response,
+                "public, max-age=30, must-revalidate",
+                "public, max-age=300, stale-while-revalidate=60, stale-if-error=600",
+            )
+
+        if (
+            request.method in ("GET", "HEAD")
+            and response.status_code == 200
+            and not _is_static_asset(path)
+            and not _is_no_store_response(response)
+            and (path.startswith("/api/") or path.endswith(".html") or path == "/")
+        ):
+            etag = response.headers.get("ETag") or _build_etag(
+                request, response, path
+            )
+            if etag:
+                response.headers["ETag"] = etag
+                if _is_not_modified(request.headers.get("if-none-match"), etag):
+                    headers = dict(response.headers)
+                    headers.pop("content-length", None)
+                    return Response(status_code=304, headers=headers)
+        return response
+
+def _register_rate_limit_middleware(app: FastAPI) -> dict[str, list[float]]:
+    """Install the per-IP rate limiter and return its request-count store."""
+    request_counts = defaultdict(list)
+    rate_limit = 300
+    rate_window = 60
+    max_unique_ips = (
+        10000
+    )
+
+    state = {"last_cleanup_time": 0.0}
+    cleanup_interval = 10.0
+
+    @app.middleware("http")
+    async def rate_limit_middleware(request, call_next):
+        if request.url.path.startswith(
+            "/static"
+        ) or not request.url.path.startswith("/api"):
+            return await call_next(request)
+
+        current_time = time_module.monotonic()
+
+        if len(request_counts) > max_unique_ips:
+            if current_time - state["last_cleanup_time"] > cleanup_interval:
+                keys_to_remove = [
+                    ip
+                    for ip, timestamps in request_counts.items()
+                    if not timestamps or current_time - timestamps[-1] > rate_window
+                ]
+                for key in keys_to_remove:
+                    del request_counts[key]
+                state["last_cleanup_time"] = current_time
+
+            while len(request_counts) > max_unique_ips:
+                try:
+                    oldest_ip = next(iter(request_counts))
+                    del request_counts[oldest_ip]
+                except StopIteration:
+                    break
+
+        client_ip = request.client.host if request.client else "unknown"
+
+        if client_ip in request_counts:
+            request_counts[client_ip] = [
+                t
+                for t in request_counts[client_ip]
+                if current_time - t < rate_window
+            ]
+
+        if len(request_counts[client_ip]) >= rate_limit:
+            return JSONResponse(
+                status_code=429,
+                content={"error": "Rate limit exceeded. Try again later."},
+            )
+        request_counts[client_ip].append(current_time)
+        return await call_next(request)
+    return request_counts
