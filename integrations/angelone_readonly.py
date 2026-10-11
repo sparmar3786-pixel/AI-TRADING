@@ -41,6 +41,12 @@ class AngelOneReadOnly:
     def _login(self):
         if self._client is not None:
             return self._client
+        # Validate configuration before importing optional SDKs, so a missing
+        # secret fails clearly even in test/dev environments without the SDK.
+        api_key = _required_env("ANGEL_API_KEY")
+        client_code = _required_env("ANGEL_CLIENT_CODE")
+        pin = _required_env("ANGEL_PIN")
+        totp_secret = _required_env("ANGEL_TOTP_SECRET")
         try:
             import pyotp
             from SmartApi import SmartConnect
@@ -48,11 +54,6 @@ class AngelOneReadOnly:
             raise RuntimeError(
                 "Install the optional Angel One dependencies: smartapi-python and pyotp"
             ) from exc
-
-        api_key = _required_env("ANGEL_API_KEY")
-        client_code = _required_env("ANGEL_CLIENT_CODE")
-        pin = _required_env("ANGEL_PIN")
-        totp_secret = _required_env("ANGEL_TOTP_SECRET")
         client = SmartConnect(api_key=api_key)
         session = _ok(client.generateSession(client_code, pin, pyotp.TOTP(totp_secret).now()))
         data = session.get("data") or {}
