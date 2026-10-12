@@ -19,7 +19,7 @@ permissions:
 # Give each workflow run its own concurrency group so a newer push cannot supersede an older queued/running APK build.
 # GitHub may queue runs when runner capacity is limited, but this workflow will not cancel sibling runs.
 concurrency:
-  group: ai-trading-apk-${{ github.run_id }}
+  group: ai-trading-apk-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
 jobs:
