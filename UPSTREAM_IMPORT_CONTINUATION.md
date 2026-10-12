@@ -158,3 +158,10 @@ Verified target branch tree count: **815 vendored files total**, including **122
 Transferred the existing selected upstream snapshots for RuchiTanmay/nselib (NSE data utilities; Apache-2.0) and zerodha/pykiteconnect (Kite Connect Python client; MIT) onto this main-based continuation branch, including their source files, setup metadata, tests/examples and license files. These are isolated vendor copies; they are not wired to credentials or the active execution engine. Live API compatibility and tests have not been run.
 
 Verified current branch tree count: **882 vendored files total**. Current vendor directory counts: FinGPT=56, FinLLM-Leaderboard=2, FinRobot=18, IMPORT_PROGRESS.md=1, LLM_trader=83, PyAlgoTrade=122, Qlib=25, Sebacaraballo-Trading-Bot=66, TradingAgents=210, awesome-ai-in-finance=10, awesome-systematic-trading=16, backtesting.py=46, financial-agent=15, hftbacktest=30, intelligent-trading-bot=64, llm-tradebot=14, nselib=32, pykiteconnect=35, qlib=19, qtpylib=18. This is still a curated import set, not proof that every file from every one of the 500 claimed repositories has been copied. The full URL manifest is needed to audit the rest accurately.
+
+
+## Missing-path reconciliation from previous import branch — 2026-10-12
+
+Compared the earlier continuation branch against this main-based PR branch and copied **65 of the 65 previously identified missing paths** across existing source namespaces where they did not already exist. This includes missing licenses/readmes and selected modules from FinRL, ai-hedge-fund, automated-trading-system, backtest-kit, earnings-intelligence-trading-bot, financial-agent, LLM_trader, systematic-trading, QuantConnect-Lean and FinLLM-Leaderboard. No existing target file was overwritten. Remaining unmatched paths in that previous branch snapshot: **0**.
+
+Verified current branch tree count: **947 vendored files total**. These remain source snapshots; this does not establish integration, test success, or completion of all 500 user-mentioned source repositories.
