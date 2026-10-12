@@ -30,7 +30,7 @@ if str(ROOT) not in sys.path:
 from integrations.angelone_readonly import AngelOneConfigError, AngelOneReadOnly
 from integrations.angelone_stream import AngelOneStream, EXCHANGE_TYPES
 from integrations.news_sentiment import fetch_market_news_sentiment
-from quant_engine import evaluate_five_layer_signal
+from quant_engine import evaluate_five_layer_signal, evaluate_futures_signal
 
 app = FastAPI(title="AI-TRADING Read-only Signals API", version="1.0.0")
 IST = ZoneInfo("Asia/Kolkata")
@@ -1185,6 +1185,12 @@ def _commodity_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]]) -
             sentiment = None
             sentiment_label = "UNKNOWN"
             indicators: dict[str, Any] = {}
+            futures_signal: dict[str, Any] = {
+                "decision": "WAIT", "candidate_decision": "WAIT", "entry": None,
+                "stop_loss": None, "target": None,
+                "signal_stability": {"state": "BLOCKED", "required_minutes": 10},
+                "reasons": ["Fresh quote and sufficient candles are required for a futures signal"],
+            }
             day_move_pct = None
             session_open = session_high = session_low = None
             reason = None if live else "Quote lacks a fresh exchange timestamp or valid LTP"
@@ -1215,6 +1221,37 @@ def _commodity_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]]) -
                         + 0.20 * max(-1.0, min(1.0, depth_imbalance))
                     ))
                     sentiment_label = "BULLISH" if sentiment >= 0.2 else "BEARISH" if sentiment <= -0.2 else "NEUTRAL"
+                    timeframe_closes = {
+                        "5m": closes[-80:],
+                        "15m": _resample_closes(closes, 3),
+                        "1h": _resample_closes(closes, 12),
+                    }
+                    future_snapshot = {
+                        "observed_at": timestamp,
+                        "underlying_ltp": ltp,
+                        "sentiment_score": sentiment,
+                        "timeframe_closes": timeframe_closes,
+                        "indicators": indicators,
+                        "order_flow": {
+                            "bid": bid, "ask": ask, "ltp": ltp,
+                            "buy_volume": buy_depth, "sell_volume": sell_depth,
+                        },
+                        "contract": {
+                            "symbol": contract.get("symbol"), "expiry": _expiry_date(contract.get("expiry")).isoformat(),
+                            "volume": _number(quote.get("tradeVolume") or quote.get("volume")),
+                            "oi": _number(quote.get("opnInterest") or quote.get("openInterest") or quote.get("oi")),
+                            "lot_size": _number(contract.get("lotsize") or contract.get("lot_size")),
+                        },
+                    }
+                    confirmation_key = f"MCX_{name}"
+                    futures_signal = evaluate_futures_signal(
+                        future_snapshot,
+                        confirmation_state=_confirmation_states.get(confirmation_key),
+                        max_data_age_seconds=60.0,
+                        confirmation_seconds=600,
+                        max_confirmation_gap_seconds=60,
+                    )
+                    _confirmation_states[confirmation_key] = futures_signal.get("confirmation_state") or {}
                 else:
                     reason = reason or "Quote is live; candle history is insufficient for a trend label"
             except Exception:
@@ -1231,6 +1268,7 @@ def _commodity_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]]) -
                 "day_move_pct": day_move_pct, "session_open": session_open,
                 "session_high": session_high, "session_low": session_low,
                 "indicators": indicators, "reason": reason,
+                **futures_signal,
             })
         except Exception:
             result.append({"name": name, "symbol": str(contract.get("symbol") or name), "status": "WAIT", "live": False, "reason": "Angel One quote/candle request failed", "ltp": None, "source": "angelone_smartapi"})
