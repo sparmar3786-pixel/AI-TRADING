@@ -79,27 +79,41 @@ jobs:
         run: flutter test
       - name: Build release APK
         run: flutter build apk --release --no-tree-shake-icons --dart-define=BACKEND_URL=https://nse-algo-backend-final-production.up.railway.app
+      - name: Build optimized ARM64 APK
+        run: |
+          set -euo pipefail
+          APK_DIR="build/app/outputs/flutter-apk"
+          cp "$APK_DIR/app-release.apk" /tmp/ai-trading-universal.apk
+          flutter build apk --release --split-per-abi --no-tree-shake-icons --dart-define=BACKEND_URL=https://nse-algo-backend-final-production.up.railway.app
+          test -s "$APK_DIR/app-arm64-v8a-release.apk"
+          cp /tmp/ai-trading-universal.apk "$APK_DIR/app-release.apk"
+          ls -lh "$APK_DIR/app-release.apk" "$APK_DIR/app-arm64-v8a-release.apk"
       - name: Verify APK configuration and signal-only safety
         run: |
           set -euo pipefail
-          APK="build/app/outputs/flutter-apk/app-release.apk"
-          test -s "$APK"
-          mapfile -t CODE_FILES < <(unzip -Z1 "$APK" | grep -E '(^classes[0-9]*[.]dex$|^lib/[^/]+/libapp[.]so$)' || true)
-          test "${#CODE_FILES[@]}" -gt 0
-          COMPILED_STRINGS=$(for file in "${CODE_FILES[@]}"; do unzip -p "$APK" "$file" | strings; done)
-          if printf '%s\n' "$COMPILED_STRINGS" | grep -E 'http://10[.]0[.]2[.]2:8000|http://localhost:8000|http://127[.]0[.]0[.]1:8000' >/dev/null; then
-            echo "Forbidden local/emulator backend URL found"
-            exit 1
-          fi
-          printf '%s\n' "$COMPILED_STRINGS" | grep -F 'nse-algo-backend-final-production.up.railway.app' >/dev/null
-          if printf '%s\n' "$COMPILED_STRINGS" | grep -E '/v1/live/execute-signal|PLACE_REAL_ANGEL_ORDER|PLACE REAL ANGEL ONE ORDER' >/dev/null; then
-            echo "Order-placement capability unexpectedly found in APK"
-            exit 1
-          fi
+          APK_DIR="build/app/outputs/flutter-apk"
+          UNIVERSAL="$APK_DIR/app-release.apk"
+          ARM64="$APK_DIR/app-arm64-v8a-release.apk"
+          test -s "$UNIVERSAL"
+          test -s "$ARM64"
           AAPT=$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort | tail -1)
-          "$AAPT" dump permissions "$APK" | grep -q 'android.permission.INTERNET'
-          "$AAPT" dump badging "$APK" | grep -F "application-label:'AI Trading Signals'" >/dev/null
-          ls -lh "$APK"
+          for APK in "$UNIVERSAL" "$ARM64"; do
+            mapfile -t CODE_FILES < <(unzip -Z1 "$APK" | grep -E '(^classes[0-9]*[.]dex$|^lib/[^/]+/libapp[.]so$)' || true)
+            test "${#CODE_FILES[@]}" -gt 0
+            COMPILED_STRINGS=$(for file in "${CODE_FILES[@]}"; do unzip -p "$APK" "$file" | strings; done)
+            if printf '%s\n' "$COMPILED_STRINGS" | grep -E 'http://10[.]0[.]2[.]2:8000|http://localhost:8000|http://127[.]0[.]0[.]1:8000' >/dev/null; then
+              echo "Forbidden local/emulator backend URL found in $APK"
+              exit 1
+            fi
+            printf '%s\n' "$COMPILED_STRINGS" | grep -F 'nse-algo-backend-final-production.up.railway.app' >/dev/null
+            if printf '%s\n' "$COMPILED_STRINGS" | grep -E '/v1/live/execute-signal|PLACE_REAL_ANGEL_ORDER|PLACE REAL ANGEL ONE ORDER' >/dev/null; then
+              echo "Order-placement capability unexpectedly found in APK"
+              exit 1
+            fi
+            "$AAPT" dump permissions "$APK" | grep -q 'android.permission.INTERNET'
+            "$AAPT" dump badging "$APK" | grep -F "application-label:'AI Trading Signals'" >/dev/null
+          done
+          ls -lh "$UNIVERSAL" "$ARM64"
       - name: Publish rolling APK release (avoids Actions artifact quota)
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         working-directory: .
@@ -108,10 +122,11 @@ jobs:
         run: |
           TAG="ai-trading-signal-latest"
           APK="flutter_app/build/app/outputs/flutter-apk/app-release.apk"
-          NOTES="Universal signal-only Android APK for broad ABI compatibility. Uses the configured Railway HTTPS API. Live BUY/SELL requires fresh validated data and a 10-minute stable side/strike. No broker order-placement API is included in the APK. Validate on-device and paper-trade before relying on signals."
+          ARM64_APK="flutter_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk"
+          NOTES="Universal signal-only Android APK for broad ABI compatibility; app-arm64-v8a-release.apk is the smaller optimized build for 64-bit ARM Android phones. Uses the configured Railway HTTPS API. Signals require fresh validated evidence and continuous 10-minute same-side/same-strike confirmation. No broker order-placement API is included in the APK. Validate on-device and paper-trade before relying on signals."
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$APK" --clobber
+            gh release upload "$TAG" "$APK" "$ARM64_APK" --clobber
             gh release edit "$TAG" --title "AI-TRADING Signal APK" --notes "$NOTES"
           else
-            gh release create "$TAG" "$APK" --title "AI-TRADING Signal APK" --notes "$NOTES" --prerelease --target "$GITHUB_SHA"
+            gh release create "$TAG" "$APK" "$ARM64_APK" --title "AI-TRADING Signal APK" --notes "$NOTES" --prerelease --target "$GITHUB_SHA"
           fi
