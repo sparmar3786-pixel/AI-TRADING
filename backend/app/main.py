@@ -1139,8 +1139,10 @@ def _get_signals(force: bool = False) -> dict[str, Any]:
 
 
 def _commodity_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    # Only active MCX futures with a valid expiry are surfaced; never use demo quotes.
+    # Active MCX futures only; live quote status and trend are kept separate
+    # from an actionable options signal because commodities may have no option chain.
     today = datetime.now(IST).date()
+    start, end = _session_range()
     result = []
     for name in COMMODITY_NAMES:
         contracts = [
@@ -1154,21 +1156,71 @@ def _commodity_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]]) -
         ]
         contracts.sort(key=lambda row: _expiry_date(row.get("expiry")) or date.max)
         if not contracts:
-            result.append({"symbol": name, "status": "WAIT", "reason": "No active MCX futures contract in instrument master", "ltp": None})
+            result.append({"name": name, "symbol": name, "status": "WAIT", "live": False, "reason": "No active MCX futures contract in instrument master", "ltp": None, "source": "angelone_smartapi"})
             continue
         contract = contracts[0]
         try:
-            quote = _quotes(adapter, "MCX", [str(contract["token"])]).get(str(contract["token"]), {})
+            token = str(contract["token"])
+            quote = _quotes(adapter, "MCX", [token]).get(token, {})
             ltp = _number(quote.get("ltp"))
             timestamp = _quote_timestamp(quote)
+            parsed_timestamp = datetime.fromisoformat(timestamp) if timestamp else None
+            age = (_utc_now() - parsed_timestamp).total_seconds() if parsed_timestamp else None
+            live = ltp is not None and ltp > 0 and age is not None and 0 <= age <= 60
+            bid, ask, buy_depth, sell_depth = _book(quote)
+            trend = "UNKNOWN"
+            sentiment = None
+            sentiment_label = "UNKNOWN"
+            indicators: dict[str, Any] = {}
+            day_move_pct = None
+            session_open = session_high = session_low = None
+            reason = None if live else "Quote lacks a fresh exchange timestamp or valid LTP"
+            try:
+                candle_rows = adapter.candles("MCX", token, "FIVE_MINUTE", start, end).get("candles") or []
+                closes = _candle_closes(candle_rows)
+                today_rows = []
+                for candle in candle_rows:
+                    if not isinstance(candle, (list, tuple)) or len(candle) < 5:
+                        continue
+                    candle_time = _iso(candle[0])
+                    parsed_time = datetime.fromisoformat(candle_time) if candle_time else None
+                    if parsed_time is not None and parsed_time.astimezone(IST).date() == today:
+                        today_rows.append(candle)
+                if len(closes) >= 30:
+                    trend = "BULLISH" if closes[-1] > closes[-2] > closes[-3] else "BEARISH" if closes[-1] < closes[-2] < closes[-3] else "MIXED"
+                    indicators = _indicator_snapshot(closes, candle_rows, today_rows)
+                    session_open = _number(today_rows[0][1]) if today_rows else closes[-1]
+                    session_high = max((_number(row[2]) or ltp or closes[-1] for row in today_rows), default=ltp or closes[-1])
+                    session_low = min((_number(row[3]) or ltp or closes[-1] for row in today_rows), default=ltp or closes[-1])
+                    day_move = ((ltp or closes[-1]) - session_open) / session_open if session_open else 0.0
+                    day_move_pct = round(day_move * 100, 3)
+                    depth_total = buy_depth + sell_depth
+                    depth_imbalance = (buy_depth - sell_depth) / depth_total if depth_total > 0 else 0.0
+                    sentiment = max(-1.0, min(1.0,
+                        (0.35 if trend == "BULLISH" else -0.35 if trend == "BEARISH" else 0.0)
+                        + max(-0.30, min(0.30, day_move * 10.0))
+                        + 0.20 * max(-1.0, min(1.0, depth_imbalance))
+                    ))
+                    sentiment_label = "BULLISH" if sentiment >= 0.2 else "BEARISH" if sentiment <= -0.2 else "NEUTRAL"
+                else:
+                    reason = reason or "Quote is live; candle history is insufficient for a trend label"
+            except Exception:
+                reason = reason or "Quote is live; historical candles are unavailable for trend calculation"
             result.append({
-                "symbol": name, "status": "LIVE" if ltp and timestamp else "WAIT",
+                "name": name, "symbol": str(contract.get("symbol") or name),
                 "contract": contract.get("symbol"), "expiry": _expiry_date(contract.get("expiry")).isoformat(),
-                "ltp": ltp, "source_timestamp": timestamp, "source": "angelone_smartapi",
-                "reason": None if ltp and timestamp else "Quote lacks a fresh price or exchange timestamp",
+                "lotsize": contract.get("lotsize") or contract.get("lot_size"),
+                "ltp": ltp, "bid": bid, "ask": ask, "buy_depth": buy_depth, "sell_depth": sell_depth,
+                "source_timestamp": timestamp, "timestamp": timestamp,
+                "age_seconds": round(age, 2) if age is not None else None,
+                "source": "angelone_smartapi", "status": "LIVE" if live else "WAIT", "live": live,
+                "trend": trend, "sentiment_score": sentiment, "sentiment_label": sentiment_label,
+                "day_move_pct": day_move_pct, "session_open": session_open,
+                "session_high": session_high, "session_low": session_low,
+                "indicators": indicators, "reason": reason,
             })
-        except Exception as exc:
-            result.append({"symbol": name, "status": "WAIT", "reason": str(exc)[:160], "ltp": None})
+        except Exception:
+            result.append({"name": name, "symbol": str(contract.get("symbol") or name), "status": "WAIT", "live": False, "reason": "Angel One quote/candle request failed", "ltp": None, "source": "angelone_smartapi"})
     return result
 
 
