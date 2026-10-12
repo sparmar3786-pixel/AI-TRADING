@@ -1576,6 +1576,7 @@ class SignalPage extends StatelessWidget {
     final validationBlocks = (validation['blocks'] as List?) ?? const <dynamic>[];
     final timeframeAnalysis = Map<String, dynamic>.from(s['timeframe_analysis'] as Map? ?? const {});
     final indicatorSummary = Map<String, dynamic>.from(s['indicator_summary'] as Map? ?? const {});
+    final newsSentiment = Map<String, dynamic>.from(marketRow['news_sentiment'] as Map? ?? const {});
     final researchPack = Map<String, dynamic>.from(timeframeAnalysis['research_pack'] as Map? ?? const {});
     final researchChecks = Map<String, dynamic>.from(researchPack['checks'] as Map? ?? const {});
     final aiDecision = Map<String, dynamic>.from(ai[index] as Map? ?? const {});
@@ -1650,6 +1651,8 @@ class SignalPage extends StatelessWidget {
           InfoRow('Option PCR (near ATM)', _val(marketRow['pcr'])),
           InfoRow('Order-book imbalance', _val(marketRow['depth_imbalance'])),
           InfoRow('Session sentiment score', _val(marketRow['sentiment_score'])),
+          InfoRow('Last-24h news sentiment', '${newsSentiment['label'] ?? 'UNKNOWN'} • ${newsSentiment['status'] ?? 'NOT_CONFIGURED'}'),
+          InfoRow('News evidence', '${newsSentiment['article_count'] ?? 0} articles • ${((newsSentiment['sources'] as List?) ?? const []).join(', ')}'),
           Text((marketRow['sentiment_source'] ?? 'Session sentiment unavailable until fresh quotes arrive.').toString(), style: const TextStyle(fontSize: 11, color: Colors.white70)),
         ]),
       )),
