@@ -95,3 +95,10 @@ Other submitted links that lacked a verifiable redistribution license, or used a
 - `gbeced/pyalgotrade` — Apache-2.0. Five files copied under `vendor/PyAlgoTrade/`: `LICENSE`, `README.md`, `pyalgotrade/strategy/__init__.py`, `pyalgotrade/strategy/position.py`, and `pyalgotrade/broker/backtesting.py`.
 - This is a selected source snapshot, not the full upstream repository. The Python modules depend on other PyAlgoTrade modules and the project’s older dependency stack; they are not imported into the active engine and have not been tested in this repository.
 - Updated branch total: **16 distinct upstream projects represented by 154 vendored files**. This count is based on the existing recorded 149 files plus these five new files. It is not a count of complete repository clones, and it does not mean the 500 URLs have been fully copied.
+
+
+## PyAlgoTrade snapshot expanded — 2026-10-12
+
+The earlier five-file PyAlgoTrade snapshot was expanded with additional Apache-2.0 upstream modules under `vendor/PyAlgoTrade/`, including core bar structures, dispatcher/event loop, logger, broker package scaffolding and fill strategy. Files remain namespaced and are not wired into the main engine. The upstream project has cross-module dependencies and an older dependency stack; no claim of standalone execution or tests is made.
+
+Verified current branch tree count: **168 vendored files total**, including **13 PyAlgoTrade files**. This is a file count across selected upstream snapshots, not the number of complete repositories cloned. The submitted list of 500 URLs is still not available as a verified complete list.
