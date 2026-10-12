@@ -64,3 +64,10 @@ Do not commit API keys, passwords, MPINs, TOTP seeds, JWTs, feed tokens or other
 - Added the MIT-licensed `Open-Finance-Lab/FinLLM-Leaderboard` demo/reference files and CC0-licensed `georgezouq/awesome-ai-in-finance` catalog.
 - Current count for this continuation branch: **9 distinct upstream projects, 61 vendored files** (licenses, metadata, code and reference docs combined). Only selected files were copied; do not describe this as 9 complete repository trees or as copying 500 repositories.
 - CI status must be verified from GitHub Actions. No connected CI runs were returned on the prior status check; imports remain isolated and untested as a combined package.
+
+## Latest continuation pass — 2026-10-12
+
+- Added the MIT-licensed `virattt/ai-hedge-fund` research snapshot under `vendor/ai-hedge-fund/` (license, README, data models, backtesting engine and fund backtest).
+- Verified running total for the continuation branch: **11 distinct upstream projects represented by 71 vendored files**, including licenses, READMEs, dependency manifests and reference docs. These are selected file snapshots, not 11 complete repository trees and not 500 copied repositories.
+- The AI Hedge Fund source says it is educational-only and does not execute real trades. No credentials were copied.
+- Existing-engine integration, tests, lint/security checks and Railway deployment remain unverified/not done.
