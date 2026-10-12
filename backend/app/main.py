@@ -28,6 +28,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from integrations.angelone_readonly import AngelOneConfigError, AngelOneReadOnly
+from integrations.angelone_stream import AngelOneStream, EXCHANGE_TYPES
 from quant_engine import evaluate_five_layer_signal
 
 app = FastAPI(title="AI-TRADING Read-only Signals API", version="1.0.0")
@@ -47,6 +48,9 @@ INDEXES: dict[str, dict[str, str]] = {
 COMMODITY_NAMES = ("GOLD", "SILVER", "CRUDEOIL", "NATURALGAS", "COPPER")
 _lock = threading.RLock()
 _adapter: AngelOneReadOnly | None = None
+_stream: AngelOneStream | None = None
+_stream_adapter: AngelOneReadOnly | None = None
+_stream_start_error: str | None = None
 _saved_meta: dict[str, Any] = {}
 _master_rows: list[dict[str, Any]] = []
 _master_loaded_at = 0.0
@@ -208,6 +212,10 @@ def _current_adapter(attempt_env_login: bool = False) -> AngelOneReadOnly | None
                 _adapter = AngelOneReadOnly(creds)
                 try:
                     _adapter.profile()
+                    try:
+                        _start_stream(_adapter)
+                    except Exception:
+                        pass  # REST fallback remains available if WebSocket setup fails.
                 except Exception:
                     _adapter = None
         return _adapter
@@ -219,6 +227,10 @@ def _require_adapter() -> AngelOneReadOnly:
         raise HTTPException(status_code=503, detail="Angel One is not connected. Open API & Railway and connect with API key, Client ID, MPIN and current TOTP.")
     try:
         adapter.profile()
+        try:
+            _start_stream(adapter)
+        except Exception:
+            pass  # Never fail a valid REST session solely because WebSocket is unavailable.
     except AngelOneConfigError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
@@ -247,6 +259,43 @@ def _load_master(force: bool = False) -> list[dict[str, Any]]:
         _master_rows = normalized
         _master_loaded_at = time.monotonic()
         return _master_rows
+
+
+def _start_stream(adapter: AngelOneReadOnly, rows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    global _stream, _stream_adapter, _stream_start_error
+    subscriptions: dict[int, list[str]] = {}
+    for config in INDEXES.values():
+        exchange_type = EXCHANGE_TYPES.get(config["exchange"])
+        if exchange_type:
+            subscriptions.setdefault(exchange_type, []).append(config["token"])
+    if rows:
+        today = datetime.now(IST).date()
+        for name in COMMODITY_NAMES:
+            contracts = [
+                row for row in rows
+                if str(row.get("exch_seg", "")).upper() == "MCX"
+                and str(row.get("name", "")).upper() == name
+                and str(row.get("instrumenttype", "")).upper() == "FUTCOM"
+                and row.get("token")
+                and _expiry_date(row.get("expiry")) is not None
+                and _expiry_date(row.get("expiry")) >= today
+            ]
+            contracts.sort(key=lambda row: _expiry_date(row.get("expiry")) or date.max)
+            if contracts:
+                subscriptions.setdefault(EXCHANGE_TYPES["MCX"], []).append(str(contracts[0]["token"]))
+    with _lock:
+        if _stream is None or _stream_adapter is not adapter:
+            if _stream is not None:
+                _stream.stop()
+            _stream = AngelOneStream(adapter)
+            _stream_adapter = adapter
+        try:
+            status = _stream.start(subscriptions)
+            _stream_start_error = None
+            return status
+        except Exception:
+            _stream_start_error = "SmartWebSocketV2 could not start; timestamp-validated REST fallback remains enabled."
+            return _stream.status()
 
 
 def _find_index_contract(rows: list[dict[str, Any]], index: str) -> dict[str, str]:
@@ -295,12 +344,32 @@ def _quote_timestamp(quote: dict[str, Any]) -> str | None:
 def _quotes(adapter: AngelOneReadOnly, exchange: str, tokens: list[str]) -> dict[str, dict[str, Any]]:
     if not tokens:
         return {}
-    result = adapter.market_data("FULL", {exchange: list(dict.fromkeys(tokens))})
+    unique_tokens = list(dict.fromkeys(str(token) for token in tokens if str(token)))
     output: dict[str, dict[str, Any]] = {}
-    for row in _quote_rows(result):
-        token = str(row.get("symbolToken") or row.get("symboltoken") or row.get("token") or "")
-        if token:
-            output[token] = row
+    exchange_type = EXCHANGE_TYPES.get(exchange.upper())
+    if _stream is not None and exchange_type is not None:
+        _stream.subscribe(exchange_type, unique_tokens)
+        for token in unique_tokens:
+            tick = _stream.get_tick(token, max_age_seconds=60.0)
+            if not tick or _number(tick.get("ltp")) is None:
+                continue
+            bid, ask, _, _ = _book(tick)
+            # Quote/option gates require a real bid and ask. If this tick mode
+            # omitted depth, request REST FULL depth instead of inventing it.
+            if bid is not None and ask is not None:
+                output[token] = tick
+    missing = [token for token in unique_tokens if token not in output]
+    if missing:
+        try:
+            result = adapter.market_data("FULL", {exchange: missing})
+            for row in _quote_rows(result):
+                token = str(row.get("symbolToken") or row.get("symboltoken") or row.get("token") or "")
+                if token:
+                    row["_source_mode"] = "REST_FULL_DEPTH"
+                    output[token] = row
+        except Exception:
+            if not output:
+                raise
     return output
 
 
@@ -629,7 +698,7 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
     }
     market = {
         "ltp": spot, "age_seconds": result.get("layers", {}).get("data_quality", {}).get("age_seconds"),
-        "feed_mode": "REST_FULL_DEPTH", "source": "angelone_smartapi",
+        "feed_mode": spot_quote.get("_source_mode", "REST_FULL_DEPTH"), "source": "angelone_smartapi",
         "source_timestamp": spot_ts, "timestamp": spot_ts,
         "live": result.get("data_fresh") is True, "day_move_pct": round(day_move * 100, 3),
         "sentiment_score": sentiment, "sentiment_label": "BULLISH" if sentiment >= 0.2 else "BEARISH" if sentiment <= -0.2 else "NEUTRAL",
@@ -678,8 +747,10 @@ def angel_status(_: str = Depends(_device)) -> dict[str, Any]:
     }
     path = _credential_path()
     saved = path.is_file()
+    stream_status = _stream.status() if _stream is not None else {"stream_started": False, "stream_open": False, "tick_count": 0, "unique_tokens_seen": 0, "last_tick_age_seconds": None, "last_error": _stream_start_error}
     return {
         **status,
+        **stream_status,
         "stored_session": bool(status.get("authenticated")),
         "stored_credentials": saved,
         "stored_api_key": saved,
@@ -738,8 +809,9 @@ def angel_connect(body: ConnectRequest, _: str = Depends(_device)) -> dict[str, 
         _adapter = adapter
         _signal_cache = None
         _signal_cache_at = 0.0
+        stream_status = _start_stream(adapter)
         return {
-            **status, "authenticated": True, "session_restored": False,
+            **status, **stream_status, "authenticated": True, "session_restored": False,
             "stored_session": True, "stored_credentials": body.remember_credentials,
             "login_message": "Angel One authenticated; JWT and feed token verified. No order-placement API is enabled.",
             "profile": {"client_code": profile.get("client_code"), "name": profile.get("name")},
@@ -755,10 +827,11 @@ def diagnostics(_: str = Depends(_device)) -> dict[str, Any]:
         "service": "ai-trading-readonly-api",
         "angel": angel,
         "angel_one": {
-            "authenticated": angel.get("authenticated", False), "stream_open": False,
-            "last_tick_age_seconds": None,
+            "authenticated": angel.get("authenticated", False),
+            "stream_open": bool(_stream and _stream.status().get("stream_open")),
+            "last_tick_age_seconds": _stream.status().get("last_tick_age_seconds") if _stream else None,
             "last_error": None if angel.get("authenticated") else "Angel One session is not authenticated",
-            "stream_error": "WebSocket streaming is not enabled; REST FULL-depth polling is used",
+            "stream_error": (_stream.status().get("last_error") if _stream else _stream_start_error),
         },
         "backend": {
             "cycle_age_seconds": round(time.monotonic() - _signal_cache_at, 1) if _signal_cache else None,
@@ -791,12 +864,15 @@ def sync_instruments(_: str = Depends(_device)) -> dict[str, Any]:
 
 @app.post("/v1/stream/start")
 def start_stream(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
-    # Do not claim a WebSocket is active: this backend currently polls SmartAPI REST.
+    adapter = _require_adapter()
     requested = [str(item).upper() for item in body.get("indexes", []) if str(item).upper() in INDEXES]
+    rows = _load_master()
+    status = _start_stream(adapter, rows)
     return {
-        "started": False, "mode": "REST_POLLING",
-        "indexes": requested, "authenticated": bool((_current_adapter() or AngelOneReadOnly()).authenticated),
-        "message": "WebSocket streaming is not enabled in this release; live data uses timestamp-validated REST FULL-depth snapshots.",
+        **status, "started": status.get("stream_started") is True,
+        "mode": "WEBSOCKET_V2_WITH_REST_FALLBACK",
+        "indexes": requested or list(INDEXES), "authenticated": adapter.authenticated,
+        "message": "SmartWebSocketV2 is requested; live status turns green only after fresh exchange-timestamped ticks. REST FULL-depth fallback remains available.",
     }
 
 
@@ -804,9 +880,11 @@ def start_stream(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, A
 def live_status(_: str = Depends(_device)) -> dict[str, Any]:
     adapter = _current_adapter()
     connected = bool(adapter and adapter.authenticated)
+    stream_status = _stream.status() if _stream is not None else {"stream_started": False, "stream_open": False, "tick_count": 0, "unique_tokens_seen": 0, "last_tick_age_seconds": None, "last_error": _stream_start_error}
     return {
+        **stream_status,
         "authenticated": connected, "live": bool(_signal_cache and _signal_cache.get("live")),
-        "feed_mode": "REST_FULL_DEPTH" if connected else "NO_FEED",
+        "feed_mode": "WEBSOCKET_V2" if stream_status.get("stream_open") else ("REST_FULL_DEPTH_FALLBACK" if connected else "NO_FEED"),
         "order_placement_enabled": False, "signal_only": True,
         "last_fetch": _signal_cache.get("last_fetch") if _signal_cache else None,
     }
@@ -900,6 +978,7 @@ def _get_signals(force: bool = False) -> dict[str, Any]:
     adapter = _require_adapter()
     try:
         rows = _load_master()
+        _start_stream(adapter, rows)
         signals: dict[str, Any] = {}
         market: dict[str, Any] = {}
         for index in INDEXES:
@@ -925,7 +1004,12 @@ def _get_signals(force: bool = False) -> dict[str, Any]:
         live = any(value.get("data_fresh") is True for value in signals.values())
         result = {
             "live": live, "last_fetch": _utc_now().isoformat(),
-            "feed": {"authenticated": True, "connected": live, "mode": "REST_FULL_DEPTH", "stream_started": False, "stream_open": False, "tick_count": 0, "unique_tokens_seen": 0, "last_tick_age_seconds": None, "last_error": None if live else "No index passed source freshness/data gates", "message": "Fresh exchange-timestamped market data" if live else "Connected but no index passed freshness/data gates"},
+            "feed": {
+                "authenticated": True, "connected": live,
+                **(_stream.status() if _stream is not None else {"stream_started": False, "stream_open": False, "tick_count": 0, "unique_tokens_seen": 0, "last_tick_age_seconds": None, "last_error": _stream_start_error}),
+                "mode": "WEBSOCKET_V2" if _stream is not None and _stream.status().get("stream_open") else "REST_FULL_DEPTH_FALLBACK",
+                "message": "Fresh exchange-timestamped market data" if live else "Connected but no index passed freshness/data gates",
+            },
             "store": {"source": "angelone_smartapi", "fresh": live, "index_count": len(signals), "update_count": len(signals), "last_update_age_seconds": 0 if live else None, "unique_tokens": sum(1 for row in market.values() if row.get("ltp") is not None)},
             "ai": {"status": "not_configured", "message": "Deterministic quant gates are authoritative; news/LLM validation is not configured on this service."},
             "market": market, "signals": signals, "trade_plans": confirmed,
