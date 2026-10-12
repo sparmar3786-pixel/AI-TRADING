@@ -1,0 +1,25 @@
+name: ai_trading_signal
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.11.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_secure_storage: ^9.2.4
+  file_picker: ^10.3.10
+  llama_flutter_android: ^0.2.6
+  http: ^1.2.2
+  shared_preferences: ^2.5.3
+  url_launcher: ^6.3.2
+  stream_chat_flutter_ai: ^0.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true

@@ -1,0 +1,99 @@
+name: Build AI-TRADING Android APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'flutter_app/**'
+      - '.github/workflows/android-apk.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'flutter_app/**'
+      - '.github/workflows/android-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Keep one APK build per PR/ref; newer commits supersede stale builds.
+concurrency:
+  group: ai-trading-apk-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: flutter_app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Bootstrap Android platform
+        run: flutter create --platforms=android --project-name ai_trading_signal .
+      - name: Add Android network permissions
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
+            sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n    <application#' "$MANIFEST"
+          fi
+          sed -i 's/android:label="ai_trading_signal"/android:label="AI Trading Signals"/' "$MANIFEST"
+          GRADLE=android/app/build.gradle.kts
+          if [ ! -f "$GRADLE" ]; then
+            echo "Generated Android Gradle file missing: $GRADLE"
+            exit 1
+          fi
+          sed -i 's/applicationId = "com.example.ai_trading_signal"/applicationId = "com.sparmar3786.aitradingsignals"/' "$GRADLE"
+          sed -i -E 's/minSdk[[:space:]]*=[[:space:]]*flutter\.minSdkVersion/minSdk = 26/' "$GRADLE"
+          grep -Eq 'minSdk[[:space:]]*=[[:space:]]*26' "$GRADLE" || { echo "Could not enforce minSdk 26 for llama_flutter_android"; exit 1; }
+          grep -n 'applicationId\|minSdk' "$GRADLE"
+          grep -n 'uses-permission' "$MANIFEST"
+      - name: Install dependencies
+        run: flutter pub get
+      - name: Analyze Dart
+        run: flutter analyze --no-fatal-infos
+      - name: Widget and API tests
+        run: flutter test
+      - name: Build release APK
+        run: flutter build apk --release --no-tree-shake-icons --dart-define=BACKEND_URL=https://nse-algo-backend-final-production.up.railway.app
+      - name: Verify APK configuration and signal-only safety
+        run: |
+          set -euo pipefail
+          APK="build/app/outputs/flutter-apk/app-release.apk"
+          test -s "$APK"
+          mapfile -t CODE_FILES < <(unzip -Z1 "$APK" | grep -E '(^classes[0-9]*[.]dex$|^lib/[^/]+/libapp[.]so$)' || true)
+          test "${#CODE_FILES[@]}" -gt 0
+          COMPILED_STRINGS=$(for file in "${CODE_FILES[@]}"; do unzip -p "$APK" "$file" | strings; done)
+          if printf '%s\n' "$COMPILED_STRINGS" | grep -E 'http://10[.]0[.]2[.]2:8000|http://localhost:8000|http://127[.]0[.]0[.]1:8000' >/dev/null; then
+            echo "Forbidden local/emulator backend URL found"
+            exit 1
+          fi
+          printf '%s\n' "$COMPILED_STRINGS" | grep -F 'nse-algo-backend-final-production.up.railway.app' >/dev/null
+          if printf '%s\n' "$COMPILED_STRINGS" | grep -E '/v1/live/execute-signal|PLACE_REAL_ANGEL_ORDER|PLACE REAL ANGEL ONE ORDER' >/dev/null; then
+            echo "Order-placement capability unexpectedly found in APK"
+            exit 1
+          fi
+          AAPT=$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort | tail -1)
+          "$AAPT" dump permissions "$APK" | grep -q 'android.permission.INTERNET'
+          "$AAPT" dump badging "$APK" | grep -F "application-label:'AI Trading Signals'" >/dev/null
+          ls -lh "$APK"
+      - name: Publish rolling APK release (avoids Actions artifact quota)
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="ai-trading-signal-latest"
+          APK="flutter_app/build/app/outputs/flutter-apk/app-release.apk"
+          NOTES="Signal-only Android build. Uses the configured Railway HTTPS API. Live BUY/SELL requires fresh validated data and a 10-minute stable side/strike. No broker order-placement API is included in the APK. Validate on-device and paper-trade before relying on signals."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$APK" --clobber
+            gh release edit "$TAG" --title "AI-TRADING Signal APK" --notes "$NOTES"
+          else
+            gh release create "$TAG" "$APK" --title "AI-TRADING Signal APK" --notes "$NOTES" --prerelease --target "$GITHUB_SHA"
+          fi
