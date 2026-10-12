@@ -41,7 +41,8 @@ class FreshApi {
     // Keep cloud AI/search and legacy portfolio/paper endpoints on BACKEND_URL.
     // Only Angel One market data and deterministic signal routes use the new service.
     final routeBase = _signalRoutes.contains(suffixUri.path) ? signalBackendUrl : baseUrl;
-    final normalized = routeBase.trim().replaceAll(RegExp(r'/+
+    final normalized = routeBase.trim().replaceAll(RegExp('/+$'), '');
+    final parsed = Uri.tryParse(normalized);
     if (parsed == null || parsed.scheme != 'https' || parsed.host.isEmpty ||
         parsed.userInfo.isNotEmpty || parsed.hasQuery || parsed.hasFragment ||
         parsed.host == 'localhost' || parsed.host == '127.0.0.1' || parsed.host == '10.0.2.2') {
