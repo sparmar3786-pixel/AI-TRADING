@@ -422,6 +422,58 @@ def _resample_closes(closes: list[float], group_size: int) -> list[float]:
     return grouped[-80:]
 
 
+def _ema_series(values: list[float], period: int) -> list[float]:
+    if not values:
+        return []
+    alpha = 2.0 / (period + 1.0)
+    output = [values[0]]
+    for value in values[1:]:
+        output.append(alpha * value + (1.0 - alpha) * output[-1])
+    return output
+
+
+def _indicator_snapshot(closes: list[float], candle_rows: list[Any], today_rows: list[Any]) -> dict[str, Any]:
+    if len(closes) < 30:
+        return {}
+    fast_line = _ema_series(closes, 8)
+    slow_line = _ema_series(closes, 21)
+    gains: list[float] = []
+    losses: list[float] = []
+    for previous, current in zip(closes[-15:-1], closes[-14:]):
+        change = current - previous
+        gains.append(max(change, 0.0))
+        losses.append(max(-change, 0.0))
+    avg_gain = sum(gains) / len(gains) if gains else 0.0
+    avg_loss = sum(losses) / len(losses) if losses else 0.0
+    rsi = 100.0 if avg_loss == 0 and avg_gain > 0 else 50.0 if avg_loss == 0 else 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
+    ema12, ema26 = _ema_series(closes, 12), _ema_series(closes, 26)
+    macd_line = [fast - slow for fast, slow in zip(ema12, ema26)]
+    macd_signal = _ema_series(macd_line, 9)
+    macd_histogram = macd_line[-1] - macd_signal[-1] if macd_line and macd_signal else None
+    vwap_numerator = 0.0
+    vwap_denominator = 0.0
+    for row in today_rows:
+        if not isinstance(row, (list, tuple)) or len(row) < 6:
+            continue
+        high, low, close, volume = _number(row[2]), _number(row[3]), _number(row[4]), _number(row[5])
+        if high is None or low is None or close is None or volume is None or volume <= 0:
+            continue
+        vwap_numerator += ((high + low + close) / 3.0) * volume
+        vwap_denominator += volume
+    return {
+        "ema_fast_8": fast_line[-1],
+        "ema_slow_21": slow_line[-1],
+        "ema_alignment": "BULLISH" if fast_line[-1] > slow_line[-1] else "BEARISH" if fast_line[-1] < slow_line[-1] else "NEUTRAL",
+        "rsi_14": round(rsi, 2),
+        "macd_line": round(macd_line[-1], 4) if macd_line else None,
+        "macd_signal": round(macd_signal[-1], 4) if macd_signal else None,
+        "macd_histogram": round(macd_histogram, 4) if macd_histogram is not None else None,
+        "underlying_atr_14": _atr_from_candles(candle_rows, 14),
+        "vwap": vwap_numerator / vwap_denominator if vwap_denominator > 0 else None,
+        "vwap_source": "session OHLCV" if vwap_denominator > 0 else "UNAVAILABLE_NO_VOLUME",
+    }
+
+
 def _atr_from_candles(rows: list[Any], period: int = 14) -> float | None:
     true_ranges: list[float] = []
     previous_close: float | None = None
@@ -562,6 +614,7 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
     up_count = sum(1 for tf in timeframe_closes.values() if len(tf) >= 3 and tf[-1] > tf[-2] > tf[-3])
     down_count = sum(1 for tf in timeframe_closes.values() if len(tf) >= 3 and tf[-1] < tf[-2] < tf[-3])
     sentiment = 0.0  # Recalculated below from today's price, trend, option OI and order-book depth.
+    indicators = _indicator_snapshot(closes, candle_rows, today_rows)
     chain_rows = [
         row for row in rows
         if str(row.get("exch_seg", "")).upper() == ("BFO" if index in ("SENSEX", "BANKEX") else "NFO")
@@ -658,6 +711,7 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
         "underlying_ltp": spot,
         "sentiment_score": sentiment,
         "timeframe_closes": timeframe_closes,
+        "indicators": indicators,
         "order_flow": {"bid": bid, "ask": ask, "ltp": spot, "buy_volume": buy_volume, "sell_volume": sell_volume},
         # Feed the exact contract whose ATR was fetched into the risk gate.
         # Do not let the engine silently choose a different contract with no ATR.
@@ -684,7 +738,7 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
         "data_fresh": result.get("layers", {}).get("data_quality", {}).get("pass") is True,
         "sentiment_source": "session price structure and order-book depth; news sentiment not configured",
         "day_move_pct": round(day_move * 100, 3),
-        "indicator_summary": {"timeframes": timeframe_closes, "five_minute_trend": trend},
+        "indicator_summary": {"timeframes": timeframe_closes, "five_minute_trend": trend, **indicators},
         "option_chain_count": len(normalized_options),
         "signal_stability": {
             "state": result.get("layers", {}).get("confirmation", {}).get("state", "BLOCKED"),
@@ -733,6 +787,7 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
         "session_open": day_open, "session_high": day_high, "session_low": day_low,
         "session_range_position": round(day_range_position, 4),
         "depth_imbalance": round(depth_imbalance, 4),
+        "indicators": indicators,
         "option_chain": chain_payload,
     }
     return result, market
