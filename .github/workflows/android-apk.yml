@@ -78,13 +78,13 @@ jobs:
       - name: Widget and API tests
         run: flutter test
       - name: Build release APK
-        run: flutter build apk --release --no-tree-shake-icons --dart-define=BACKEND_URL=https://nse-algo-backend-final-production.up.railway.app
+        run: flutter build apk --release --no-tree-shake-icons --dart-define=BACKEND_URL=https://nse-algo-backend-final-production.up.railway.app --dart-define=SIGNAL_BACKEND_URL=https://ai-trading-signals-api-production.up.railway.app
       - name: Build optimized ARM64 APK
         run: |
           set -euo pipefail
           APK_DIR="build/app/outputs/flutter-apk"
           cp "$APK_DIR/app-release.apk" /tmp/ai-trading-universal.apk
-          flutter build apk --release --split-per-abi --no-tree-shake-icons --dart-define=BACKEND_URL=https://nse-algo-backend-final-production.up.railway.app
+          flutter build apk --release --split-per-abi --no-tree-shake-icons --dart-define=BACKEND_URL=https://nse-algo-backend-final-production.up.railway.app --dart-define=SIGNAL_BACKEND_URL=https://ai-trading-signals-api-production.up.railway.app
           test -s "$APK_DIR/app-arm64-v8a-release.apk"
           cp /tmp/ai-trading-universal.apk "$APK_DIR/app-release.apk"
           ls -lh "$APK_DIR/app-release.apk" "$APK_DIR/app-arm64-v8a-release.apk"
@@ -106,6 +106,7 @@ jobs:
               exit 1
             fi
             printf '%s\n' "$COMPILED_STRINGS" | grep -F 'nse-algo-backend-final-production.up.railway.app' >/dev/null
+            printf '%s\n' "$COMPILED_STRINGS" | grep -F 'ai-trading-signals-api-production.up.railway.app' >/dev/null
             if printf '%s\n' "$COMPILED_STRINGS" | grep -E '/v1/live/execute-signal|PLACE_REAL_ANGEL_ORDER|PLACE REAL ANGEL ONE ORDER' >/dev/null; then
               echo "Order-placement capability unexpectedly found in APK"
               exit 1
@@ -123,7 +124,7 @@ jobs:
           TAG="ai-trading-signal-latest"
           APK="flutter_app/build/app/outputs/flutter-apk/app-release.apk"
           ARM64_APK="flutter_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk"
-          NOTES="Universal signal-only Android APK for broad ABI compatibility; app-arm64-v8a-release.apk is the smaller optimized build for 64-bit ARM Android phones. Uses the configured Railway HTTPS API. Signals require fresh validated evidence and continuous 10-minute same-side/same-strike confirmation. No broker order-placement API is included in the APK. Validate on-device and paper-trade before relying on signals."
+          NOTES="Universal signal-only Android APK for broad ABI compatibility; app-arm64-v8a-release.apk is the smaller optimized build for 64-bit ARM Android phones. Keeps the existing Railway AI/chat backend separate from the AI-TRADING Angel One signals API. Signals require fresh exchange-timestamped evidence and continuous 10-minute same-side/same-strike confirmation. No broker order-placement API is included in the APK. Configure Angel One credentials in the app over HTTPS; validate on-device and paper-trade before relying on signals."
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$APK" "$ARM64_APK" --clobber
             gh release edit "$TAG" --title "AI-TRADING Signal APK" --notes "$NOTES"
