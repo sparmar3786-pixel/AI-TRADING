@@ -35,6 +35,7 @@ class FreshApi {
     '/api/v1/signals',
     '/api/signals',
     '/v1/backtest/historical',
+    '/v1/research/indicators',
   };
 
   Uri _uri(String path) {
@@ -281,6 +282,22 @@ class FreshApi {
         },
         timeout: const Duration(seconds: 40),
       );
+
+  /// Deterministic indicators for caller-supplied OHLCV candles. The backend
+  /// explicitly marks these as unverified input, not authenticated live data.
+  Future<Map<String, dynamic>> researchIndicators(
+    List<List<dynamic>> candles, {
+    int emaFast = 8,
+    int emaSlow = 21,
+    int rsiPeriod = 14,
+    int atrPeriod = 14,
+  }) => postJson('/v1/research/indicators', {
+        'candles': candles,
+        'ema_fast': emaFast,
+        'ema_slow': emaSlow,
+        'rsi_period': rsiPeriod,
+        'atr_period': atrPeriod,
+      });
 
   /// Historical candle fetches are bounded server-side to 45 seconds.
   Future<Map<String, dynamic>> historicalBacktest(
