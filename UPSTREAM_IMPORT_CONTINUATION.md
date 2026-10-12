@@ -151,3 +151,10 @@ Verified current branch tree count: **277 vendored files across selected upstrea
 The full curated PyAlgoTrade snapshot was transferred from the earlier continuation branch onto a fresh branch based on current main, so these additions can be reviewed independently without carrying unrelated divergent branch history. Includes the source package's 89 Python modules plus selected examples, docs, README and license. Optional dependencies, external feeds, historical sample datasets, and tests have not been integrated or executed.
 
 Verified target branch tree count: **815 vendored files total**, including **122 PyAlgoTrade files**. The full manifest of all 500 user-mentioned repository URLs is still not present in one verifiable list, so this is not a claim that all 500 repositories are fully copied.
+
+
+## Additional NSE library and Kite Connect snapshots — 2026-10-12
+
+Transferred the existing selected upstream snapshots for RuchiTanmay/nselib (NSE data utilities; Apache-2.0) and zerodha/pykiteconnect (Kite Connect Python client; MIT) onto this main-based continuation branch, including their source files, setup metadata, tests/examples and license files. These are isolated vendor copies; they are not wired to credentials or the active execution engine. Live API compatibility and tests have not been run.
+
+Verified current branch tree count: **882 vendored files total**. Current vendor directory counts: FinGPT=56, FinLLM-Leaderboard=2, FinRobot=18, IMPORT_PROGRESS.md=1, LLM_trader=83, PyAlgoTrade=122, Qlib=25, Sebacaraballo-Trading-Bot=66, TradingAgents=210, awesome-ai-in-finance=10, awesome-systematic-trading=16, backtesting.py=46, financial-agent=15, hftbacktest=30, intelligent-trading-bot=64, llm-tradebot=14, nselib=32, pykiteconnect=35, qlib=19, qtpylib=18. This is still a curated import set, not proof that every file from every one of the 500 claimed repositories has been copied. The full URL manifest is needed to audit the rest accurately.
