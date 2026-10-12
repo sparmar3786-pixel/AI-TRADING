@@ -90,7 +90,7 @@ jobs:
         run: |
           TAG="ai-trading-signal-latest"
           APK="flutter_app/build/app/outputs/flutter-apk/app-release.apk"
-          NOTES="ARM64-only signal APK for modern Android devices. Uses the configured Railway HTTPS API. Live BUY/SELL requires fresh validated data and a 10-minute stable side/strike. No broker order-placement API is included in the APK. Validate on-device and paper-trade before relying on signals."
+          NOTES="Universal signal-only Android APK for broad ABI compatibility. Uses the configured Railway HTTPS API. Live BUY/SELL requires fresh validated data and a 10-minute stable side/strike. No broker order-placement API is included in the APK. Validate on-device and paper-trade before relying on signals."
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$APK" --clobber
             gh release edit "$TAG" --title "AI-TRADING Signal APK" --notes "$NOTES"
