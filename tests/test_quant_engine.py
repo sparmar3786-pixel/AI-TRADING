@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from quant_engine import evaluate_five_layer_signal
+from quant_engine import evaluate_five_layer_signal, evaluate_futures_signal
 
 
 class FiveLayerEngineTests(unittest.TestCase):
@@ -96,6 +96,45 @@ class FiveLayerEngineTests(unittest.TestCase):
         conflicted = evaluate_five_layer_signal(self.snapshot, now=self.now)
         self.assertFalse(conflicted["layers"]["trend_sentiment"]["pass"])
         self.assertEqual(conflicted["decision"], "WAIT")
+
+    def test_commodity_futures_signal_requires_ten_minute_confirmation(self):
+        snapshot = {
+            "observed_at": self.now.isoformat(),
+            "underlying_ltp": 100.0,
+            "sentiment_score": 0.55,
+            "timeframe_closes": {
+                "5m": [90, 92, 94, 97, 100],
+                "15m": [88, 90, 93, 96, 100],
+                "1h": [85, 89, 92, 96, 100],
+            },
+            "indicators": {
+                "ema_fast_8": 101.0, "ema_slow_21": 99.0,
+                "rsi_14": 60.0, "macd_histogram": 1.5,
+                "underlying_atr_14": 2.0, "vwap": 95.0,
+            },
+            "order_flow": {
+                "bid": 99.9, "ask": 100.1, "ltp": 100.0,
+                "buy_volume": 600, "sell_volume": 400,
+            },
+            "contract": {
+                "symbol": "GOLD26OCTFUT",
+                "expiry": (self.now.date() + timedelta(days=10)).isoformat(),
+                "volume": 12000, "oi": 200000, "lot_size": 10,
+            },
+        }
+        result = evaluate_futures_signal(snapshot, now=self.now)
+        self.assertEqual(result["decision"], "WAIT")
+        self.assertEqual(result["candidate_decision"], "BUY FUTURE")
+        self.assertEqual(result["signal_stability"]["state"], "CONFIRMING")
+        state = result["confirmation_state"]
+        for elapsed in range(30, 631, 30):
+            next_now = self.now + timedelta(seconds=elapsed)
+            next_snapshot = dict(snapshot, observed_at=next_now.isoformat())
+            result = evaluate_futures_signal(next_snapshot, now=next_now, confirmation_state=state)
+            state = result["confirmation_state"]
+        self.assertEqual(result["decision"], "BUY FUTURE")
+        self.assertEqual(result["signal_stability"]["state"], "CONFIRMED")
+        self.assertFalse(result["order_placement_enabled"])
 
     def test_wide_option_spread_blocks_contract_selection(self):
         self.snapshot["option_chain"][0]["bid"] = 90
