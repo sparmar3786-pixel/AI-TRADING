@@ -1970,7 +1970,6 @@ class _AiAccessState extends State<AiAccessPage> {
     int passed = 0;
     for (final path in candidates) {
       if (!mounted) break;
-      final name = path.split('/').last;
       setState(() { activeModelPath = path; modelTestStatus[path] = 'testing'; modelTestDetail[path] = 'Checking RAM, load and inference…'; });
       llama.LlamaController? controller;
       try {
