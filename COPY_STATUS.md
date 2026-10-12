@@ -71,3 +71,12 @@ Do not commit API keys, passwords, MPINs, TOTP seeds, JWTs, feed tokens or other
 - Verified running total for the continuation branch: **11 distinct upstream projects represented by 71 vendored files**, including licenses, READMEs, dependency manifests and reference docs. These are selected file snapshots, not 11 complete repository trees and not 500 copied repositories.
 - The AI Hedge Fund source says it is educational-only and does not execute real trades. No credentials were copied.
 - Existing-engine integration, tests, lint/security checks and Railway deployment remain unverified/not done.
+
+## Added India-market data and broker references — 2026-10-12
+
+- `vendor/nselib/`: 32 source/metadata/test files from Apache-2.0 `RuchiTanmay/nselib`.
+- `vendor/pykiteconnect/`: 35 text/source/example/test/CI files from MIT `zerodha/pykiteconnect`. This is **not Angel One** and has not been enabled.
+- `vendor/QuantConnect-Lean/`: 4 Apache-2.0 C# reference files.
+- `vendor/financial-agent/`: 7 MIT source/document/test files.
+- Current import count: **15 distinct upstream projects, 149 vendored files** in the continuation branch, not 500 copied repositories.
+- The source snapshots have not been installed, tested as a combined application, wired into the execution engine, or deployed to Railway. API freshness and broker compatibility remain unverified.
