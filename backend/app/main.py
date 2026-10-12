@@ -787,7 +787,9 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
     result.update({
         "index": index, "data_source": "angelone_smartapi",
         "data_fresh": result.get("layers", {}).get("data_quality", {}).get("pass") is True,
-        "sentiment_source": "session price structure and order-book depth; news sentiment not configured",
+        "sentiment_source": "intraday OHLC + multi-timeframe trend + option OI PCR + top-five bid/ask depth" + (" + last-24h Exa/Tavily headlines" if news_score is not None else ""),
+        "technical_sentiment_score": technical_sentiment,
+        "news_sentiment": news_sentiment,
         "day_move_pct": round(day_move * 100, 3),
         "indicator_summary": {"timeframes": timeframe_closes, "five_minute_trend": trend, **indicators},
         "option_chain_count": len(normalized_options),
