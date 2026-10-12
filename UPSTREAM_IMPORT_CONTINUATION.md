@@ -88,3 +88,10 @@ Other submitted links that lacked a verifiable redistribution license, or used a
 - `QuantConnect/Lean` — Apache-2.0. 4 selected files under `vendor/QuantConnect-Lean/` (license, order, order-request, security-holding C# reference files); the larger .NET engine is not copied as a whole.
 - `schen9999/financial-agent` — MIT. 7 files under `vendor/financial-agent/` (license, README, MCP/API entrypoints, grounding check, requirements and an MCP test).
 - Latest total in this branch: **15 distinct upstream projects represented by 149 vendored files** including license, README, build/dependency metadata, examples/tests/reference code. These are not 149 repositories or 15 complete repository clones. The two near-complete text/source snapshots are `nselib` and `pykiteconnect`; other projects are selected subsets.
+
+
+## Additional licensed snapshot — PyAlgoTrade — 2026-10-12
+
+- `gbeced/pyalgotrade` — Apache-2.0. Five files copied under `vendor/PyAlgoTrade/`: `LICENSE`, `README.md`, `pyalgotrade/strategy/__init__.py`, `pyalgotrade/strategy/position.py`, and `pyalgotrade/broker/backtesting.py`.
+- This is a selected source snapshot, not the full upstream repository. The Python modules depend on other PyAlgoTrade modules and the project’s older dependency stack; they are not imported into the active engine and have not been tested in this repository.
+- Updated branch total: **16 distinct upstream projects represented by 154 vendored files**. This count is based on the existing recorded 149 files plus these five new files. It is not a count of complete repository clones, and it does not mean the 500 URLs have been fully copied.
