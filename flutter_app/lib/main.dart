@@ -1575,6 +1575,7 @@ class SignalPage extends StatelessWidget {
     final validation = Map<String, dynamic>.from(s['live_validation'] as Map? ?? const {});
     final validationBlocks = (validation['blocks'] as List?) ?? const <dynamic>[];
     final timeframeAnalysis = Map<String, dynamic>.from(s['timeframe_analysis'] as Map? ?? const {});
+    final indicatorSummary = Map<String, dynamic>.from(s['indicator_summary'] as Map? ?? const {});
     final researchPack = Map<String, dynamic>.from(timeframeAnalysis['research_pack'] as Map? ?? const {});
     final researchChecks = Map<String, dynamic>.from(researchPack['checks'] as Map? ?? const {});
     final aiDecision = Map<String, dynamic>.from(ai[index] as Map? ?? const {});
@@ -1631,6 +1632,23 @@ class SignalPage extends StatelessWidget {
           InfoRow('Execution liquidity', ((researchChecks['execution_liquidity'] as Map?)?['state'] ?? 'UNKNOWN').toString()),
           const SizedBox(height: 4),
           Text((researchPack['safety_note'] ?? 'Research diagnostics are unavailable until the backend returns this payload.').toString(), style: const TextStyle(fontSize: 11)),
+        ]),
+      )),
+      const Section('Technical Indicators & Session Sentiment'),
+      Card(child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          InfoRow('EMA 8 / EMA 21', '${_val(indicatorSummary['ema_fast_8'])} / ${_val(indicatorSummary['ema_slow_21'])}'),
+          InfoRow('EMA alignment', (indicatorSummary['ema_alignment'] ?? 'UNKNOWN').toString()),
+          InfoRow('RSI 14', _val(indicatorSummary['rsi_14'])),
+          InfoRow('MACD histogram', _val(indicatorSummary['macd_histogram'])),
+          InfoRow('Underlying ATR 14', _val(indicatorSummary['underlying_atr_14'])),
+          InfoRow('Session VWAP', _val(indicatorSummary['vwap'])),
+          InfoRow('Session move', marketRow['day_move_pct'] == null ? '—' : '${marketRow['day_move_pct']}%'),
+          InfoRow('Option PCR (near ATM)', _val(marketRow['pcr'])),
+          InfoRow('Order-book imbalance', _val(marketRow['depth_imbalance'])),
+          InfoRow('Session sentiment score', _val(marketRow['sentiment_score'])),
+          Text((marketRow['sentiment_source'] ?? 'Session sentiment unavailable until fresh quotes arrive.').toString(), style: const TextStyle(fontSize: 11, color: Colors.white70)),
         ]),
       )),
       const Section('Multi-Agent AI Review'),
