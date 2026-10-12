@@ -50,3 +50,11 @@ Do not commit API keys, passwords, MPINs, TOTP seeds, JWTs, feed tokens or other
 - The three repeated submissions of the fsaavedra0003 URL are recorded once.
 - README checks returned 404 for the exact supplied URLs `wangzhe3224/awesome-systematic-trading`, `nkaz001/hftbacktest`, and `ranaroussi/qtpylib`; these are blocked pending corrected URLs/default branches.
 - Tests have not been executed in this connector pass. The PR/CI must confirm syntax and test status before merge.
+
+## Continuation update — 2026-10-12 (follow-up pass)
+
+- Added selected snapshots under separate `vendor/<project>/` namespaces from `asavinov/intelligent-trading-bot` (MIT), `Sebacaraballo/Trading-Bot` (MIT), `FalconTrading06/llm-tradebot` (MIT), `karimcodes/systematic-trading` (MIT), `Jaydot33/automated-trading-system` (MIT), and `tripolskypetr/backtest-kit` (MIT).
+- Together with the earlier `qrak/LLM_trader` snapshot, this branch represents **7 distinct upstream projects across 55 vendored files**, including licenses, READMEs and dependency manifests. See `UPSTREAM_IMPORT_CONTINUATION.md` for exact file lists and limitations.
+- These are **partial snapshots**, not seven complete repository trees; no third-party source has been connected to the live engine. Python and TypeScript modules are kept separate. Some files intentionally retain missing upstream sibling dependencies.
+- Not run/verified: unit tests, third-party dependency install, security scan, type check, paper trading, Railway deploy, Angel One integration, and live order execution.
+- The original claim of 500 supplied repositories has not been independently verified from an accessible full URL list. This status does not claim 500 repositories have been copied.
