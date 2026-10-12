@@ -109,6 +109,7 @@ class AngelOneStream:
             self._client.on_close = self._on_close
             self._started_at = time.monotonic()
             self._closed_at = None
+            self._open = False
             self._error = None
             self._thread = threading.Thread(target=self._connect, name="angelone-smartwebsocketv2", daemon=True)
             self._thread.start()
