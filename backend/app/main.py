@@ -576,6 +576,7 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
         max_confirmation_gap_seconds=60,
     )
     _confirmation_states[index] = result.get("confirmation_state") or {}
+    chain_payload = _market_chain_rows(normalized_options)
     result.update({
         "index": index, "data_source": "angelone_smartapi",
         "data_fresh": result.get("layers", {}).get("data_quality", {}).get("pass") is True,
@@ -615,16 +616,17 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
         "verdict": "PASS" if result.get("decision") in ("CALL BUY", "PUT BUY") else "WARN",
         "market_direction": result.get("layers", {}).get("trend_sentiment", {}).get("trend", "UNKNOWN"),
         "market_age_seconds": result.get("layers", {}).get("data_quality", {}).get("age_seconds"),
-        "option_age_seconds": next((item.get("age_seconds") for item in _market_chain_rows(normalized_options) if item.get("strike") == result.get("strike")), None),
+        "option_age_seconds": next((item.get("age_seconds") for item in chain_payload if item.get("strike") == result.get("strike")), None),
         "ai_decision": "NOT_CONFIGURED",
         "blocks": list(result.get("reasons") or []),
     }
     market = {
         "ltp": spot, "age_seconds": result.get("layers", {}).get("data_quality", {}).get("age_seconds"),
         "feed_mode": "REST_FULL_DEPTH", "source": "angelone_smartapi",
-        "source_timestamp": spot_ts, "timestamp": spot_ts, "day_move_pct": round(day_move * 100, 3),
+        "source_timestamp": spot_ts, "timestamp": spot_ts,
+        "live": result.get("data_fresh") is True, "day_move_pct": round(day_move * 100, 3),
         "sentiment_score": sentiment, "sentiment_label": "BULLISH" if sentiment >= 0.2 else "BEARISH" if sentiment <= -0.2 else "NEUTRAL",
-        "option_chain": _market_chain_rows(normalized_options),
+        "option_chain": chain_payload,
     }
     return result, market
 
@@ -733,9 +735,27 @@ def angel_connect(body: ConnectRequest, _: str = Depends(_device)) -> dict[str, 
 @app.get("/v1/system/diagnostics")
 def diagnostics(_: str = Depends(_device)) -> dict[str, Any]:
     adapter = _current_adapter()
+    angel = adapter.status() if adapter else {"authenticated": False, "has_jwt_token": False, "has_feed_token": False}
+    fresh_count = sum(1 for row in (_signal_cache or {}).get("market", {}).values() if row.get("live") is True)
     return {
         "service": "ai-trading-readonly-api",
-        "angel": adapter.status() if adapter else {"authenticated": False, "has_jwt_token": False, "has_feed_token": False},
+        "angel": angel,
+        "angel_one": {
+            "authenticated": angel.get("authenticated", False), "stream_open": False,
+            "last_tick_age_seconds": None,
+            "last_error": None if angel.get("authenticated") else "Angel One session is not authenticated",
+            "stream_error": "WebSocket streaming is not enabled; REST FULL-depth polling is used",
+        },
+        "backend": {
+            "cycle_age_seconds": round(time.monotonic() - _signal_cache_at, 1) if _signal_cache else None,
+            "cycle_fresh": bool(_signal_cache and time.monotonic() - _signal_cache_at < SIGNAL_CACHE_SECONDS),
+        },
+        "instrument_master": {"row_count": len(_master_rows), "cached": bool(_master_rows)},
+        "market_data": {
+            "snapshot_count": len((_signal_cache or {}).get("market", {})),
+            "fresh_snapshot_count": fresh_count, "live_snapshot_count": fresh_count,
+        },
+        "ai": {"configured": False, "model": "deterministic-five-layer", "error_indexes": []},
         "credentials_encryption_configured": bool(os.getenv("CREDENTIALS_ENCRYPTION_KEY")),
         "persistent_credential_file_configured": _credential_path().parent.exists(),
         "instrument_master_cached": bool(_master_rows),
@@ -891,8 +911,8 @@ def _get_signals(force: bool = False) -> dict[str, Any]:
         live = any(value.get("data_fresh") is True for value in signals.values())
         result = {
             "live": live, "last_fetch": _utc_now().isoformat(),
-            "feed": {"authenticated": True, "connected": live, "mode": "REST_FULL_DEPTH", "message": "Fresh exchange-timestamped market data" if live else "Connected but no index passed freshness/data gates"},
-            "store": {"source": "angelone_smartapi", "fresh": live, "index_count": len(signals)},
+            "feed": {"authenticated": True, "connected": live, "mode": "REST_FULL_DEPTH", "stream_started": False, "stream_open": False, "tick_count": 0, "unique_tokens_seen": 0, "last_tick_age_seconds": None, "last_error": None if live else "No index passed source freshness/data gates", "message": "Fresh exchange-timestamped market data" if live else "Connected but no index passed freshness/data gates"},
+            "store": {"source": "angelone_smartapi", "fresh": live, "index_count": len(signals), "update_count": len(signals), "last_update_age_seconds": 0 if live else None, "unique_tokens": sum(1 for row in market.values() if row.get("ltp") is not None)},
             "ai": {"status": "not_configured", "message": "Deterministic quant gates are authoritative; news/LLM validation is not configured on this service."},
             "market": market, "signals": signals, "trade_plans": confirmed,
             "qualified_trade_count": len(confirmed), "commodities": commodities,
