@@ -64,6 +64,25 @@ class BackendApiTests(unittest.TestCase):
         self.assertNotIn("angel_totp", loaded)
         self.assertEqual(loaded["angel_client_code"], "example-client")
 
+    def test_backtest_accepts_flutter_form_payload(self):
+        request = api.BacktestRequest(
+            index="NIFTY",
+            from_date="2026-10-01",
+            to_date="2026-10-05",
+            interval="FIVE_MINUTE",
+            fast_ema=8,
+            slow_ema=13,
+            atr_period=14,
+            stop_atr=1.5,
+            target_r=2.0,
+            max_hold_bars=30,
+            slippage_r=0.02,
+            transaction_cost_r=0.02,
+        )
+        self.assertEqual(request.index, "NIFTY")
+        self.assertEqual(request.fast_ema, 8)
+        self.assertEqual(request.from_date, "2026-10-01")
+
     def test_book_parser_does_not_invent_quotes_or_depth(self):
         self.assertEqual(api._book({}), (None, None, 0, 0))
         bid, ask, buy, sell = api._book({
