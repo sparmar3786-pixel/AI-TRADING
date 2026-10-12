@@ -13,6 +13,32 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
+  test('Angel One signal routes use the dedicated service', () async {
+    Uri? requestedUri;
+    final client = MockClient((request) async {
+      requestedUri = request.url;
+      return http.Response(jsonEncode({'authenticated': false}), 200);
+    });
+    addTearDown(client.close);
+    final api = FreshApi('https://legacy.example.test', client, 'https://signals.example.test');
+    await api.angelStatus();
+    expect(requestedUri!.origin, 'https://signals.example.test');
+    expect(requestedUri!.path, '/v1/angel/status');
+  });
+
+  test('Cloud AI remains on the legacy backend', () async {
+    Uri? requestedUri;
+    final client = MockClient((request) async {
+      requestedUri = request.url;
+      return http.Response(jsonEncode({'answer': 'test response'}), 200);
+    });
+    addTearDown(client.close);
+    final api = FreshApi('https://legacy.example.test', client, 'https://signals.example.test');
+    await api.aiChat(index: 'NIFTY', question: 'test');
+    expect(requestedUri!.origin, 'https://legacy.example.test');
+    expect(requestedUri!.path, '/v1/ai/chat');
+  });
+
   test('signals keeps query parameters separate from the path', () async {
     Uri? requestedUri;
     final client = MockClient((request) async {
@@ -25,7 +51,7 @@ void main() {
     });
     addTearDown(client.close);
 
-    final api = FreshApi('https://example.test', client);
+    final api = FreshApi('https://example.test', client, 'https://example.test');
     await api.signals(emaFast: 8, emaSlow: 13);
 
     expect(requestedUri, isNotNull);
