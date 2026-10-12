@@ -1790,7 +1790,9 @@ class _ApiPageState extends State<ApiPage> {
       if(!mounted)return;
       setState(()=>savedStatus=result);
       if(result['stored_session']==true) {
-        setState(()=>message='Saved Angel session found. The app will restore it automatically; enter TOTP only if the session has expired.');
+        setState(()=>message='Active Angel One session found. A fresh TOTP is needed only if the broker session expires.');
+      } else if(result['stored_credentials']==true) {
+        setState(()=>message='Encrypted credentials found. Enter the current six-digit TOTP to reconnect after a backend restart.');
       }
     } catch (_) {}
   }
@@ -1836,9 +1838,9 @@ class _ApiPageState extends State<ApiPage> {
       title: const Text('Live signal service'),
       subtitle: SelectableText(widget.signalBackendUrl),
     ),
-    if(savedStatus['stored_session']==true) Card(child:ListTile(
-      leading:const Icon(Icons.verified_user,color:Colors.greenAccent),
-      title:const Text('Remembered Angel credentials'),
+    if(savedStatus['stored_session']==true || savedStatus['stored_credentials']==true) Card(child:ListTile(
+      leading:Icon(savedStatus['stored_session']==true?Icons.verified_user:Icons.lock_outline,color:savedStatus['stored_session']==true?Colors.greenAccent:Colors.orangeAccent),
+      title:Text(savedStatus['stored_session']==true?'Active Angel One session':'Encrypted Angel credentials saved'),
       subtitle:Text('Client ID: ${savedStatus['client_code']??'saved'} • API Key: ${savedStatus['stored_api_key']==true?'saved':''} • MPIN: ${savedStatus['stored_pin']==true?'saved':''}'),
       trailing:const Icon(Icons.lock),
     )),
@@ -1850,11 +1852,11 @@ class _ApiPageState extends State<ApiPage> {
       contentPadding:EdgeInsets.zero,
       value:rememberCredentials,
       onChanged:working?null:(v)=>setState(()=>rememberCredentials=v??true),
-      title:const Text('Remember API Key, Client ID, MPIN and access tokens'),
-      subtitle:const Text('Stored encrypted on backend. TOTP is never stored. Turn off to forget saved credentials after this login.'),
+      title:const Text('Remember API Key, Client ID and MPIN (encrypted)'),
+      subtitle:const Text('TOTP and generated JWT/feed tokens are not persisted. Turn off to delete previously saved credentials. A fresh TOTP may be required after backend restart.'),
       controlAffinity:ListTileControlAffinity.leading,
     ),
-    FilledButton.icon(onPressed:working?null:connect,icon:const Icon(Icons.link),label:Text(working?'CONNECTING…':(savedStatus['stored_session']==true?'RESTORE / CONNECT':'CONNECT ANGEL ONE'))),
+    FilledButton.icon(onPressed:working?null:connect,icon:const Icon(Icons.link),label:Text(working?'CONNECTING…':(savedStatus['stored_session']==true?'RESTORE / CONNECT':(savedStatus['stored_credentials']==true?'RECONNECT WITH TOTP':'CONNECT ANGEL ONE')))),
     const SizedBox(height:10),Text(message),
     const Section('Live Feed Diagnostics'),
     InfoRow('Angel authenticated',widget.feed['authenticated']==true?'YES':'NO'),
