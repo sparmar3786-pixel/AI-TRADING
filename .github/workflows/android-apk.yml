@@ -36,6 +36,11 @@ jobs:
           if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
             sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n    <application#' "$MANIFEST"
           fi
+          sed -i 's/android:label="ai_trading_signal"/android:label="AI Trading Signals"/' "$MANIFEST"
+          GRADLE=android/app/build.gradle.kts
+          if [ -f "$GRADLE" ]; then
+            sed -i 's/com.example.ai_trading_signal/com.sparmar3786.aitradingsignals/g' "$GRADLE"
+          fi
           grep -n 'uses-permission' "$MANIFEST"
       - name: Install dependencies
         run: flutter pub get
@@ -64,6 +69,7 @@ jobs:
           fi
           AAPT=$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort | tail -1)
           "$AAPT" dump permissions "$APK" | grep -q 'android.permission.INTERNET'
+          "$AAPT" dump badging "$APK" | grep -F "application-label:'AI Trading Signals'" >/dev/null
           ls -lh "$APK"
       - name: Publish rolling APK release (avoids Actions artifact quota)
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
