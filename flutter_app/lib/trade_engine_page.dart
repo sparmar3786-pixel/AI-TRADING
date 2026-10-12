@@ -67,6 +67,13 @@ class _TradeEnginePageState extends State<TradeEnginePage> {
     final a = _map(ai[selectedIndex]);
     final validation = _map(s['live_validation']);
     final checks = _map(validation['checks']);
+    final quant = _map(s['quant_engine'] ?? s['five_layer_engine']);
+    final quantLayers = _map(quant['layers']);
+    final orderFlow = _map(quantLayers['order_flow'] ?? s['order_flow']);
+    final trendLayer = _map(quantLayers['trend_sentiment'] ?? s['trend_sentiment']);
+    final optionLayer = _map(quantLayers['option_selection'] ?? s['option_validation']);
+    final riskLayer = _map(quantLayers['risk_levels'] ?? s['risk_validation']);
+    final stability = _map(s['signal_stability'] ?? quantLayers['confirmation']);
     final blocks = (validation['blocks'] as List?) ?? const <dynamic>[];
     final plan = _map(s['trade_plan']);
     final decision = (s['decision'] ?? 'NO DATA').toString();
@@ -195,7 +202,68 @@ class _TradeEnginePageState extends State<TradeEnginePage> {
           ),
         ),
         const SizedBox(height: 8),
-        _layerHeader('03', 'TRADE MONITOR', 'Broker order status & lifecycle • Layer 3', mode, Colors.lightBlueAccent),
+        _layerHeader('03', 'TREND & SENTIMENT', 'Multi-timeframe trend + session sentiment • Layer 3', (trendLayer['pass'] == true) ? 'PASS' : 'DATA REQUIRED', (trendLayer['pass'] == true) ? Colors.greenAccent : Colors.orangeAccent),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _row('Trend', (trendLayer['trend'] ?? m['trend'] ?? 'NOT PROVIDED BY BACKEND').toString()),
+                _row('Session sentiment', (trendLayer['sentiment_direction'] ?? m['sentiment_direction'] ?? 'NOT PROVIDED').toString()),
+                _row('Sentiment score', _value(trendLayer['sentiment_score'] ?? m['sentiment_score'])),
+                _row('Timeframe agreement', trendLayer['timeframes'] is Map ? (trendLayer['timeframes'] as Map).entries.map((e) => '${e.key}: ${e.value}').join(' • ') : 'Multi-timeframe evidence unavailable'),
+                const Text('Trend/sentiment must come from fresh market/news evidence; missing data is not treated as neutral confirmation.', style: TextStyle(fontSize: 11, color: Colors.white70)),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        _layerHeader('04', 'OPTION CHAIN & ORDER FLOW', 'Strike liquidity, bid/ask spread, OI and flow • Layer 4', (optionLayer['pass'] == true && orderFlow['pass'] == true) ? 'PASS' : 'DATA REQUIRED', (optionLayer['pass'] == true && orderFlow['pass'] == true) ? Colors.greenAccent : Colors.orangeAccent),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _metricGrid([
+                  ('Selected strike', _value(optionLayer['strike'] ?? s['strike'])),
+                  ('Expiry', (optionLayer['expiry'] ?? s['expiry'] ?? '—').toString()),
+                  ('Option spread %', _value(optionLayer['spread_pct'] ?? s['option_spread_pct'])),
+                  ('Flow direction', (orderFlow['direction'] ?? s['order_flow_direction'] ?? 'NOT PROVIDED').toString()),
+                  ('Flow imbalance', _value(orderFlow['imbalance'] ?? s['order_flow_imbalance'])),
+                  ('OI context', (s['oi_context'] ?? 'NOT PROVIDED').toString()),
+                ]),
+                const SizedBox(height: 8),
+                const Text('Do not infer bid/ask pressure or OI from a chart image. This layer passes only when the backend supplies valid, fresh contract and flow fields.', style: TextStyle(fontSize: 11, color: Colors.white70)),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        _layerHeader('05', 'RISK & 10-MINUTE STABILITY', 'Entry, stop, target and continuous confirmation • Layer 5', (riskLayer['pass'] == true && stability['state'] == 'CONFIRMED') ? 'CONFIRMED' : 'WAIT / CONFIRMING', (riskLayer['pass'] == true && stability['state'] == 'CONFIRMED') ? Colors.greenAccent : Colors.orangeAccent),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _metricGrid([
+                  ('Entry reference', _value(riskLayer['entry_reference'] ?? s['entry'])),
+                  ('Stop loss', _value(riskLayer['stop_loss'] ?? s['stop_loss'])),
+                  ('Target', _value(riskLayer['target'] ?? s['target'])),
+                  ('RR method', (riskLayer['method'] ?? validation['risk_method'] ?? 'NOT PROVIDED').toString()),
+                  ('Stability', (stability['state'] ?? 'NOT VERIFIED').toString()),
+                  ('Seconds remaining', _value(stability['remaining_seconds'])),
+                ]),
+                const SizedBox(height: 8),
+                const Text('The app remains WAIT until fresh evidence, valid risk levels and an uninterrupted 10-minute same-side/same-strike confirmation are all verified. This is not a guarantee of profit or minimum holding duration.', style: TextStyle(fontSize: 11, color: Colors.white70)),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        _layerHeader('MONITOR', 'READ-ONLY BROKER MONITOR', 'Order book visibility only; this APK does not place orders', mode, Colors.lightBlueAccent),
         Card(
           child: Padding(
             padding: const EdgeInsets.all(14),
