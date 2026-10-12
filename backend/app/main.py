@@ -498,7 +498,7 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
     if not strike_values:
         raise RuntimeError("Option master has no valid strikes for the selected expiry")
     atm_index = min(range(len(strike_values)), key=lambda i: abs(strike_values[i] - spot))
-    wanted_strikes = set(strike_values[max(0, atm_index - 3): min(len(strike_values), atm_index + 4)])
+    wanted_strikes = set(strike_values[max(0, atm_index - 8): min(len(strike_values), atm_index + 9)])
     candidates = [
         row for row in expiry_rows
         if (strike := _strike_value(row.get("strike"), spot)) in wanted_strikes
