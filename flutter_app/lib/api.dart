@@ -32,6 +32,8 @@ class FreshApi {
     '/v1/option-chain',
     '/v1/market/sentiment',
     '/v1/signals',
+    '/api/v1/signals',
+    '/api/signals',
     '/v1/backtest/historical',
   };
 
