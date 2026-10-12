@@ -55,6 +55,7 @@ class AngelOneReadOnly:
         self._jwt_token: str | None = None
         self._feed_token: str | None = None
         self._client_code: str | None = None
+        self._api_key: str | None = None
         # Credentials supplied by the HTTPS connect endpoint are kept only in
         # this process's memory. Otherwise use Railway environment variables.
         self._credentials = {str(k): str(v) for k, v in (credentials or {}).items() if v}
@@ -92,6 +93,18 @@ class AngelOneReadOnly:
     @property
     def client_code(self) -> str | None:
         return self._client_code
+
+    def websocket_credentials(self) -> dict[str, str]:
+        """Return broker tokens to the internal stream manager only; never serialize this."""
+        with self._lock:
+            if not self.authenticated or not all((self._api_key, self._client_code, self._jwt_token, self._feed_token)):
+                raise AngelOneConfigError("Angel One JWT/feed token pair is not ready for WebSocket streaming")
+            return {
+                "api_key": str(self._api_key),
+                "client_code": str(self._client_code),
+                "jwt_token": str(self._jwt_token),
+                "feed_token": str(self._feed_token),
+            }
 
     def status(self) -> dict[str, Any]:
         with self._lock:
@@ -183,6 +196,7 @@ class AngelOneReadOnly:
                     except Exception:
                         pass
             self._client = client
+            self._api_key = api_key
             self._refresh_token = str(refresh_token)
             self._jwt_token = str(jwt_token) if jwt_token else None
             self._feed_token = str(feed_token) if feed_token else None
