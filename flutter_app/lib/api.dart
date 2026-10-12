@@ -36,20 +36,29 @@ class FreshApi {
   };
 
   Uri _uri(String path) {
-    final suffix = path.startsWith('/') ? path : '/$path';
+    final suffix = path.startsWith('/') ? path : '/' + path;
     final suffixUri = Uri.parse(suffix);
     final routeBase = _signalRoutes.contains(suffixUri.path) ? signalBackendUrl : baseUrl;
-    final normalized = routeBase.trim().replaceAll(RegExp('/+
+    var normalized = routeBase.trim();
+    while (normalized.endsWith('/')) {
+      normalized = normalized.substring(0, normalized.length - 1);
+    }
+    final parsed = Uri.tryParse(normalized);
     if (parsed == null || parsed.scheme != 'https' || parsed.host.isEmpty ||
         parsed.userInfo.isNotEmpty || parsed.hasQuery || parsed.hasFragment ||
         parsed.host == 'localhost' || parsed.host == '127.0.0.1' || parsed.host == '10.0.2.2') {
       throw Exception('Backend must be configured with a valid public HTTPS URL.');
     }
-    final basePath = parsed.path.replaceAll(RegExp('/+
-      path: '$basePath${suffixUri.path}',
+    var basePath = parsed.path;
+    while (basePath.endsWith('/')) {
+      basePath = basePath.substring(0, basePath.length - 1);
+    }
+    return parsed.replace(
+      path: basePath + suffixUri.path,
       query: suffixUri.hasQuery ? suffixUri.query : null,
     );
   }
+
   Future<String> _deviceId() async {
     // Keep the same device scope used by older APKs so server-side Angel One
     // sessions remain linked across upgrades. Prefer the existing prefs value;
