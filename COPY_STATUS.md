@@ -58,3 +58,9 @@ Do not commit API keys, passwords, MPINs, TOTP seeds, JWTs, feed tokens or other
 - These are **partial snapshots**, not seven complete repository trees; no third-party source has been connected to the live engine. Python and TypeScript modules are kept separate. Some files intentionally retain missing upstream sibling dependencies.
 - Not run/verified: unit tests, third-party dependency install, security scan, type check, paper trading, Railway deploy, Angel One integration, and live order execution.
 - The original claim of 500 supplied repositories has not been independently verified from an accessible full URL list. This status does not claim 500 repositories have been copied.
+
+## Latest import count — 2026-10-12
+
+- Added the MIT-licensed `Open-Finance-Lab/FinLLM-Leaderboard` demo/reference files and CC0-licensed `georgezouq/awesome-ai-in-finance` catalog.
+- Current count for this continuation branch: **9 distinct upstream projects, 61 vendored files** (licenses, metadata, code and reference docs combined). Only selected files were copied; do not describe this as 9 complete repository trees or as copying 500 repositories.
+- CI status must be verified from GitHub Actions. No connected CI runs were returned on the prior status check; imports remain isolated and untested as a combined package.
