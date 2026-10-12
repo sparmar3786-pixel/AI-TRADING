@@ -447,17 +447,10 @@ def _ema_series(values: list[float], period: int) -> list[float]:
 def _indicator_snapshot(closes: list[float], candle_rows: list[Any], today_rows: list[Any]) -> dict[str, Any]:
     if len(closes) < 30:
         return {}
-    fast_line = _ema_series(closes, 8)
-    slow_line = _ema_series(closes, 21)
-    gains: list[float] = []
-    losses: list[float] = []
-    for previous, current in zip(closes[-15:-1], closes[-14:]):
-        change = current - previous
-        gains.append(max(change, 0.0))
-        losses.append(max(-change, 0.0))
-    avg_gain = sum(gains) / len(gains) if gains else 0.0
-    avg_loss = sum(losses) / len(losses) if losses else 0.0
-    rsi = 100.0 if avg_loss == 0 and avg_gain > 0 else 50.0 if avg_loss == 0 else 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
+    fast_line = technical_ema(closes, 8)
+    slow_line = technical_ema(closes, 21)
+    rsi_values = technical_rsi(closes, 14)
+    rsi = float(rsi_values[-1]) if rsi_values and rsi_values[-1] is not None else 50.0
     ema12, ema26 = _ema_series(closes, 12), _ema_series(closes, 26)
     macd_line = [fast - slow for fast, slow in zip(ema12, ema26)]
     macd_signal = _ema_series(macd_line, 9)
@@ -472,15 +465,30 @@ def _indicator_snapshot(closes: list[float], candle_rows: list[Any], today_rows:
             continue
         vwap_numerator += ((high + low + close) / 3.0) * volume
         vwap_denominator += volume
+    valid_indicator_rows = [
+        row for row in candle_rows
+        if isinstance(row, (list, tuple)) and len(row) >= 5
+        and _number(row[2]) is not None and _number(row[3]) is not None and _number(row[4]) is not None
+    ]
+    indicator_highs = [float(row[2]) for row in valid_indicator_rows]
+    indicator_lows = [float(row[3]) for row in valid_indicator_rows]
+    indicator_closes = [float(row[4]) for row in valid_indicator_rows]
+    atr_values = technical_atr(indicator_highs, indicator_lows, indicator_closes, 14) if len(indicator_closes) >= 14 else []
+    sma20_values = technical_sma(closes, 20)
+    sma50_values = technical_sma(closes, 50)
+    reversion_values = rsi_reversion(closes, 14)
     return {
         "ema_fast_8": fast_line[-1],
         "ema_slow_21": slow_line[-1],
         "ema_alignment": "BULLISH" if fast_line[-1] > slow_line[-1] else "BEARISH" if fast_line[-1] < slow_line[-1] else "NEUTRAL",
         "rsi_14": round(rsi, 2),
+        "sma_20": sma20_values[-1] if sma20_values else None,
+        "sma_50": sma50_values[-1] if sma50_values else None,
+        "rsi_reversion_signal": reversion_values[-1] if reversion_values else "WAIT",
         "macd_line": round(macd_line[-1], 4) if macd_line else None,
         "macd_signal": round(macd_signal[-1], 4) if macd_signal else None,
         "macd_histogram": round(macd_histogram, 4) if macd_histogram is not None else None,
-        "underlying_atr_14": _atr_from_candles(candle_rows, 14),
+        "underlying_atr_14": atr_values[-1] if atr_values and atr_values[-1] is not None else None,
         "vwap": vwap_numerator / vwap_denominator if vwap_denominator > 0 else None,
         "vwap_source": "session OHLCV" if vwap_denominator > 0 else "UNAVAILABLE_NO_VOLUME",
     }
