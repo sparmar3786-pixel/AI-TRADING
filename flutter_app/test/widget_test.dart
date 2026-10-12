@@ -217,9 +217,15 @@ void main() {
       of: find.byType(ListView).last,
       matching: find.byType(Scrollable),
     );
-    final riskLayer = find.text('RISK & VALIDATION');
+    final riskLayer = find.text('RISK & 10-MINUTE STABILITY');
     await tester.scrollUntilVisible(riskLayer, 250, scrollable: engineScrollable);
     expect(riskLayer, findsOneWidget);
+    final trendLayer = find.text('TREND & SENTIMENT');
+    await tester.scrollUntilVisible(trendLayer, 250, scrollable: engineScrollable);
+    expect(trendLayer, findsOneWidget);
+    final optionLayer = find.text('OPTION CHAIN & ORDER FLOW');
+    await tester.scrollUntilVisible(optionLayer, 250, scrollable: engineScrollable);
+    expect(optionLayer, findsOneWidget);
     final monitorLayer = find.text('READ-ONLY BROKER MONITOR');
     await tester.scrollUntilVisible(monitorLayer, 250, scrollable: engineScrollable);
     expect(monitorLayer, findsOneWidget);
