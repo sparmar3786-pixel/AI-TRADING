@@ -71,11 +71,22 @@ class ConnectRequest(BaseModel):
 
 
 class BacktestRequest(BaseModel):
-    exchange: str = "NSE"
-    symboltoken: str = Field(min_length=1, max_length=32)
+    index: str = "NIFTY"
+    exchange: str | None = None
+    symboltoken: str | None = Field(default=None, min_length=1, max_length=32)
     interval: str = "FIVE_MINUTE"
-    fromdate: str
-    todate: str
+    from_date: str | None = None
+    to_date: str | None = None
+    fromdate: str | None = None
+    todate: str | None = None
+    fast_ema: int = Field(default=8, ge=2, le=100)
+    slow_ema: int = Field(default=13, ge=3, le=200)
+    atr_period: int = Field(default=14, ge=2, le=100)
+    stop_atr: float = Field(default=1.5, gt=0, le=10)
+    target_r: float = Field(default=2.0, gt=0, le=20)
+    max_hold_bars: int = Field(default=30, ge=1, le=500)
+    slippage_r: float = Field(default=0.02, ge=0, le=1)
+    transaction_cost_r: float = Field(default=0.02, ge=0, le=1)
     initial_capital: float = Field(default=100000.0, gt=0, le=1000000000)
 
 
@@ -1177,42 +1188,174 @@ def signals(ema_fast: int = Query(default=8, ge=2, le=50), ema_slow: int = Query
 @app.post("/v1/backtest/historical")
 def historical_backtest(body: BacktestRequest, _: str = Depends(_device)) -> dict[str, Any]:
     adapter = _require_adapter()
+    index = body.index.strip().upper()
+    if body.symboltoken:
+        exchange = (body.exchange or "NSE").strip().upper()
+        token = body.symboltoken.strip()
+    else:
+        config = INDEXES.get(index)
+        if config is None:
+            raise HTTPException(status_code=400, detail=f"Unsupported index: {index}")
+        exchange = (body.exchange or config["exchange"]).strip().upper()
+        token = config["token"]
+
+    start_value = body.from_date or body.fromdate
+    end_value = body.to_date or body.todate
+    if not start_value or not end_value:
+        raise HTTPException(status_code=422, detail="from_date and to_date are required.")
+    def bound(value: str, end: bool) -> str:
+        text = value.strip()
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+            return f"{text} {'15:30' if end else '09:15'}"
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            if parsed.tzinfo is not None:
+                parsed = parsed.astimezone(IST)
+            return parsed.strftime("%Y-%m-%d %H:%M")
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Dates must use YYYY-MM-DD or YYYY-MM-DD HH:MM.")
+    start_text, end_text = bound(start_value, False), bound(end_value, True)
+    start_dt = datetime.strptime(start_text, "%Y-%m-%d %H:%M").replace(tzinfo=IST)
+    end_dt = datetime.strptime(end_text, "%Y-%m-%d %H:%M").replace(tzinfo=IST)
+    if end_dt <= start_dt or end_dt - start_dt > timedelta(days=31):
+        raise HTTPException(status_code=422, detail="Choose a valid historical range of 31 days or less.")
+    if body.fast_ema >= body.slow_ema:
+        raise HTTPException(status_code=422, detail="fast_ema must be less than slow_ema.")
+    if body.interval not in {"ONE_MINUTE", "FIVE_MINUTE", "FIFTEEN_MINUTE", "ONE_HOUR"}:
+        raise HTTPException(status_code=422, detail="Unsupported candle interval.")
+
     try:
-        candles = adapter.candles(body.exchange, body.symboltoken, body.interval, body.fromdate, body.todate).get("candles") or []
+        candles = adapter.candles(exchange, token, body.interval, start_text, end_text).get("candles") or []
     except Exception as exc:
         raise HTTPException(status_code=502, detail="Angel One historical candle request failed; no synthetic backtest data was used.") from exc
-    closes = _candle_closes(candles)
-    if len(closes) < 30:
-        raise HTTPException(status_code=422, detail="At least 30 valid historical closes are required for backtesting.")
-    fast, slow = 8, 21
-    def ema(values: list[float], period: int) -> list[float]:
-        alpha = 2 / (period + 1)
-        output = [values[0]]
-        for value in values[1:]:
-            output.append(alpha * value + (1 - alpha) * output[-1])
-        return output
-    fast_line, slow_line = ema(closes, fast), ema(closes, slow)
-    position = 0
-    trades = []
+    valid_rows = [
+        row for row in candles
+        if isinstance(row, (list, tuple)) and len(row) >= 6
+        and _number(row[1]) is not None and _number(row[2]) is not None
+        and _number(row[3]) is not None and _number(row[4]) is not None
+    ]
+    valid_rows.sort(key=lambda row: str(row[0]))
+    closes = [_number(row[4]) for row in valid_rows]
+    closes = [value for value in closes if value is not None]
+    required = max(body.slow_ema + 2, body.atr_period + 2)
+    if len(valid_rows) < required or len(closes) != len(valid_rows):
+        raise HTTPException(status_code=422, detail=f"At least {required} valid historical candles are required for these EMA/ATR settings.")
+
+    fast_line = _ema_series(closes, body.fast_ema)
+    slow_line = _ema_series(closes, body.slow_ema)
+    true_ranges: list[float] = []
+    previous_close: float | None = None
+    for row in valid_rows:
+        high, low, close = float(row[2]), float(row[3]), float(row[4])
+        tr = max(high - low, abs(high - previous_close), abs(low - previous_close)) if previous_close is not None else high - low
+        true_ranges.append(tr)
+        previous_close = close
+    atr_values: list[float | None] = []
+    for i in range(len(true_ranges)):
+        atr_values.append(sum(true_ranges[i - body.atr_period + 1:i + 1]) / body.atr_period if i + 1 >= body.atr_period else None)
+
+    trades: list[dict[str, Any]] = []
+    position: dict[str, Any] | None = None
     equity = body.initial_capital
-    for i in range(1, len(closes) - 1):
-        desired = 1 if fast_line[i] > slow_line[i] else 0
-        if desired != position:
-            # Execute on the next bar close, never on the same bar as the signal.
-            fill = closes[i + 1]
-            if position:
-                pnl = (fill - entry_price) / entry_price * equity
-                equity += pnl
-                trades.append({"side": "EXIT_LONG", "bar": i + 1, "price": fill, "pnl": round(pnl, 2)})
-            elif desired:
-                entry_price = fill
-                trades.append({"side": "ENTER_LONG", "bar": i + 1, "price": fill, "pnl": 0.0})
-            position = desired
-    return {
-        "status": "ok", "source": "angelone_smartapi_historical_candles",
-        "exchange": body.exchange, "symboltoken": body.symboltoken, "interval": body.interval,
-        "bars": len(closes), "initial_capital": body.initial_capital, "ending_equity": round(equity, 2),
-        "return_pct": round((equity / body.initial_capital - 1) * 100, 3),
-        "trades": trades, "trade_count": len(trades),
-        "limitations": ["Long-only EMA 8/21 research baseline", "next-bar-close fills", "excludes option premium, taxes, spread, brokerage, margin and slippage", "not a profit guarantee"],
+    equity_curve_r = 0.0
+    peak_r = 0.0
+    max_drawdown_r = 0.0
+
+    def close_position(exit_index: int, exit_price: float, reason: str) -> None:
+        nonlocal position, equity, equity_curve_r, peak_r, max_drawdown_r
+        if position is None:
+            return
+        risk_distance = float(position["risk_distance"])
+        gross_r = (exit_price - float(position["entry_price"])) / risk_distance
+        net_r = gross_r - body.slippage_r - body.transaction_cost_r
+        risk_cash = equity * 0.01
+        pnl = net_r * risk_cash
+        equity += pnl
+        equity_curve_r += net_r
+        peak_r = max(peak_r, equity_curve_r)
+        max_drawdown_r = max(max_drawdown_r, peak_r - equity_curve_r)
+        trades.append({
+            "side": "LONG",
+            "entry_time": str(valid_rows[position["entry_index"]][0]),
+            "exit_time": str(valid_rows[exit_index][0]),
+            "entry_price": round(float(position["entry_price"]), 4),
+            "exit_price": round(float(exit_price), 4),
+            "stop_loss": round(float(position["stop_loss"]), 4),
+            "target": round(float(position["target"]), 4),
+            "gross_r": round(gross_r, 4), "net_r": round(net_r, 4),
+            "r": round(net_r, 4), "pnl": round(pnl, 2),
+            "bars_held": max(1, exit_index - position["entry_index"] + 1),
+            "exit_reason": reason,
+        })
+        position = None
+
+    start_index = max(body.slow_ema, body.atr_period)
+    for i in range(start_index, len(valid_rows) - 1):
+        row = valid_rows[i]
+        open_price, high, low, close = float(row[1]), float(row[2]), float(row[3]), float(row[4])
+        if position is not None and i >= position["entry_index"]:
+            # Conservative same-bar handling: if stop and target are both touched,
+            # assume the stop was hit first because candle sequencing is unknown.
+            stop_hit = low <= float(position["stop_loss"])
+            target_hit = high >= float(position["target"])
+            if stop_hit:
+                close_position(i, float(position["stop_loss"]), "STOP_LOSS" if not target_hit else "STOP_FIRST_BOTH_TOUCHED")
+                continue
+            if target_hit:
+                close_position(i, float(position["target"]), "TARGET")
+                continue
+            if i - position["entry_index"] + 1 >= body.max_hold_bars:
+                close_position(i + 1, float(valid_rows[i + 1][1]), "MAX_HOLD")
+                continue
+            crossed_down = fast_line[i] < slow_line[i] and fast_line[i - 1] >= slow_line[i - 1]
+            if crossed_down:
+                close_position(i + 1, float(valid_rows[i + 1][1]), "EMA_CROSS_EXIT")
+                continue
+        if position is None:
+            crossed_up = fast_line[i] > slow_line[i] and fast_line[i - 1] <= slow_line[i - 1]
+            atr = atr_values[i]
+            if crossed_up and atr is not None and atr > 0:
+                entry_index = i + 1
+                entry_price = float(valid_rows[entry_index][1])
+                risk_distance = atr * body.stop_atr
+                position = {
+                    "entry_index": entry_index, "entry_price": entry_price,
+                    "risk_distance": risk_distance,
+                    "stop_loss": entry_price - risk_distance,
+                    "target": entry_price + risk_distance * body.target_r,
+                }
+    if position is not None:
+        last_index = len(valid_rows) - 1
+        close_position(last_index, float(valid_rows[last_index][4]), "END_OF_DATA")
+
+    net_rs = [float(trade["net_r"]) for trade in trades]
+    wins = [value for value in net_rs if value > 0]
+    losses = [value for value in net_rs if value < 0]
+    metrics = {
+        "n": len(trades),
+        "win_rate": len(wins) / len(trades) if trades else None,
+        "expectancy_r": round(sum(net_rs) / len(net_rs), 4) if trades else None,
+        "net_total_r": round(sum(net_rs), 4),
+        "profit_factor": round(sum(wins) / abs(sum(losses)), 4) if losses else (None if not wins else None),
+        "max_drawdown_r": round(max_drawdown_r, 4),
+        "ending_equity": round(equity, 2),
+        "return_pct": round((equity / body.initial_capital - 1.0) * 100.0, 3),
     }
+    report = {
+        "status": "OK" if trades else "NO_TRADES",
+        "mode": "ANGELONE_HISTORICAL_EMA_ATR",
+        "candle_count": len(valid_rows),
+        "first_candle": str(valid_rows[0][0]),
+        "last_candle": str(valid_rows[-1][0]),
+        "metrics": metrics,
+        "trades": trades,
+        "assumptions": [
+            f"EMA {body.fast_ema}/{body.slow_ema} crossover; ATR({body.atr_period}) stop = {body.stop_atr}x ATR; target = {body.target_r}R",
+            "Signal is evaluated on a candle close and fills on the next candle open; intrabar stop/target collisions assume stop first.",
+            f"Position sizing risks 1% of current equity per trade; costs subtract {body.slippage_r}R slippage and {body.transaction_cost_r}R transaction cost per round trip.",
+            "Long-only underlying-index research baseline; not an options premium backtest and not a profit guarantee.",
+            "Excludes taxes, brokerage-specific charges, latency, margin, partial fills and real order-book execution.",
+        ],
+    }
+    return {"status": "ok", "source": "angelone_smartapi_historical_candles", "index": index, "exchange": exchange, "symboltoken": token, "interval": body.interval, "report": report}
+
