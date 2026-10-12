@@ -32,6 +32,9 @@ from integrations.angelone_stream import AngelOneStream, EXCHANGE_TYPES
 from integrations.news_sentiment import fetch_market_news_sentiment
 from quant_engine import evaluate_five_layer_signal, evaluate_futures_signal
 
+from strategies.technical import atr as technical_atr, ema as technical_ema, rsi as technical_rsi, rsi_reversion, sma as technical_sma
+from risk.position_sizing import position_size
+
 app = FastAPI(title="AI-TRADING Read-only Signals API", version="1.0.0")
 IST = ZoneInfo("Asia/Kolkata")
 MASTER_URL = "https://margincalculator.angelone.in/OpenAPI_File/files/OpenAPIScripMaster.json"
