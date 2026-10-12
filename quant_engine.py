@@ -88,7 +88,7 @@ def evaluate_five_layer_signal(
     trend_states = {str(tf): _closes_direction(closes) for tf, closes in raw_tfs.items()}
     directional = [state for state in trend_states.values() if state in ("BULLISH", "BEARISH")]
     trend = (
-        "UNKNOWN" if not directional else
+        "UNKNOWN" if len(directional) < 2 else
         "CONFLICT" if len(set(directional)) > 1 else directional[0]
     )
     sentiment = _number(snapshot.get("sentiment_score"))
