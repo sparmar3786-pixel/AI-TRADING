@@ -181,6 +181,13 @@ def _load_credentials() -> dict[str, str]:
         # Do not log ciphertext, plaintext or exception payloads.
         return {}
 
+def _forget_credentials() -> None:
+    path = _credential_path()
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="Could not remove saved encrypted credentials from the persistent volume.") from exc
+
 
 def _credentials_from_env() -> dict[str, str]:
     mapping = {
@@ -692,7 +699,9 @@ def angel_connect(body: ConnectRequest, _: str = Depends(_device)) -> dict[str, 
     }
     with _lock:
         if _adapter and _adapter.authenticated and not any(supplied.values()):
-            return {**_adapter.status(), "session_restored": True, "stored_session": True, "login_message": "Existing in-memory session is authenticated"}
+            if not body.remember_credentials:
+                _forget_credentials()
+            return {**_adapter.status(), "session_restored": True, "stored_session": True, "stored_credentials": _credential_path().is_file(), "login_message": "Existing in-memory session is authenticated"}
         saved = _load_credentials()
         env = _credentials_from_env()
         base = {**saved, **env}
@@ -724,6 +733,8 @@ def angel_connect(body: ConnectRequest, _: str = Depends(_device)) -> dict[str, 
             raise HTTPException(status_code=502, detail="Profile login succeeded but JWT/feed token readiness was not verified. Check SmartAPI SDK version/session response.")
         if body.remember_credentials:
             _save_credentials(supplied)
+        else:
+            _forget_credentials()
         _adapter = adapter
         _signal_cache = None
         _signal_cache_at = 0.0
