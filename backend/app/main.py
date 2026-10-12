@@ -29,6 +29,7 @@ if str(ROOT) not in sys.path:
 
 from integrations.angelone_readonly import AngelOneConfigError, AngelOneReadOnly
 from integrations.angelone_stream import AngelOneStream, EXCHANGE_TYPES
+from integrations.news_sentiment import fetch_market_news_sentiment
 from quant_engine import evaluate_five_layer_signal
 
 app = FastAPI(title="AI-TRADING Read-only Signals API", version="1.0.0")
@@ -961,12 +962,24 @@ def market_sentiment(index: str = Query(default="NIFTY"), _: str = Depends(_devi
         raise HTTPException(status_code=400, detail=f"Unsupported index. Choose from {', '.join(INDEXES)}.")
     signal = payload["signals"].get(key, {})
     market = payload["market"].get(key, {})
+    news = fetch_market_news_sentiment(
+        key, exa_api_key=os.getenv("EXA_API_KEY"), tavily_api_key=os.getenv("TAVILY_API_KEY")
+    )
     return {
         "index": key, "sentiment": market.get("sentiment_label", "UNKNOWN"),
         "score": market.get("sentiment_score"), "day_move_pct": market.get("day_move_pct"),
         "trend": (signal.get("indicator_summary") or {}).get("five_minute_trend", "UNKNOWN"),
         "source": "session price structure and order-book depth",
-        "news_sentiment": "NOT_CONFIGURED", "observed_at": payload.get("last_fetch"),
+        "news_sentiment": news.get("label", "UNKNOWN"),
+        "news_score": news.get("score"),
+        "news_status": news.get("status"),
+        "news_article_count": news.get("article_count", 0),
+        "news_sources": news.get("sources", []),
+        "news_evidence": news.get("articles", []),
+        "news_window_hours": news.get("window_hours", 24),
+        "news_note": "Headline sentiment is contextual only and never overrides deterministic risk gates.",
+        "news_errors": news.get("errors", []),
+        "observed_at": payload.get("last_fetch"),
     }
 
 
