@@ -1,0 +1,1617 @@
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from '@/components/ui/alert-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/lib/auth';
+import { useToast } from '@/hooks/use-toast';
+import { formatDistanceToNow } from 'date-fns';
+import {
+  RefreshCw,
+  Loader2,
+  Eye,
+  Trash2,
+  XCircle,
+  CheckCircle,
+  Clock,
+  AlertCircle,
+  MoreVertical,
+  StopCircle,
+  TrendingUp,
+  TrendingDown,
+  Calendar as CalendarIcon,
+  ChevronLeft,
+  ChevronRight
+} from 'lucide-react';
+import RebalanceDetailModal from './RebalanceDetailModal';
+import {
+  type RebalanceStatus,
+  REBALANCE_STATUS,
+  convertLegacyRebalanceStatus,
+  isRebalanceActive,
+  isRebalanceFinished,
+  getStatusDisplayText
+} from "@/lib/statusTypes";
+
+interface RebalanceAnalysis {
+  id: string;
+  ticker: string;
+  action: string;
+  confidence: number;
+  agent_insights: any;
+}
+
+interface RebalanceRequest {
+  id: string;
+  user_id?: string;
+  status: RebalanceStatus | string; // Support both new RebalanceStatus and legacy strings
+  created_at: string;
+  total_stocks: number;
+  stocks_analyzed: number;
+  plan_generated_at?: string | null;
+  rebalance_plan?: any;
+  error_message?: string;
+  constraints?: any;
+  target_allocations?: any;
+  portfolio_snapshot?: any;
+}
+
+export default function RebalanceHistoryTable() {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false); // Separate state for refresh button
+  const [runningRebalances, setRunningRebalances] = useState<RebalanceRequest[]>([]);
+  const [completedRebalances, setCompletedRebalances] = useState<RebalanceRequest[]>([]);
+  const [cancelledRebalances, setCancelledRebalances] = useState<RebalanceRequest[]>([]);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [selectedRebalanceId, setSelectedRebalanceId] = useState<string | null>(null);
+  const [detailModalOpen, setDetailModalOpen] = useState(false);
+  const [selectedDetailId, setSelectedDetailId] = useState<string | undefined>(undefined);
+  const [cancelling, setCancelling] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [analysisData, setAnalysisData] = useState<{ [key: string]: any[] }>({});
+  const [activeTab, setActiveTab] = useState<string>("all");
+
+  // Date filter states - default to today (using local date to avoid timezone issues)
+  const today = new Date();
+  const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const [selectedDate, setSelectedDate] = useState<string>(todayString);
+  const isTodaySelected = selectedDate === todayString;
+
+  // Track if initial data has been loaded
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
+
+  // Helper to format date display
+  const getDateDisplay = () => {
+    const today = new Date();
+    const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayString = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
+
+    if (selectedDate === todayString) return "Today";
+    if (selectedDate === yesterdayString) return "Yesterday";
+
+    // Parse the date parts to avoid timezone issues
+    const [year, month, day] = selectedDate.split('-').map(Number);
+    const date = new Date(year, month - 1, day);
+
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    });
+  };
+
+  useEffect(() => {
+    if (user) {
+      // Pass true for isInitialLoad only when we haven't loaded data yet
+      fetchRebalanceRequests(!initialLoadComplete);
+    }
+  }, [user, selectedDate]); // Reload when selectedDate changes
+
+  // Separate useEffect for real-time updates on running rebalances only
+  useEffect(() => {
+    if (!user || !initialLoadComplete || !isTodaySelected) return;
+
+    // Only subscribe if there are running rebalances
+    if (runningRebalances.length === 0) return;
+
+    // Set up real-time subscription for instant updates
+    const subscription = supabase
+      .channel('rebalance_updates')
+      .on('postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'rebalance_requests',
+          filter: `user_id=eq.${user.id}`
+        },
+        (payload) => {
+          // Only fetch if it's an update to a running rebalance
+          if (payload.new && runningRebalances.some(r => r.id === payload.new.id)) {
+            fetchRebalanceRequests(false); // Don't show loading on subscription updates
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [user, runningRebalances.length > 0, selectedDate, initialLoadComplete, isTodaySelected]); // Use boolean comparison
+
+  useEffect(() => {
+    if (!user || !isTodaySelected) return;
+
+    const intervalId = setInterval(() => {
+      fetchRebalanceRequests(false);
+    }, 10000);
+
+    return () => clearInterval(intervalId);
+  }, [user, selectedDate, activeTab, isTodaySelected]);
+
+  const handleManualRefresh = async () => {
+    setRefreshing(true);
+    await fetchRebalanceRequests(false);
+    setRefreshing(false);
+  };
+
+  const fetchAnalysisDataForRebalance = async (rebalanceId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('analysis_history')
+        .select('id,ticker,analysis_status,full_analysis,created_at')
+        .eq('rebalance_request_id', rebalanceId);
+
+      if (error) throw error;
+
+      return data || [];
+    } catch (error) {
+      console.error('Error fetching analysis data:', error);
+      return [];
+    }
+  };
+
+  const fetchRebalanceRequests = async (isInitialLoad = false, withSpinner: boolean = isInitialLoad) => {
+    if (!user) return;
+
+    // Only show loading state on initial load or when explicitly requested
+    if (withSpinner) {
+      setLoading(true);
+    }
+    
+    try {
+      // Build date range for the selected date using local date parsing
+      const [year, month, day] = selectedDate.split('-').map(Number);
+      const startOfDay = new Date(year, month - 1, day, 0, 0, 0, 0);
+      const endOfDay = new Date(year, month - 1, day, 23, 59, 59, 999);
+
+      // Query only rebalances from the selected date
+      const { data, error } = await supabase
+        .from('rebalance_requests')
+        .select('id,status,created_at,total_stocks,stocks_analyzed,plan_generated_at,error_message')
+        .eq('user_id', user.id)
+        .gte('created_at', startOfDay.toISOString())
+        .lte('created_at', endOfDay.toISOString())
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching rebalance requests:', error);
+        
+        // Handle 500 errors gracefully - don't throw, just return
+        if (error.message?.includes('500') || error.code === '500') {
+          console.log('Server error, skipping update');
+          return;
+        }
+
+        // Handle authentication errors
+        if (error.code === 'PGRST301' || error.message?.includes('JWT')) {
+          console.log('JWT error detected, will attempt refresh on next poll');
+          // Try to refresh the session
+          supabase.auth.refreshSession().catch(err => {
+            console.error('Failed to refresh session:', err);
+          });
+          return;
+        }
+        
+        throw error;
+      }
+
+      // Debug logging
+      console.log('Fetched rebalance requests:', data?.map(r => ({
+        id: r.id,
+        status: r.status,
+        error_message: r.error_message,
+        rebalance_plan: r.rebalance_plan ? 'exists' : 'null'
+      })));
+
+      // Separate running, completed, and cancelled rebalances
+      const running: RebalanceRequest[] = [];
+      const completed: RebalanceRequest[] = [];
+      const cancelled: RebalanceRequest[] = [];
+
+      for (const item of data || []) {
+        // Convert legacy status to new format
+        const status: RebalanceStatus = convertLegacyRebalanceStatus(item.status);
+
+        if (status === REBALANCE_STATUS.ERROR || status === REBALANCE_STATUS.CANCELLED) {
+          cancelled.push(item);
+        } else if (status === REBALANCE_STATUS.RUNNING) {
+          // Running status means still analyzing
+          running.push(item);
+        } else if (status === REBALANCE_STATUS.COMPLETED) {
+          completed.push(item);
+        }
+      }
+
+      setRunningRebalances(running);
+      setCompletedRebalances(completed);
+      setCancelledRebalances(cancelled);
+
+      // Fetch analysis data for running rebalances to calculate progress
+      if (running.length > 0) {
+        const analysisResults = await Promise.all(
+          running.map((rebalance) => fetchAnalysisDataForRebalance(rebalance.id))
+        );
+
+        const analysisDataMap: { [key: string]: any[] } = {};
+        running.forEach((rebalance, index) => {
+          analysisDataMap[rebalance.id] = analysisResults[index];
+        });
+        setAnalysisData(analysisDataMap);
+      } else {
+        setAnalysisData({});
+      }
+
+    } catch (error) {
+      console.error('Error fetching rebalance requests:', error);
+      if (!initialLoadComplete) { // Only show toast if not initial load
+        toast({
+          title: 'Error Loading History',
+          description: 'Failed to load rebalance history. Please try again.',
+          variant: 'destructive'
+        });
+      }
+    } finally {
+      if (withSpinner) {
+        setLoading(false);
+      }
+      setInitialLoadComplete(true);
+    }
+  };
+
+  const handleTabChange = (value: string) => {
+    setActiveTab(value);
+    if (isTodaySelected) {
+      fetchRebalanceRequests(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!selectedRebalanceId || !user) return;
+
+    setDeleting(true);
+    try {
+      const { error: tradingError } = await supabase
+        .from('trading_actions')
+        .delete()
+        .eq('rebalance_request_id', selectedRebalanceId)
+        .eq('user_id', user.id);
+
+      if (tradingError && tradingError.code !== '23503') {
+        throw tradingError;
+      }
+
+      // Delete related analyses first from analysis_history table
+      const { error: analysesError } = await supabase
+        .from('analysis_history')
+        .delete()
+        .eq('rebalance_request_id', selectedRebalanceId);
+
+      if (analysesError && analysesError.code !== '23503') {
+        console.warn('Error deleting related analyses:', analysesError);
+      }
+
+      // Then delete the rebalance request
+      const { error } = await supabase
+        .from('rebalance_requests')
+        .delete()
+        .eq('id', selectedRebalanceId);
+
+      if (error) throw error;
+
+      toast({
+        title: 'Success',
+        description: 'Rebalance record deleted successfully'
+      });
+
+      // Remove from state instead of refreshing everything
+      setRunningRebalances(prev => prev.filter(r => r.id !== selectedRebalanceId));
+      setCompletedRebalances(prev => prev.filter(r => r.id !== selectedRebalanceId));
+      setCancelledRebalances(prev => prev.filter(r => r.id !== selectedRebalanceId));
+    } catch (error) {
+      console.error('Error deleting rebalance:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to delete rebalance record',
+        variant: 'destructive'
+      });
+    } finally {
+      setDeleting(false);
+      setDeleteDialogOpen(false);
+      setSelectedRebalanceId(null);
+    }
+  };
+
+  const handleCancel = async () => {
+    if (!selectedRebalanceId || !user) return;
+
+    setCancelling(true);
+    try {
+      // Find the item to be cancelled
+      const itemToCancel = runningRebalances.find(r => r.id === selectedRebalanceId);
+      if (!itemToCancel) {
+        throw new Error('Rebalance not found in running list');
+      }
+
+      // First check if the rebalance exists and belongs to the user
+      const { data: checkData, error: checkError } = await supabase
+        .from('rebalance_requests')
+        .select('*')
+        .eq('id', selectedRebalanceId)
+        .eq('user_id', user.id)
+        .single();
+
+      if (checkError || !checkData) {
+        throw new Error('Rebalance request not found or already cancelled');
+      }
+
+      // Only cancel if it's in a cancellable state
+      if (isRebalanceFinished(convertLegacyRebalanceStatus(checkData.status))) {
+        toast({
+          title: 'Info',
+          description: `Rebalance is already ${checkData.status}`,
+          variant: 'default'
+        });
+        return;
+      }
+
+      // Use the RPC function to cancel the rebalance (bypasses RLS issues)
+      const { error: cancelError } = await supabase
+        .rpc('cancel_rebalance_request', {
+          p_request_id: selectedRebalanceId
+        });
+
+      if (cancelError) {
+        // Fallback to direct update if RPC function doesn't exist yet
+        const { error: updateError } = await supabase
+          .from('rebalance_requests')
+          .update({
+            status: REBALANCE_STATUS.CANCELLED,
+            error_message: 'Cancelled by user'
+          })
+          .eq('id', selectedRebalanceId)
+          .eq('user_id', user.id);
+
+        if (updateError) throw updateError;
+      }
+
+      // Gracefully move from running to cancelled list
+      setRunningRebalances(prev => prev.filter(r => r.id !== selectedRebalanceId));
+      
+      // Create the cancelled item with all data from the database
+      const cancelledItem: RebalanceRequest = {
+        ...checkData,
+        status: REBALANCE_STATUS.CANCELLED,
+        error_message: checkData.error_message || 'Cancelled by user'
+      };
+      
+      setCancelledRebalances(prev => [cancelledItem, ...prev]);
+
+      // Also cancel all related analyses if any
+      if (analysisData[selectedRebalanceId]) {
+        const analysesToCancel = analysisData[selectedRebalanceId];
+        // Update analysis statuses in the background
+        analysesToCancel.forEach(async (analysis: any) => {
+          await supabase
+            .from('analysis_history')
+            .update({ 
+              analysis_status: 'CANCELLED',
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', analysis.id)
+            .eq('rebalance_request_id', selectedRebalanceId);
+        });
+        
+        // Remove from analysis data
+        setAnalysisData(prev => {
+          const newData = { ...prev };
+          delete newData[selectedRebalanceId];
+          return newData;
+        });
+      }
+
+      toast({
+        title: 'Success',
+        description: 'Rebalance cancelled successfully'
+      });
+
+      // Close modal if viewing this rebalance
+      if (selectedDetailId === selectedRebalanceId) {
+        setDetailModalOpen(false);
+        setSelectedDetailId(undefined);
+      }
+    } catch (error: any) {
+      console.error('Error cancelling rebalance:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to cancel rebalance',
+        variant: 'destructive'
+      });
+    } finally {
+      setCancelling(false);
+      setCancelDialogOpen(false);
+      setSelectedRebalanceId(null);
+    }
+  };
+
+  const getStatusIcon = (status: string) => {
+    // Convert legacy status to new format for consistent icon display
+    const normalizedStatus = convertLegacyRebalanceStatus(status);
+
+    switch (normalizedStatus) {
+      case REBALANCE_STATUS.COMPLETED:
+        return <CheckCircle className="h-3 w-3" />;
+      case REBALANCE_STATUS.CANCELLED:
+        return <XCircle className="h-3 w-3" />;
+      case REBALANCE_STATUS.ERROR:
+        return <AlertCircle className="h-3 w-3" />;
+      case REBALANCE_STATUS.RUNNING:
+        return <Loader2 className="h-3 w-3 animate-spin" />;
+      case REBALANCE_STATUS.PENDING:
+        return <Clock className="h-3 w-3" />;
+      default:
+        return <Clock className="h-3 w-3" />;
+    }
+  };
+
+  const getStatusVariant = (status: string): "default" | "secondary" | "destructive" | "outline" | undefined => {
+    // Convert legacy status to new format for consistent variant display
+    const normalizedStatus = convertLegacyRebalanceStatus(status);
+
+    switch (normalizedStatus) {
+      case REBALANCE_STATUS.COMPLETED:
+        return undefined; // No variant, use className only
+      case REBALANCE_STATUS.CANCELLED:
+      case REBALANCE_STATUS.ERROR:
+        return 'destructive';
+      case REBALANCE_STATUS.RUNNING:
+        return 'default'; // Use default variant like UnifiedAnalysisHistory
+      case REBALANCE_STATUS.PENDING:
+        return 'secondary';
+      default:
+        return 'outline';
+    }
+  };
+
+  const getStatusClassName = (status: string): string => {
+    // Convert legacy status to new format for consistent variant display
+    const normalizedStatus = convertLegacyRebalanceStatus(status);
+
+    switch (normalizedStatus) {
+      case REBALANCE_STATUS.COMPLETED:
+        return 'border border-green-500/30 bg-green-500/10 text-green-600 font-semibold hover:bg-green-500/20';
+      case REBALANCE_STATUS.RUNNING:
+        return ''; // Let default variant handle the styling
+      default:
+        return '';
+    }
+  };
+
+  // Calculate completion percentage based on agent step completion
+  const calculateAgentStepCompletion = (rebalanceRequest: RebalanceRequest): number => {
+    const analyses = analysisData[rebalanceRequest.id] || [];
+    const normalizedStatus = convertLegacyRebalanceStatus(rebalanceRequest.status);
+    const hasRebalancePlan = !!(rebalanceRequest.rebalance_plan && Object.keys(rebalanceRequest.rebalance_plan).length > 0);
+    const portfolioManagerCompleted = Boolean(
+      rebalanceRequest.plan_generated_at ||
+      rebalanceRequest.rebalance_plan?.portfolioManagerCompletedAt ||
+      rebalanceRequest.rebalance_plan?.rebalance_agent_insight ||
+      hasRebalancePlan ||
+      normalizedStatus === REBALANCE_STATUS.COMPLETED
+    );
+
+    console.log('calculateAgentStepCompletion - rebalanceRequest:', {
+      id: rebalanceRequest.id,
+      status: rebalanceRequest.status,
+      hasRebalancePlan,
+      analysesCount: analyses.length,
+      planGeneratedAt: rebalanceRequest.plan_generated_at,
+      portfolioManagerCompleted
+    });
+
+    let totalAgentSteps = 0;
+    let completedAgentSteps = 0;
+
+    // For completed rebalances with workflow steps, use the workflow data
+    if (rebalanceRequest.rebalance_plan?.workflowSteps) {
+      const workflowSteps = rebalanceRequest.rebalance_plan.workflowSteps;
+      const analysisStep = workflowSteps.find((step: any) => step.id === 'analysis');
+
+      if (analysisStep?.stockAnalyses) {
+        const stockAnalyses = analysisStep.stockAnalyses;
+        const expectedWorkflowSteps = ['analysis', 'research', 'trading', 'risk'];
+
+        stockAnalyses.forEach((stockAnalysis: any) => {
+          const fullAnalysis = stockAnalysis.fullAnalysis || {};
+          const fullWorkflowSteps = fullAnalysis.workflowSteps || [];
+
+          expectedWorkflowSteps.forEach(stepId => {
+            totalAgentSteps++;
+            const step = fullWorkflowSteps.find((s: any) => s.id === stepId);
+
+            if (step?.agents?.length) {
+              const allAgentsCompleted = step.agents.every((agent: any) => agent.status === 'completed');
+              if (allAgentsCompleted) {
+                completedAgentSteps++;
+              }
+            } else if (stepId === 'analysis') {
+              const agents = stockAnalysis.agents || {};
+              const analysisAgents = ['marketAnalyst', 'newsAnalyst', 'socialMediaAnalyst', 'fundamentalsAnalyst'];
+              const allAnalysisCompleted = analysisAgents.every(agentKey => agents[agentKey] === 'completed');
+              if (allAnalysisCompleted) {
+                completedAgentSteps++;
+              }
+            }
+          });
+        });
+      }
+    } else if (analyses.length === 0) {
+      console.log('calculateAgentStepCompletion - No analyses found, using legacy fallback', {
+        total_stocks: rebalanceRequest.total_stocks,
+        stocks_analyzed: rebalanceRequest.stocks_analyzed
+      });
+
+      if (rebalanceRequest.total_stocks > 0) {
+        totalAgentSteps = rebalanceRequest.total_stocks;
+        completedAgentSteps = Math.min(rebalanceRequest.stocks_analyzed, rebalanceRequest.total_stocks);
+      }
+    } else {
+      // For running rebalances, use the analysis_history data
+      const expectedAgents = [
+        'macro-analyst', 'market-analyst', 'news-analyst', 'social-media-analyst', 'fundamentals-analyst',
+        'bull-researcher', 'bear-researcher', 'research-manager',
+        'risky-analyst', 'safe-analyst', 'neutral-analyst', 'risk-manager',
+        'trader'
+      ];
+
+      console.log('calculateAgentStepCompletion - Expected agents:', expectedAgents);
+
+      analyses.forEach((analysis: any) => {
+        console.log(`calculateAgentStepCompletion - Analysis ${analysis.ticker}:`, {
+          ticker: analysis.ticker,
+          status: analysis.status,
+          hasMessages: !!analysis.full_analysis?.messages,
+          messageCount: analysis.full_analysis?.messages?.length || 0
+        });
+
+        // Count expected agent steps for this stock
+        totalAgentSteps += expectedAgents.length;
+
+        // Count completed agents based on messages in full_analysis
+        const messages = analysis.full_analysis?.messages || [];
+        const completedAgents = new Set<string>();
+
+        console.log(`calculateAgentStepCompletion - Stock ${analysis.ticker} messages sample:`,
+          messages.slice(0, 5).map((msg: any) => ({
+            agent: msg.agent,
+            type: msg.type,
+            hasContent: !!msg.content,
+            timestamp: msg.timestamp
+          })));
+
+        messages.forEach((msg: any) => {
+          if (msg.agent && msg.timestamp) {
+            // Consider an agent completed if it has a timestamp (indicating it posted a message)
+            const normalizedAgent = msg.agent.toLowerCase().replace(/\s+/g, '-');
+            completedAgents.add(normalizedAgent);
+            console.log(`calculateAgentStepCompletion - Added agent: ${msg.agent} -> ${normalizedAgent}`);
+          }
+        });
+
+        console.log(`calculateAgentStepCompletion - Stock ${analysis.ticker} completed agents:`,
+          Array.from(completedAgents));
+
+        // Count how many expected agents have completed
+        expectedAgents.forEach(agentKey => {
+          if (completedAgents.has(agentKey)) {
+            completedAgentSteps++;
+            console.log(`calculateAgentStepCompletion - Matched agent: ${agentKey} for ${analysis.ticker}`);
+          }
+        });
+
+        console.log(`calculateAgentStepCompletion - Stock ${analysis.ticker} matching:`, {
+          expectedAgents,
+          completedAgents: Array.from(completedAgents),
+          matches: expectedAgents.filter(key => completedAgents.has(key))
+        });
+      });
+    }
+
+    const shouldIncludePortfolioManagerStep = (
+      totalAgentSteps > 0 ||
+      isRebalanceActive(normalizedStatus) ||
+      portfolioManagerCompleted
+    );
+
+    if (shouldIncludePortfolioManagerStep) {
+      totalAgentSteps += 1;
+      if (portfolioManagerCompleted) {
+        completedAgentSteps += 1;
+      }
+    }
+
+    const percentage = totalAgentSteps > 0 ? (completedAgentSteps / totalAgentSteps) * 100 : 0;
+    console.log('calculateAgentStepCompletion - Final result:', {
+      totalAgentSteps,
+      completedAgentSteps,
+      percentage,
+      includePortfolioManagerStep: shouldIncludePortfolioManagerStep
+    });
+
+    return Math.min(percentage, 100);
+  };
+
+  const viewRebalanceDetails = (rebalance: RebalanceRequest) => {
+    setSelectedDetailId(rebalance.id);
+    setDetailModalOpen(true);
+  };
+
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold">Rebalance History</h3>
+            <div className="flex items-center gap-2">
+              {/* Manual refresh button */}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0 hover:bg-[#fc0]/10 hover:text-[#fc0]"
+                title="Refresh"
+                disabled
+              >
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+
+              <div className="w-px h-6 bg-border" />
+
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled
+                  className="h-8 w-8 p-0 hover:bg-[#fc0]/10 hover:text-[#fc0]"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled
+                      className="justify-start text-left"
+                    >
+                      <CalendarIcon className="h-4 w-4 mr-2" />
+                      {getDateDisplay()}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={new Date(selectedDate)}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled
+                  className="h-8 w-8 p-0 hover:bg-[#fc0]/10 hover:text-[#fc0]"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <Tabs value={activeTab} className="space-y-4">
+            <TabsList className="grid w-full grid-cols-4">
+              <TabsTrigger value="all">All</TabsTrigger>
+              <TabsTrigger value="running">Active</TabsTrigger>
+              <TabsTrigger value="completed">Completed</TabsTrigger>
+              <TabsTrigger value="canceled">Canceled</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="all" className="space-y-4">
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin" />
+              </div>
+            </TabsContent>
+
+            <TabsContent value="running">
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin" />
+              </div>
+            </TabsContent>
+
+            <TabsContent value="completed">
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin" />
+              </div>
+            </TabsContent>
+
+            <TabsContent value="canceled">
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin" />
+              </div>
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const totalCount = runningRebalances.length + completedRebalances.length + cancelledRebalances.length;
+
+  return (
+    <>
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold">Rebalance History</h3>
+            <div className="flex items-center gap-2">
+              {/* Manual refresh button */}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleManualRefresh}
+                disabled={refreshing}
+                className="h-8 w-8 p-0 hover:bg-[#fc0]/10 hover:text-[#fc0]"
+                title="Refresh"
+              >
+                <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+              </Button>
+              
+              <div className="w-px h-6 bg-border" />
+              
+              <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  const [year, month, day] = selectedDate.split('-').map(Number);
+                  const prevDate = new Date(year, month - 1, day);
+                  prevDate.setDate(prevDate.getDate() - 1);
+                  const prevYear = prevDate.getFullYear();
+                  const prevMonth = String(prevDate.getMonth() + 1).padStart(2, '0');
+                  const prevDay = String(prevDate.getDate()).padStart(2, '0');
+                  setSelectedDate(`${prevYear}-${prevMonth}-${prevDay}`);
+                }}
+                className="h-8 w-8 p-0 hover:bg-[#fc0]/10 hover:text-[#fc0]"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="px-3 min-w-[140px] hover:border-[#fc0] hover:bg-[#fc0]/10 hover:text-[#fc0] transition-all duration-200"
+                  >
+                    <CalendarIcon className="h-4 w-4 mr-2" />
+                    {getDateDisplay()}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  className="w-auto p-0 bg-background border-border"
+                  align="center"
+                >
+                  <div className="space-y-2 p-3">
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1 text-xs hover:bg-[#fc0]/10 hover:border-[#fc0]/50 hover:text-[#fc0]"
+                        onClick={() => {
+                          const yesterday = new Date();
+                          yesterday.setDate(yesterday.getDate() - 1);
+                          const year = yesterday.getFullYear();
+                          const month = String(yesterday.getMonth() + 1).padStart(2, '0');
+                          const day = String(yesterday.getDate()).padStart(2, '0');
+                          setSelectedDate(`${year}-${month}-${day}`);
+                        }}
+                      >
+                        Yesterday
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1 text-xs hover:bg-[#fc0]/10 hover:border-[#fc0]/50 hover:text-[#fc0]"
+                        onClick={() => {
+                          const today = new Date();
+                          const year = today.getFullYear();
+                          const month = String(today.getMonth() + 1).padStart(2, '0');
+                          const day = String(today.getDate()).padStart(2, '0');
+                          setSelectedDate(`${year}-${month}-${day}`);
+                        }}
+                      >
+                        Today
+                      </Button>
+                    </div>
+                  </div>
+                  <Calendar
+                    mode="single"
+                    selected={(() => {
+                      // Parse the date string properly to avoid timezone issues
+                      const [year, month, day] = selectedDate.split('-').map(Number);
+                      return new Date(year, month - 1, day);
+                    })()}
+                    onSelect={(date) => {
+                      if (date) {
+                        // Format the date properly without timezone issues
+                        const year = date.getFullYear();
+                        const month = String(date.getMonth() + 1).padStart(2, '0');
+                        const day = String(date.getDate()).padStart(2, '0');
+                        setSelectedDate(`${year}-${month}-${day}`);
+                      }
+                    }}
+                    disabled={(date) => {
+                      const today = new Date();
+                      today.setHours(23, 59, 59, 999);
+                      return date > today;
+                    }}
+                    showOutsideDays={false}
+                    initialFocus
+                    className="rounded-b-lg"
+                  />
+                </PopoverContent>
+              </Popover>
+
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  const [year, month, day] = selectedDate.split('-').map(Number);
+                  const nextDate = new Date(year, month - 1, day);
+                  nextDate.setDate(nextDate.getDate() + 1);
+
+                  const today = new Date();
+                  const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+                  const nextYear = nextDate.getFullYear();
+                  const nextMonth = String(nextDate.getMonth() + 1).padStart(2, '0');
+                  const nextDay = String(nextDate.getDate()).padStart(2, '0');
+                  const next = `${nextYear}-${nextMonth}-${nextDay}`;
+
+                  if (next <= todayString) {
+                    setSelectedDate(next);
+                  }
+                }}
+                disabled={(() => {
+                  const today = new Date();
+                  const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+                  return selectedDate === todayString;
+                })()}
+                className="h-8 w-8 p-0 hover:bg-[#fc0]/10 hover:text-[#fc0] disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              </div>
+            </div>
+          </div>
+
+          <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4">
+            <TabsList className="grid w-full grid-cols-4">
+              <TabsTrigger value="all">
+                All <span className="hidden sm:inline">({totalCount})</span>
+              </TabsTrigger>
+              <TabsTrigger value="running">
+                Running <span className="hidden sm:inline">({runningRebalances.length})</span>
+              </TabsTrigger>
+              <TabsTrigger value="completed">
+                Completed <span className="hidden sm:inline">({completedRebalances.length})</span>
+              </TabsTrigger>
+              <TabsTrigger value="cancelled">
+                Cancelled <span className="hidden sm:inline">({cancelledRebalances.length})</span>
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="all" className="space-y-4">
+              {/* Running Rebalances Section */}
+              {runningRebalances.length > 0 && (
+                <div className="mb-6">
+                  <h3 className="text-sm font-medium text-muted-foreground mb-3">Currently Running</h3>
+                  <div className="space-y-2">
+                    {runningRebalances.map((item) => (
+                      <div
+                        key={item.id}
+                        className="border border-border rounded-lg p-4 space-y-3 cursor-pointer hover:bg-muted/50 transition-colors"
+                        onClick={() => viewRebalanceDetails(item)}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <span className="font-semibold">Portfolio Rebalance</span>
+                            <Badge variant={getStatusVariant(item.status)} className={getStatusClassName(item.status)}>
+                              <span className="flex items-center gap-1">
+                                {getStatusIcon(item.status)}
+                                {item.status.replace('_', ' ')}
+                              </span>
+                            </Badge>
+                          </div>
+                          <span className="text-xs text-muted-foreground">
+                            Started {formatDistanceToNow(new Date(item.created_at), { addSuffix: true })}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1">
+                            {isRebalanceActive(convertLegacyRebalanceStatus(item.status)) && (
+                              <div className="flex items-center gap-2">
+                                <div className="flex-1 h-2  bg-muted rounded-full overflow-hidden">
+                                  <div
+                                    className="h-full bg-yellow-500 animate-pulse transition-all"
+                                    style={{
+                                      width: `${calculateAgentStepCompletion(item)}%`
+                                    }}
+                                  />
+                                </div>
+                                <span className="text-xs text-yellow-600 dark:text-yellow-400">
+                                  {Math.round(calculateAgentStepCompletion(item))}%
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 ml-4">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="border border-slate-700"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                viewRebalanceDetails(item);
+                              }}
+                            >
+                              <Eye className="h-4 w-4 mr-1" />
+                              View Details
+                            </Button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0 border border-slate-700"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <MoreVertical className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedRebalanceId(item.id);
+                                    setCancelDialogOpen(true);
+                                  }}
+                                  className="text-red-600 dark:text-red-400 hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400 focus:bg-red-500/10 focus:text-red-600 dark:focus:text-red-400"
+                                  disabled={cancelling}
+                                >
+                                  <StopCircle className="h-4 w-4 mr-2" />
+                                  Cancel Rebalance
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedRebalanceId(item.id);
+                                    setDeleteDialogOpen(true);
+                                  }}
+                                  className="text-red-600 dark:text-red-400 hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400 focus:bg-red-500/10 focus:text-red-600 dark:focus:text-red-400"
+                                >
+                                  <Trash2 className="h-4 w-4 mr-2" />
+                                  Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Completed Rebalances Section */}
+              {completedRebalances.length > 0 && (
+                <div className="space-y-3">
+                  {runningRebalances.length > 0 && (
+                    <h3 className="text-sm font-medium text-muted-foreground mb-3">Completed Rebalances</h3>
+                  )}
+                  {completedRebalances.map((item) => (
+                    <div
+                      key={item.id}
+                      className="border border-border rounded-lg p-4 space-y-3 cursor-pointer hover:bg-muted/50 transition-colors"
+                      onClick={() => viewRebalanceDetails(item)}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <span className="font-semibold">Portfolio Rebalance</span>
+                          <Badge className="border border-green-500/30 bg-green-500/10 text-green-600 font-semibold hover:bg-green-500/20">
+                            <span className="flex items-center gap-1">
+                              <CheckCircle className="h-3 w-3" />
+                              Completed
+                            </span>
+                          </Badge>
+                          <span className="text-sm text-muted-foreground">
+                            {item.total_stocks} stocks analyzed
+                          </span>
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {formatDistanceToNow(new Date(item.created_at), { addSuffix: true })}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-muted-foreground">
+                          Completed on: {new Date(item.created_at).toLocaleDateString()}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="border border-slate-700"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              viewRebalanceDetails(item);
+                            }}
+                          >
+                            <Eye className="h-4 w-4 mr-1" />
+                            View Details
+                          </Button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 border border-slate-700"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedRebalanceId(item.id);
+                                  setDeleteDialogOpen(true);
+                                }}
+                                className="text-red-600 dark:text-red-400 hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400 focus:bg-red-500/10 focus:text-red-600 dark:focus:text-red-400"
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Cancelled Rebalances Section */}
+              {cancelledRebalances.length > 0 && (
+                <div className="space-y-3">
+                  <h3 className="text-sm font-medium text-muted-foreground mb-3">Cancelled/Failed</h3>
+                  {cancelledRebalances.map((item) => (
+                    <div
+                      key={item.id}
+                      className="border border-border rounded-lg p-4 space-y-3 cursor-pointer hover:bg-muted/50 transition-colors opacity-75"
+                      onClick={() => viewRebalanceDetails(item)}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <span className="font-semibold">Portfolio Rebalance</span>
+                          <Badge variant="destructive">
+                            <span className="flex items-center gap-1">
+                              {getStatusIcon(item.status)}
+                              {getStatusDisplayText(convertLegacyRebalanceStatus(item.status))}
+                            </span>
+                          </Badge>
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {formatDistanceToNow(new Date(item.created_at), { addSuffix: true })}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-muted-foreground">
+                          {convertLegacyRebalanceStatus(item.status) === REBALANCE_STATUS.ERROR
+                            ? (item.error_message || item.rebalance_plan?.error || item.rebalance_plan?.errorDetails || 'Rebalance failed')
+                            : (item.error_message || 'Rebalance was cancelled by user')}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="border border-slate-700"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              viewRebalanceDetails(item);
+                            }}
+                          >
+                            <Eye className="h-4 w-4 mr-1" />
+                            View Details
+                          </Button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 border border-slate-700"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedRebalanceId(item.id);
+                                  setDeleteDialogOpen(true);
+                                }}
+                                className="text-red-600 dark:text-red-400 hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400 focus:bg-red-500/10 focus:text-red-600 dark:focus:text-red-400"
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {!initialLoadComplete || loading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin mr-2" />
+                  <span className="text-muted-foreground">Loading rebalances...</span>
+                </div>
+              ) : (
+                totalCount === 0 && (
+                  <div className="flex items-center justify-center py-8">
+                    <img
+                      src="/goose_sit.png"
+                      alt="No data"
+                      className="w-32 h-32 mr-6"
+                    />
+                    <div className="text-left text-muted-foreground">
+                      <p>No rebalances on {getDateDisplay()}</p>
+                      <p className="text-sm mt-2">Select a different date to view more rebalances</p>
+                    </div>
+                  </div>
+                )
+              )}
+            </TabsContent>
+
+            <TabsContent value="running" className="space-y-4">
+              {!initialLoadComplete || loading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin mr-2" />
+                  <span className="text-muted-foreground">Loading rebalances...</span>
+                </div>
+              ) : runningRebalances.length === 0 ? (
+                <div className="flex items-center justify-center py-8">
+                  <img
+                    src="/goose_sit.png"
+                    alt="No data"
+                    className="w-32 h-32 mr-6"
+                  />
+                  <div className="text-left text-muted-foreground">
+                    <p>No running rebalances on {getDateDisplay()}</p>
+                    <p className="text-sm mt-2">Select a different date to view more rebalances</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {runningRebalances.map((item) => (
+                    <div
+                      key={item.id}
+                      className="border border-border rounded-lg p-4 space-y-3 cursor-pointer hover:bg-muted/50 transition-colors"
+                      onClick={() => viewRebalanceDetails(item)}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <span className="font-semibold">Portfolio Rebalance</span>
+                          <Badge variant={getStatusVariant(item.status)} className={getStatusClassName(item.status)}>
+                            <span className="flex items-center gap-1">
+                              {getStatusIcon(item.status)}
+                              {getStatusDisplayText(convertLegacyRebalanceStatus(item.status))}
+                            </span>
+                          </Badge>
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          Started {formatDistanceToNow(new Date(item.created_at), { addSuffix: true })}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          {isRebalanceActive(convertLegacyRebalanceStatus(item.status)) && (
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-blue-500 transition-all "
+                                  style={{
+                                    width: `${calculateAgentStepCompletion(item)}%`
+                                  }}
+                                />
+                              </div>
+                              <span className="text-xs text-muted-foreground">
+                                {Math.round(calculateAgentStepCompletion(item))}%
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 ml-4">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="border border-slate-700"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              viewRebalanceDetails(item);
+                            }}
+                          >
+                            <Eye className="h-4 w-4 mr-1" />
+                            View Details
+                          </Button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 border border-slate-700"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedRebalanceId(item.id);
+                                  setCancelDialogOpen(true);
+                                }}
+                                className="text-red-600 dark:text-red-400 hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400 focus:bg-red-500/10 focus:text-red-600 dark:focus:text-red-400"
+                                disabled={cancelling}
+                              >
+                                <StopCircle className="h-4 w-4 mr-2" />
+                                Cancel Rebalance
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedRebalanceId(item.id);
+                                  setDeleteDialogOpen(true);
+                                }}
+                                className="text-red-600 dark:text-red-400 hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400 focus:bg-red-500/10 focus:text-red-600 dark:focus:text-red-400"
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="completed" className="space-y-4">
+              {!initialLoadComplete || loading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin mr-2" />
+                  <span className="text-muted-foreground">Loading rebalances...</span>
+                </div>
+              ) : completedRebalances.length === 0 ? (
+                <div className="flex items-center justify-center py-8">
+                  <img
+                    src="/goose_sit.png"
+                    alt="No data"
+                    className="w-32 h-32 mr-6"
+                  />
+                  <div className="text-left text-muted-foreground">
+                    <p>No completed rebalances on {getDateDisplay()}</p>
+                    <p className="text-sm mt-2">Select a different date to view more rebalances</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {completedRebalances.map((item) => (
+                    <div
+                      key={item.id}
+                      className="border border-border rounded-lg p-4 space-y-3 cursor-pointer hover:bg-muted/50 transition-colors"
+                      onClick={() => viewRebalanceDetails(item)}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <span className="font-semibold">Portfolio Rebalance</span>
+                          <Badge className="border border-green-500/30 bg-green-500/10 text-green-600 font-semibold hover:bg-green-500/20">
+                            <span className="flex items-center gap-1">
+                              <CheckCircle className="h-3 w-3" />
+                              Completed
+                            </span>
+                          </Badge>
+                          <span className="text-sm text-muted-foreground">
+                            {item.total_stocks} stocks analyzed
+                          </span>
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {formatDistanceToNow(new Date(item.created_at), { addSuffix: true })}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-muted-foreground">
+                          Completed on: {new Date(item.created_at).toLocaleDateString()}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="border border-slate-700"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              viewRebalanceDetails(item);
+                            }}
+                          >
+                            <Eye className="h-4 w-4 mr-1" />
+                            View Details
+                          </Button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 border border-slate-700"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedRebalanceId(item.id);
+                                  setDeleteDialogOpen(true);
+                                }}
+                                className="text-red-600 dark:text-red-400 hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400 focus:bg-red-500/10 focus:text-red-600 dark:focus:text-red-400"
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="cancelled" className="space-y-4">
+              {!initialLoadComplete || loading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin mr-2" />
+                  <span className="text-muted-foreground">Loading rebalances...</span>
+                </div>
+              ) : cancelledRebalances.length === 0 ? (
+                <div className="flex items-center justify-center py-8">
+                  <img
+                    src="/goose_sit.png"
+                    alt="No data"
+                    className="w-32 h-32 mr-6"
+                  />
+                  <div className="text-left text-muted-foreground">
+                    <p>No cancelled rebalances on {getDateDisplay()}</p>
+                    <p className="text-sm mt-2">Select a different date to view more rebalances</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {cancelledRebalances.map((item) => (
+                    <div
+                      key={item.id}
+                      className="border border-border rounded-lg p-4 space-y-3 cursor-pointer hover:bg-muted/50 transition-colors opacity-75"
+                      onClick={() => viewRebalanceDetails(item)}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <span className="font-semibold">Portfolio Rebalance</span>
+                          <Badge variant="destructive">
+                            <span className="flex items-center gap-1">
+                              {getStatusIcon(item.status)}
+                              {getStatusDisplayText(convertLegacyRebalanceStatus(item.status))}
+                            </span>
+                          </Badge>
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {formatDistanceToNow(new Date(item.created_at), { addSuffix: true })}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-muted-foreground">
+                          {convertLegacyRebalanceStatus(item.status) === REBALANCE_STATUS.ERROR
+                            ? (item.error_message || item.rebalance_plan?.error || item.rebalance_plan?.errorDetails || 'Rebalance failed')
+                            : (item.error_message || 'Rebalance was cancelled by user')}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="border border-slate-700"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              viewRebalanceDetails(item);
+                            }}
+                          >
+                            <Eye className="h-4 w-4 mr-1" />
+                            View Details
+                          </Button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 border border-slate-700"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedRebalanceId(item.id);
+                                  setDeleteDialogOpen(true);
+                                }}
+                                className="text-red-600 dark:text-red-400 hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400 focus:bg-red-500/10 focus:text-red-600 dark:focus:text-red-400"
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Rebalance Record</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this rebalance record? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setSelectedRebalanceId(null)}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                'Delete'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Cancel Confirmation Dialog */}
+      <AlertDialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancel Rebalance</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to cancel this rebalance operation? Any pending analyses will be stopped.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setSelectedRebalanceId(null)}>
+              Keep Running
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleCancel} disabled={cancelling}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {cancelling ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Cancelling...
+                </>
+              ) : (
+                'Cancel Rebalance'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Detail Modal */}
+      <RebalanceDetailModal
+        rebalanceId={selectedDetailId}
+        isOpen={detailModalOpen}
+        onClose={() => {
+          setDetailModalOpen(false);
+          setSelectedDetailId(undefined);
+        }}
+      />
+    </>
+  );
+}
