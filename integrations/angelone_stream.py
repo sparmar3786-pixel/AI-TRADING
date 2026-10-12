@@ -138,7 +138,9 @@ class AngelOneStream:
         # Mode 3 is SmartAPI's snap-quote mode; depth fields are used only when
         # the SDK actually supplies them in a tick.
         try:
-            client.subscribe("ai-trading-live", 3, [{"exchangeType": int(exchange_type), "tokens": tokens}])
+            # Keep each subscription request within the conservative 50-token batch.
+            for offset in range(0, len(tokens), 50):
+                client.subscribe("ai-trading-live", 3, [{"exchangeType": int(exchange_type), "tokens": tokens[offset:offset + 50]}])
         except Exception:
             with self._lock:
                 self._error = "SmartWebSocketV2 subscription failed for one or more market tokens."
