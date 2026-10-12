@@ -45,14 +45,20 @@ class FiveLayerEngineTests(unittest.TestCase):
         self.assertTrue(result["signal_only"])
 
     def test_stable_candidate_can_confirm_after_ten_minutes(self):
-        first = evaluate_five_layer_signal(self.snapshot, now=self.now)
-        next_now = self.now + timedelta(seconds=600)
-        next_snapshot = dict(self.snapshot)
-        next_snapshot["observed_at"] = next_now.isoformat()
-        next_snapshot["option_chain"] = [dict(self.snapshot["option_chain"][0], timestamp=next_now.isoformat())]
-        result = evaluate_five_layer_signal(
-            next_snapshot, now=next_now, confirmation_state=first["confirmation_state"]
-        )
+        result = evaluate_five_layer_signal(self.snapshot, now=self.now)
+        state = result["confirmation_state"]
+        # Refresh every 30 seconds so the data-continuity guard remains satisfied.
+        for elapsed in range(30, 631, 30):
+            next_now = self.now + timedelta(seconds=elapsed)
+            next_snapshot = dict(self.snapshot)
+            next_snapshot["observed_at"] = next_now.isoformat()
+            next_snapshot["option_chain"] = [
+                dict(self.snapshot["option_chain"][0], timestamp=next_now.isoformat())
+            ]
+            result = evaluate_five_layer_signal(
+                next_snapshot, now=next_now, confirmation_state=state
+            )
+            state = result["confirmation_state"]
         self.assertEqual(result["decision"], "CALL BUY")
         self.assertEqual(result["layers"]["confirmation"]["state"], "CONFIRMED")
 
