@@ -126,6 +126,16 @@ jobs:
             echo "Skipping release upload for stale commit $GITHUB_SHA; main is now $LATEST_SHA"
             exit 0
           fi
+          # Concurrent older builds must never overwrite the rolling release for a newer main commit.
+          CURRENT_MAIN_SHA="$(git ls-remote origin refs/heads/main | awk 'NR==1 {print $1}')"
+          if [ -z "$CURRENT_MAIN_SHA" ]; then
+            echo "Could not verify current main SHA; refusing to publish a possibly stale APK"
+            exit 1
+          fi
+          if [ "$CURRENT_MAIN_SHA" != "$GITHUB_SHA" ]; then
+            echo "Skipping release publish for stale commit $GITHUB_SHA; current main is $CURRENT_MAIN_SHA"
+            exit 0
+          fi
           TAG="ai-trading-signal-latest"
           APK="flutter_app/build/app/outputs/flutter-apk/app-release.apk"
           ARM64_APK="flutter_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk"
