@@ -69,6 +69,20 @@ class AngelOneReadOnlyTests(unittest.TestCase):
         self.assertNotIn("refresh-token-only-in-test", repr(result))
         client.generateSession.assert_called_once()
 
+    def test_current_six_digit_totp_from_app_is_used_directly(self):
+        client, modules = self._mock_sdk()
+        credentials = {
+            "angel_api_key": "test-api-key",
+            "angel_client_code": "demo-client",
+            "angel_pin": "test-pin",
+            "angel_totp_code": "654321",
+        }
+        with patch.dict(os.environ, {}, clear=True), patch.dict(sys.modules, modules):
+            adapter = AngelOneReadOnly(credentials)
+            result = adapter.profile()
+        self.assertEqual(result["client_code"], "demo-client")
+        client.generateSession.assert_called_once_with("demo-client", "test-pin", "654321")
+
     def test_read_only_quote_candles_and_greeks(self):
         client, modules = self._mock_sdk()
         env = {
