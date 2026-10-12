@@ -1769,7 +1769,7 @@ class CommodityPage extends StatelessWidget {
         return Card(child: ListTile(
           leading: Icon(Icons.show_chart, color: live ? Colors.greenAccent : Colors.orangeAccent),
           title: Text((item['name'] ?? item['symbol'] ?? 'Commodity').toString(), style: const TextStyle(fontWeight: FontWeight.w800)),
-          subtitle: Text('Symbol: ${item['symbol'] ?? '—'} • Expiry: ${item['expiry'] ?? '—'}\nTrend: ${item['trend'] ?? 'UNKNOWN'} • Sentiment: ${item['sentiment_label'] ?? 'UNKNOWN'}\nLot: ${item['lotsize'] ?? '—'} • Age: ${item['age_seconds'] ?? '—'}s • ${item['source'] ?? 'NO DATA'}'),
+          subtitle: Text('Symbol: ${item['symbol'] ?? '—'} • Expiry: ${item['expiry'] ?? '—'}\nTrend: ${item['trend'] ?? 'UNKNOWN'} • Sentiment: ${item['sentiment_label'] ?? 'UNKNOWN'}\nSignal: ${item['decision'] ?? 'WAIT'} • Candidate: ${item['candidate_decision'] ?? 'WAIT'}\nEntry: ${_val(item['entry'])} • SL: ${_val(item['stop_loss'])} • Target: ${_val(item['target'])}\nStability: ${(item['signal_stability'] as Map?)?['state'] ?? 'BLOCKED'} • Lot: ${item['lotsize'] ?? '—'} • Age: ${item['age_seconds'] ?? '—'}s'),
           isThreeLine: true,
           trailing: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [
             Text(item['ltp'] == null ? '—' : '₹${_val(item['ltp'])}', style: const TextStyle(fontWeight: FontWeight.w900)),
