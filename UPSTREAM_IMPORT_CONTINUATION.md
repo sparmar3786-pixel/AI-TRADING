@@ -74,3 +74,9 @@ Two further user-listed sources were added after the previous count:
 The current branch therefore contains **9 distinct upstream projects represented by 61 vendored files**, including licenses, READMEs, dependency manifests and reference docs. Of those, only selected files are present; this is not a full copy of 9 entire repository trees and does not satisfy a claim that 500 repositories were copied.
 
 Other submitted links that lacked a verifiable redistribution license, or used a custom agreement not yet reviewed for intended redistribution, remain un-copied. No API keys, model weights, binaries, caches, broker secrets or account data were imported.
+
+## Additional licensed source snapshot — AI Hedge Fund — 2026-10-12
+
+- `virattt/ai-hedge-fund` — MIT; 5 files copied into `vendor/ai-hedge-fund/`: `LICENSE`, `README.md`, `hedge_fund/models.py`, `hedge_fund/backtesting/engine.py`, and `hedge_fund/backtesting/fund.py`.
+- Upstream README explicitly states it is educational/research-only and does not itself execute trades. It uses an external Financial Datasets API and LLM provider keys; those secrets were not copied. This partial snapshot is not production trading integration.
+- Current total on this branch: **11 distinct upstream projects represented by 71 vendored files** (license/docs/manifests/source combined). It is not 71 complete repository copies and it is not a claim that all 500 submitted URLs are copied.
