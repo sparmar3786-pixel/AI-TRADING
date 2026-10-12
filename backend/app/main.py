@@ -680,6 +680,7 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
             "token": token, "exchange": exchange, "option_type": kind,
             "strike": strike, "expiry": selected_expiry.isoformat(),
             "symbol": str(row.get("symbol", "")), "bid": obid, "ask": oask,
+            "lot_size": _number(row.get("lotsize") or row.get("lot_size")),
             "ltp": ltp, "volume": volume, "oi": oi, "delta": delta,
             "gamma": greek.get("gamma"), "theta": greek.get("theta"),
             "vega": greek.get("vega"), "iv": greek.get("iv"),
@@ -778,6 +779,18 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
             },
             "safety_note": "Deterministic gates only; no calibrated win probability or news sentiment.",
         },
+    }
+    selected_expiry_date = _expiry_date(selected.get("expiry")) if selected else None
+    result["trade_plan"] = {
+        "selection_grade": "A" if result.get("decision") in ("CALL BUY", "PUT BUY") else "WAIT",
+        "dte": max(0, (selected_expiry_date - datetime.now(IST).date()).days) if selected_expiry_date else None,
+        "lot_size": selected.get("lot_size") if selected else None,
+        "strike": result.get("strike"),
+        "expiry": result.get("expiry"),
+        "entry": result.get("entry"),
+        "stop_loss": result.get("stop_loss"),
+        "target": result.get("target"),
+        "signal_only": True,
     }
     result["live_validation"] = {
         "decision": result.get("decision", "WAIT"),
