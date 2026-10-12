@@ -34,7 +34,7 @@ app = FastAPI(title="AI-TRADING Read-only Signals API", version="1.0.0")
 IST = ZoneInfo("Asia/Kolkata")
 MASTER_URL = "https://margincalculator.angelone.in/OpenAPI_File/files/OpenAPIScripMaster.json"
 MASTER_TTL_SECONDS = 6 * 60 * 60
-SIGNAL_CACHE_SECONDS = 12
+SIGNAL_CACHE_SECONDS = 30
 DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{43,128}$")
 INDEXES: dict[str, dict[str, str]] = {
     "NIFTY": {"exchange": "NSE", "token": "99926000", "name": "NIFTY"},
@@ -422,7 +422,16 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
     }
     bid, ask, buy_volume, sell_volume = _book(spot_quote)
     # Session structure sentiment is explicitly price/volume-derived, not news sentiment.
-    day_open = _number(candle_rows[0][1]) if candle_rows and isinstance(candle_rows[0], (list, tuple)) and len(candle_rows[0]) > 1 else closes[0]
+    today_ist = datetime.now(IST).date()
+    today_rows = []
+    for candle in candle_rows:
+        if not isinstance(candle, (list, tuple)) or len(candle) < 2:
+            continue
+        candle_time = _iso(candle[0])
+        parsed_time = datetime.fromisoformat(candle_time) if candle_time else None
+        if parsed_time is not None and parsed_time.astimezone(IST).date() == today_ist:
+            today_rows.append(candle)
+    day_open = _number(today_rows[0][1]) if today_rows else closes[-1]
     day_move = (spot - day_open) / day_open if day_open else 0.0
     up_count = sum(1 for tf in timeframe_closes.values() if len(tf) >= 3 and tf[-1] > tf[-2] > tf[-3])
     down_count = sum(1 for tf in timeframe_closes.values() if len(tf) >= 3 and tf[-1] < tf[-2] < tf[-3])
@@ -471,8 +480,10 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
         oi = _number(quote.get("opnInterest") or quote.get("openInterest") or quote.get("oi"))
         delta = greeks.get((strike or -1, kind or ""))
         timestamp = _quote_timestamp(quote)
-        if timestamp:
-            quote_time_by_token[token] = timestamp
+        if not timestamp:
+            # Never promote the spot timestamp or server fetch time to an option's timestamp.
+            continue
+        quote_time_by_token[token] = timestamp
         normalized_options.append({
             "token": token, "exchange": exchange, "option_type": kind,
             "strike": strike, "expiry": selected_expiry.isoformat(),
@@ -500,7 +511,11 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
         "sentiment_score": sentiment,
         "timeframe_closes": timeframe_closes,
         "order_flow": {"bid": bid, "ask": ask, "ltp": spot, "buy_volume": buy_volume, "sell_volume": sell_volume},
+        # Feed the exact contract whose ATR was fetched into the risk gate.
+        # Do not let the engine silently choose a different contract with no ATR.
         "option_chain": [
+            {key: value for key, value in selected.items() if key not in ("token", "exchange", "symbol")}
+        ] if selected and option_atr is not None else [
             {key: value for key, value in item.items() if key not in ("token", "exchange", "symbol")}
             for item in normalized_options
         ],
