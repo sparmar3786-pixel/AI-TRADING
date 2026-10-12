@@ -1,0 +1,257 @@
+"""Five-layer, fail-closed signal research engine for AI-TRADING.
+
+This module consumes normalized market snapshots. It does not fetch broker data,
+authenticate accounts, or place orders. Missing/stale evidence always returns WAIT.
+Scores are evidence alignment, never a probability of profit.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from math import isfinite
+from typing import Any
+
+
+def _number(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if isfinite(number) else None
+
+
+def _timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def _closes_direction(values: Any) -> str:
+    if not isinstance(values, (list, tuple)) or len(values) < 3:
+        return "UNKNOWN"
+    numbers = [_number(item) for item in values[-5:]]
+    if any(item is None or item <= 0 for item in numbers):
+        return "UNKNOWN"
+    clean = [float(item) for item in numbers]
+    if clean[-1] > clean[-2] and clean[-1] > clean[0]:
+        return "BULLISH"
+    if clean[-1] < clean[-2] and clean[-1] < clean[0]:
+        return "BEARISH"
+    return "MIXED"
+
+
+def evaluate_five_layer_signal(
+    snapshot: dict[str, Any],
+    *,
+    now: datetime | None = None,
+    confirmation_state: dict[str, Any] | None = None,
+    max_data_age_seconds: float = 15.0,
+    confirmation_seconds: int = 600,
+    max_confirmation_gap_seconds: int = 60,
+) -> dict[str, Any]:
+    """Evaluate data, trend/sentiment, order flow, option contract and risk/time gates.
+
+    Expected snapshot keys:
+      observed_at, underlying_ltp, sentiment_score (-1..1), timeframe_closes,
+      order_flow {bid, ask, ltp, buy_volume, sell_volume},
+      option_chain [{option_type, strike, expiry, bid, ask, ltp, volume, oi,
+                     delta, option_atr, timestamp?}].
+    The caller must provide exchange-validated, normalized inputs.
+    """
+    now_utc = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    layers: dict[str, dict[str, Any]] = {}
+    reasons: list[str] = []
+
+    # Layer 1: data quality and freshness.
+    observed = _timestamp(snapshot.get("observed_at"))
+    age = (now_utc - observed).total_seconds() if observed else None
+    underlying = _number(snapshot.get("underlying_ltp"))
+    data_ok = (
+        observed is not None and age is not None and 0 <= age <= max_data_age_seconds
+        and underlying is not None and underlying > 0
+    )
+    layers["data_quality"] = {
+        "pass": data_ok, "age_seconds": round(age, 2) if age is not None else None,
+        "max_age_seconds": max_data_age_seconds,
+    }
+    if not data_ok:
+        reasons.append("Market snapshot missing, invalid, future-dated or stale")
+
+    # Layer 2: multi-timeframe trend + day/session sentiment alignment.
+    raw_tfs = snapshot.get("timeframe_closes")
+    raw_tfs = raw_tfs if isinstance(raw_tfs, dict) else {}
+    trend_states = {str(tf): _closes_direction(closes) for tf, closes in raw_tfs.items()}
+    directional = [state for state in trend_states.values() if state in ("BULLISH", "BEARISH")]
+    trend = (
+        "UNKNOWN" if not directional else
+        "CONFLICT" if len(set(directional)) > 1 else directional[0]
+    )
+    sentiment = _number(snapshot.get("sentiment_score"))
+    sentiment_ok = sentiment is not None and -1 <= sentiment <= 1
+    sentiment_direction = (
+        "BULLISH" if sentiment is not None and sentiment >= 0.2 else
+        "BEARISH" if sentiment is not None and sentiment <= -0.2 else
+        "NEUTRAL" if sentiment_ok else "UNKNOWN"
+    )
+    layer2_ok = trend in ("BULLISH", "BEARISH") and sentiment_direction in (trend, "NEUTRAL")
+    layers["trend_sentiment"] = {
+        "pass": layer2_ok, "trend": trend, "timeframes": trend_states,
+        "sentiment_score": sentiment, "sentiment_direction": sentiment_direction,
+    }
+    if not layer2_ok:
+        reasons.append("Trend and session sentiment are unknown, mixed or conflicting")
+
+    # Layer 3: bid/ask sanity, spread and volume order-flow imbalance.
+    flow = snapshot.get("order_flow")
+    flow = flow if isinstance(flow, dict) else {}
+    bid, ask, flow_ltp = map(_number, (flow.get("bid"), flow.get("ask"), flow.get("ltp")))
+    buy_vol, sell_vol = map(_number, (flow.get("buy_volume"), flow.get("sell_volume")))
+    flow_valid = (
+        bid is not None and ask is not None and flow_ltp is not None
+        and 0 < bid <= flow_ltp <= ask
+        and buy_vol is not None and sell_vol is not None
+        and buy_vol >= 0 and sell_vol >= 0 and buy_vol + sell_vol > 0
+    )
+    spread_pct = ((ask - bid) / ((ask + bid) / 2) * 100) if flow_valid else None
+    imbalance = ((buy_vol - sell_vol) / (buy_vol + sell_vol)) if flow_valid else None
+    flow_direction = (
+        "BULLISH" if imbalance is not None and imbalance >= 0.15 else
+        "BEARISH" if imbalance is not None and imbalance <= -0.15 else
+        "NEUTRAL" if imbalance is not None else "UNKNOWN"
+    )
+    layer3_ok = flow_valid and spread_pct is not None and spread_pct <= 2.0
+    layers["order_flow"] = {
+        "pass": bool(layer3_ok), "spread_pct": round(spread_pct, 3) if spread_pct is not None else None,
+        "imbalance": round(imbalance, 3) if imbalance is not None else None,
+        "direction": flow_direction,
+    }
+    if not layer3_ok:
+        reasons.append("Order-flow quote is missing/invalid or spread exceeds 2%")
+    if layer3_ok and flow_direction not in ("NEUTRAL", trend):
+        layer3_ok = False
+        layers["order_flow"]["pass"] = False
+        reasons.append("Order flow conflicts with the trend")
+
+    # Layer 4: choose a liquid, near-ATM option with sane bid/ask and usable delta.
+    chain = snapshot.get("option_chain")
+    chain = chain if isinstance(chain, list) else []
+    option_type = "CALL" if trend == "BULLISH" else "PUT" if trend == "BEARISH" else None
+    valid_options: list[tuple[float, dict[str, Any]]] = []
+    for option in chain:
+        if not isinstance(option, dict) or option.get("option_type", "").upper() != option_type:
+            continue
+        strike = _number(option.get("strike"))
+        obid, oask, ltp = map(_number, (option.get("bid"), option.get("ask"), option.get("ltp")))
+        volume, oi, delta = map(_number, (option.get("volume"), option.get("oi"), option.get("delta")))
+        expiry = _timestamp(str(option.get("expiry", "")) + "T23:59:00+00:00") if option.get("expiry") else None
+        option_time = _timestamp(option.get("timestamp")) if option.get("timestamp") else observed
+        option_age = (now_utc - option_time).total_seconds() if option_time else None
+        valid = (
+            strike is not None and strike > 0 and obid is not None and oask is not None
+            and ltp is not None and 0 < obid <= ltp <= oask
+            and volume is not None and volume > 0 and oi is not None and oi > 0
+            and delta is not None and 0.25 <= abs(delta) <= 0.75
+            and expiry is not None and expiry > now_utc
+            and option_age is not None and 0 <= option_age <= max_data_age_seconds
+        )
+        if not valid:
+            continue
+        option_spread = (oask - obid) / ((oask + obid) / 2) * 100
+        if option_spread > 5.0:
+            continue
+        # Prefer near ATM and moderate absolute delta, then liquid contracts.
+        score = abs(strike - float(underlying or 0)) / max(float(underlying or 1), 1) * 100
+        score += abs(abs(delta) - 0.5) * 2
+        score -= min(volume, 1_000_000) / 1_000_000 * 0.05
+        valid_options.append((score, option))
+    selected = min(valid_options, key=lambda pair: pair[0])[1] if valid_options else None
+    layer4_ok = selected is not None
+    layers["option_selection"] = {
+        "pass": layer4_ok, "option_type": option_type,
+        "candidate_count": len(valid_options),
+        "strike": selected.get("strike") if selected else None,
+        "expiry": selected.get("expiry") if selected else None,
+        "spread_pct": round((float(selected["ask"]) - float(selected["bid"])) /
+                            ((float(selected["ask"]) + float(selected["bid"])) / 2) * 100, 3)
+                       if selected else None,
+    }
+    if not layer4_ok:
+        reasons.append("No fresh, liquid, non-expired option contract passes spread/delta checks")
+
+    # Layer 5: risk levels + ten-minute stable-candidate gate.
+    entry = _number(selected.get("ask")) if selected else None
+    option_atr = _number(selected.get("option_atr")) if selected else None
+    risk_ok = (
+        entry is not None and entry > 0 and option_atr is not None and option_atr > 0
+    )
+    stop = target = None
+    if risk_ok and entry is not None and option_atr is not None:
+        risk_distance = 1.5 * option_atr
+        stop, target = entry - risk_distance, entry + 2 * risk_distance
+        if stop <= 0:
+            risk_ok = False
+            stop = target = None
+    layers["risk_levels"] = {
+        "pass": risk_ok, "entry_reference": entry,
+        "stop_loss": round(stop, 4) if stop is not None else None,
+        "target": round(target, 4) if target is not None else None,
+        "reward_risk": 2.0 if risk_ok else None,
+        "method": "1.5 x option ATR stop; 2R target; excludes costs/slippage",
+    }
+    if not risk_ok:
+        reasons.append("Option ATR or valid positive risk levels are missing")
+
+    all_layers_pass = data_ok and layer2_ok and layer3_ok and layer4_ok and risk_ok
+    candidate = None
+    if all_layers_pass and selected:
+        candidate = f"{option_type}|{selected.get('strike')}|{selected.get('expiry')}"
+    state = confirmation_state if isinstance(confirmation_state, dict) else {}
+    since = _timestamp(state.get("since_utc"))
+    last_seen = _timestamp(state.get("last_seen_utc"))
+    state_key_matches = candidate is not None and state.get("candidate_key") == candidate
+    gap = (now_utc - last_seen).total_seconds() if last_seen else None
+    if not all_layers_pass or candidate is None:
+        new_state = {}
+        decision = "WAIT"
+        stability = "BLOCKED"
+    elif not state_key_matches or since is None or last_seen is None or gap is None or gap < 0 or gap > max_confirmation_gap_seconds:
+        new_state = {"candidate_key": candidate, "since_utc": now_utc.isoformat(), "last_seen_utc": now_utc.isoformat()}
+        decision = "WAIT"
+        stability = "CONFIRMING"
+        reasons.append("New candidate or refresh gap: restarting 10-minute confirmation")
+    else:
+        new_state = {"candidate_key": candidate, "since_utc": since.isoformat(), "last_seen_utc": now_utc.isoformat()}
+        elapsed = (now_utc - since).total_seconds()
+        if elapsed < confirmation_seconds:
+            decision = "WAIT"
+            stability = "CONFIRMING"
+            reasons.append(f"Candidate stability gate: {int(confirmation_seconds - elapsed)} seconds remaining")
+        else:
+            decision = "CALL BUY" if option_type == "CALL" else "PUT BUY"
+            stability = "CONFIRMED"
+
+    layers["confirmation"] = {
+        "pass": decision in ("CALL BUY", "PUT BUY"),
+        "state": stability, "required_seconds": confirmation_seconds,
+    }
+    return {
+        "decision": decision,
+        "candidate_decision": ("CALL BUY" if option_type == "CALL" else "PUT BUY") if candidate else "WAIT",
+        "underlying_ltp": underlying,
+        "option_type": option_type if candidate else None,
+        "strike": selected.get("strike") if candidate and selected else None,
+        "expiry": selected.get("expiry") if candidate and selected else None,
+        "entry": round(entry, 4) if candidate and entry is not None else None,
+        "stop_loss": round(stop, 4) if candidate and stop is not None else None,
+        "target": round(target, 4) if candidate and target is not None else None,
+        "layers": layers,
+        "reasons": reasons,
+        "confirmation_state": new_state,
+        "score_semantics": "Layer pass status is a rule checklist, not probability of profit",
+        "signal_only": True,
+    }
