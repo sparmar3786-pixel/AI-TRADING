@@ -40,6 +40,8 @@ jobs:
           GRADLE=android/app/build.gradle.kts
           if [ -f "$GRADLE" ]; then
             sed -i 's/applicationId = "com.example.ai_trading_signal"/applicationId = "com.sparmar3786.aitradingsignals"/' "$GRADLE"
+            sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 26/' "$GRADLE"
+            grep -n 'minSdk' "$GRADLE"
           fi
           grep -n 'uses-permission' "$MANIFEST"
       - name: Install dependencies
