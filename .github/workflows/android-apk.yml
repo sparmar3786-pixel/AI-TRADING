@@ -60,7 +60,7 @@ jobs:
       - name: Widget and API tests
         run: flutter test
       - name: Build release APK
-        run: flutter build apk --release --target-platform android-arm64 --no-tree-shake-icons --dart-define=BACKEND_URL=https://nse-algo-backend-final-production.up.railway.app
+        run: flutter build apk --release --no-tree-shake-icons --dart-define=BACKEND_URL=https://nse-algo-backend-final-production.up.railway.app
       - name: Verify APK configuration and signal-only safety
         run: |
           set -euo pipefail

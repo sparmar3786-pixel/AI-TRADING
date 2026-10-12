@@ -18,6 +18,6 @@ Keep API key, client code, MPIN/PIN, TOTP seed, JWT, refresh token, and feed tok
 
 ## Build and distribution
 
-The workflow bootstraps Android project files, sets Android minSdk to 26 (required by llama_flutter_android), runs Dart analysis and Flutter tests, builds an ARM64-only release APK for modern Android devices, verifies the Railway host and internet permission, and publishes one rolling prerelease asset at GitHub Releases. Android 8.0 (API 26) or newer is required. It deliberately avoids upload-artifact because the existing Fresh-Apk Actions artifact quota had been exhausted.
+The workflow bootstraps Android project files, sets Android minSdk to 26 (required by llama_flutter_android), runs Dart analysis and Flutter tests, builds a universal release APK for broad Android ABI compatibility, verifies the Railway host and internet permission, and publishes one rolling prerelease asset at GitHub Releases. Android 8.0 (API 26) or newer is required. It deliberately avoids upload-artifact because the existing Fresh-Apk Actions artifact quota had been exhausted.
 
 The app is not a guarantee of returns. Live Angel One session health, market data freshness, option-chain completeness, and on-device behavior still require separate verification. The repository's Python engine and vendored research code are not automatically invoked by this Flutter app unless a deployed backend explicitly integrates them.
