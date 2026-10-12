@@ -41,3 +41,33 @@ python -m unittest discover -s tests -v
 ```
 
 Do not commit API keys, passwords, MPINs, TOTP seeds, JWTs, feed tokens or other account secrets.
+
+## Continuation pass — 2026-10-12
+
+- Added `UPSTREAM_IMPORT_CONTINUATION.md` with a deduplicated source list, initial README access checks, import decisions and strict no-overlap rules.
+- Added `vendor/LLM_trader/src/trading/trading_strategy.py` from `qrak/LLM_trader` (source blob `ad0dcedb53dd94b485830908ac92a6374922b3f2`) and retained its MIT license at `vendor/LLM_trader/LICENSE.md`.
+- This is an isolated vendor snapshot, **not wired into the main strategy engine**. The upstream module imports many sibling modules and services that are not yet imported, so it is not runnable standalone. No live trading is enabled.
+- The three repeated submissions of the fsaavedra0003 URL are recorded once.
+- README checks returned 404 for the exact supplied URLs `wangzhe3224/awesome-systematic-trading`, `nkaz001/hftbacktest`, and `ranaroussi/qtpylib`; these are blocked pending corrected URLs/default branches.
+- Tests have not been executed in this connector pass. The PR/CI must confirm syntax and test status before merge.
+
+## Continuation update — 2026-10-12 (follow-up pass)
+
+- Added selected snapshots under separate `vendor/<project>/` namespaces from `asavinov/intelligent-trading-bot` (MIT), `Sebacaraballo/Trading-Bot` (MIT), `FalconTrading06/llm-tradebot` (MIT), `karimcodes/systematic-trading` (MIT), `Jaydot33/automated-trading-system` (MIT), and `tripolskypetr/backtest-kit` (MIT).
+- Together with the earlier `qrak/LLM_trader` snapshot, this branch represents **7 distinct upstream projects across 55 vendored files**, including licenses, READMEs and dependency manifests. See `UPSTREAM_IMPORT_CONTINUATION.md` for exact file lists and limitations.
+- These are **partial snapshots**, not seven complete repository trees; no third-party source has been connected to the live engine. Python and TypeScript modules are kept separate. Some files intentionally retain missing upstream sibling dependencies.
+- Not run/verified: unit tests, third-party dependency install, security scan, type check, paper trading, Railway deploy, Angel One integration, and live order execution.
+- The original claim of 500 supplied repositories has not been independently verified from an accessible full URL list. This status does not claim 500 repositories have been copied.
+
+## Latest import count — 2026-10-12
+
+- Added the MIT-licensed `Open-Finance-Lab/FinLLM-Leaderboard` demo/reference files and CC0-licensed `georgezouq/awesome-ai-in-finance` catalog.
+- Current count for this continuation branch: **9 distinct upstream projects, 61 vendored files** (licenses, metadata, code and reference docs combined). Only selected files were copied; do not describe this as 9 complete repository trees or as copying 500 repositories.
+- CI status must be verified from GitHub Actions. No connected CI runs were returned on the prior status check; imports remain isolated and untested as a combined package.
+
+## Latest continuation pass — 2026-10-12
+
+- Added the MIT-licensed `virattt/ai-hedge-fund` research snapshot under `vendor/ai-hedge-fund/` (license, README, data models, backtesting engine and fund backtest).
+- Verified running total for the continuation branch: **11 distinct upstream projects represented by 71 vendored files**, including licenses, READMEs, dependency manifests and reference docs. These are selected file snapshots, not 11 complete repository trees and not 500 copied repositories.
+- The AI Hedge Fund source says it is educational-only and does not execute real trades. No credentials were copied.
+- Existing-engine integration, tests, lint/security checks and Railway deployment remain unverified/not done.
