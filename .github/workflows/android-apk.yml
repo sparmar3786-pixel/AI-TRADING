@@ -16,10 +16,10 @@ on:
 permissions:
   contents: write
 
-# Keep one APK build per PR/ref; newer commits supersede stale builds.
+# Keep each build in the queue so every commit's result remains observable.
 concurrency:
   group: ai-trading-apk-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -36,21 +36,38 @@ jobs:
           cache: true
       - name: Bootstrap Android platform
         run: flutter create --platforms=android --project-name ai_trading_signal .
+      - name: Enforce Android minSdk 26
+        run: |
+          set -euo pipefail
+          GRADLE="android/app/build.gradle.kts"
+          if [ ! -f "$GRADLE" ]; then
+            echo "Generated Android Gradle file missing: $GRADLE"
+            find android -maxdepth 4 -type f -print | sort || true
+            exit 1
+          fi
+
+          # Handle both Flutter's generated default and an explicit older integer.
+          if grep -Eq 'minSdk[[:space:]]*=[[:space:]]*flutter\.minSdkVersion' "$GRADLE"; then
+            sed -i -E 's/minSdk[[:space:]]*=[[:space:]]*flutter\.minSdkVersion/minSdk = 26/' "$GRADLE"
+          else
+            sed -i -E 's/minSdk[[:space:]]*=[[:space:]]*[0-9]+/minSdk = 26/' "$GRADLE"
+          fi
+
+          grep -Eq 'minSdk[[:space:]]*=[[:space:]]*26([[:space:]]|$)' "$GRADLE" || {
+            echo "Could not enforce minSdk 26 for llama_flutter_android"
+            exit 1
+          }
+          grep -n 'minSdk' "$GRADLE"
       - name: Add Android network permissions
         run: |
+          set -euo pipefail
           MANIFEST=android/app/src/main/AndroidManifest.xml
           if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
             sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n    <application#' "$MANIFEST"
           fi
           sed -i 's/android:label="ai_trading_signal"/android:label="AI Trading Signals"/' "$MANIFEST"
           GRADLE=android/app/build.gradle.kts
-          if [ ! -f "$GRADLE" ]; then
-            echo "Generated Android Gradle file missing: $GRADLE"
-            exit 1
-          fi
           sed -i 's/applicationId = "com.example.ai_trading_signal"/applicationId = "com.sparmar3786.aitradingsignals"/' "$GRADLE"
-          sed -i -E 's/minSdk[[:space:]]*=[[:space:]]*flutter\.minSdkVersion/minSdk = 26/' "$GRADLE"
-          grep -Eq 'minSdk[[:space:]]*=[[:space:]]*26' "$GRADLE" || { echo "Could not enforce minSdk 26 for llama_flutter_android"; exit 1; }
           grep -n 'applicationId\|minSdk' "$GRADLE"
           grep -n 'uses-permission' "$MANIFEST"
       - name: Install dependencies
