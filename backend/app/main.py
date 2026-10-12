@@ -688,18 +688,22 @@ def angel_connect(body: ConnectRequest, _: str = Depends(_device)) -> dict[str, 
         "angel_api_key": (body.angel_api_key or "").strip(),
         "angel_client_code": (body.angel_client_code or "").strip(),
         "angel_pin": (body.angel_pin or "").strip(),
-        "angel_totp_secret": (body.angel_totp or "").strip(),
+        "angel_totp_code": (body.angel_totp or "").strip(),
     }
     with _lock:
-        if not all(supplied.values()):
-            if _adapter and _adapter.authenticated:
-                return {**_adapter.status(), "session_restored": True, "stored_session": True, "login_message": "Existing in-memory session is authenticated"}
-            saved = _load_credentials()
-            env = _credentials_from_env()
-            base = {**saved, **env}
-            if not all(base.get(key) for key in ("angel_api_key", "angel_client_code", "angel_pin")) or not supplied["angel_totp_secret"]:
-                raise HTTPException(status_code=422, detail="Enter API key, Client ID, MPIN and current TOTP for a fresh Angel One login.")
-            supplied.update(base)
+        if _adapter and _adapter.authenticated and not any(supplied.values()):
+            return {**_adapter.status(), "session_restored": True, "stored_session": True, "login_message": "Existing in-memory session is authenticated"}
+        saved = _load_credentials()
+        env = _credentials_from_env()
+        base = {**saved, **env}
+        for key in ("angel_api_key", "angel_client_code", "angel_pin"):
+            supplied[key] = supplied.get(key) or base.get(key, "")
+        # A direct six-digit code from the app takes precedence. If no code is
+        # supplied, server-side ANGEL_TOTP_SECRET may generate the current code.
+        if not supplied.get("angel_totp_code"):
+            supplied["angel_totp_secret"] = base.get("angel_totp_secret", "")
+        if not all(supplied.get(key) for key in ("angel_api_key", "angel_client_code", "angel_pin")) or not (supplied.get("angel_totp_code") or supplied.get("angel_totp_secret")):
+            raise HTTPException(status_code=422, detail="Enter API key, Client ID, MPIN and current six-digit TOTP (or configure ANGEL_TOTP_SECRET in Railway).")
         if body.remember_credentials:
             # Validate key and writable persistent path before contacting broker.
             _encryption_key()
@@ -713,9 +717,8 @@ def angel_connect(body: ConnectRequest, _: str = Depends(_device)) -> dict[str, 
         except AngelOneConfigError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except Exception as exc:
-            # SDK errors can include sensitive broker data; return only a safe class/message.
-            safe = str(exc).splitlines()[0][:180]
-            raise HTTPException(status_code=502, detail=f"Angel One login failed: {safe}") from exc
+            # Never echo SDK request/response details from a credential-bearing login.
+            raise HTTPException(status_code=502, detail="Angel One login failed. Verify API key, Client ID, MPIN, current TOTP and SmartAPI access.") from exc
         status = adapter.status()
         if not status["has_jwt_token"] or not status["has_feed_token"]:
             raise HTTPException(status_code=502, detail="Profile login succeeded but JWT/feed token readiness was not verified. Check SmartAPI SDK version/session response.")
