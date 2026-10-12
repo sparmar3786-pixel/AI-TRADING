@@ -65,6 +65,22 @@ class BackendApiTests(unittest.TestCase):
         self.assertNotIn("angel_totp", loaded)
         self.assertEqual(loaded["angel_client_code"], "example-client")
 
+    def test_indicator_snapshot_uses_repository_technical_helpers(self):
+        closes = [100.0 + index * 0.25 for index in range(60)]
+        candles = [
+            [f"2026-10-12T{9 + (index // 12):02d}:{(index % 12) * 5:02d}:00+05:30",
+             close, close + 1.0, close - 1.0, close, 1000.0]
+            for index, close in enumerate(closes)
+        ]
+        indicators = api._indicator_snapshot(closes, candles, candles[-20:])
+        self.assertIsNotNone(indicators["ema_fast_8"])
+        self.assertIsNotNone(indicators["ema_slow_21"])
+        self.assertIsNotNone(indicators["sma_20"])
+        self.assertIsNotNone(indicators["sma_50"])
+        self.assertIsNotNone(indicators["rsi_14"])
+        self.assertIsNotNone(indicators["underlying_atr_14"])
+        self.assertIsNotNone(indicators["vwap"])
+
     def test_backtest_accepts_flutter_form_payload(self):
         request = api.BacktestRequest(
             index="NIFTY",
