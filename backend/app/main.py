@@ -29,7 +29,7 @@ if str(ROOT) not in sys.path:
 
 from integrations.angelone_readonly import AngelOneConfigError, AngelOneReadOnly
 from integrations.angelone_stream import AngelOneStream, EXCHANGE_TYPES
-from integrations.news_sentiment import fetch_market_news_sentiment
+from integrations.news_sentiment import cached_market_news_sentiment, fetch_market_news_sentiment
 from quant_engine import evaluate_five_layer_signal, evaluate_futures_signal
 
 from strategies.technical import atr as technical_atr, ema as technical_ema, rsi as technical_rsi, rsi_reversion, sma as technical_sma
@@ -55,6 +55,8 @@ _adapter: AngelOneReadOnly | None = None
 _stream: AngelOneStream | None = None
 _stream_adapter: AngelOneReadOnly | None = None
 _stream_start_error: str | None = None
+_news_refreshing: set[str] = set()
+_news_lock = threading.Lock()
 _saved_meta: dict[str, Any] = {}
 _master_rows: list[dict[str, Any]] = []
 _master_loaded_at = 0.0
@@ -156,6 +158,28 @@ def _encryption_key() -> bytes:
     if len(key) != 32:
         raise HTTPException(status_code=503, detail="CREDENTIALS_ENCRYPTION_KEY must decode to exactly 32 bytes.")
     return key
+
+
+def _refresh_news_worker(index: str) -> None:
+    try:
+        fetch_market_news_sentiment(index)
+    except Exception:
+        pass
+    finally:
+        with _news_lock:
+            _news_refreshing.discard(index)
+
+
+def _schedule_news_refresh(indexes: list[str]) -> None:
+    if not (os.getenv("EXA_API_KEY", "").strip() or os.getenv("TAVILY_API_KEY", "").strip()):
+        return
+    for index in indexes:
+        key = index.strip().upper()
+        with _news_lock:
+            if key in _news_refreshing:
+                continue
+            _news_refreshing.add(key)
+        threading.Thread(target=_refresh_news_worker, args=(key,), name=f"news-{key.lower()}", daemon=True).start()
 
 
 def _credential_path() -> Path:
@@ -715,7 +739,10 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
         "option_pcr_bias": round(pcr_component, 4),
         "session_range_position": round(range_component, 4),
     }
-    sentiment = max(-1.0, min(1.0, sum(sentiment_components.values())))
+    technical_sentiment = max(-1.0, min(1.0, sum(sentiment_components.values())))
+    news_sentiment = cached_market_news_sentiment(index)
+    news_score = _number(news_sentiment.get("score"))
+    sentiment = max(-1.0, min(1.0, technical_sentiment * 0.85 + news_score * 0.15)) if news_score is not None else technical_sentiment
     trend_5 = timeframe_closes["5m"]
     trend = "BULLISH" if len(trend_5) >= 3 and trend_5[-1] > trend_5[-2] > trend_5[-3] else "BEARISH" if len(trend_5) >= 3 and trend_5[-1] < trend_5[-2] < trend_5[-3] else "MIXED"
     preferred_type = "CALL" if trend == "BULLISH" else "PUT" if trend == "BEARISH" else None
@@ -818,7 +845,9 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
         "source_timestamp": spot_ts, "timestamp": spot_ts,
         "live": result.get("data_fresh") is True, "day_move_pct": round(day_move * 100, 3),
         "sentiment_score": sentiment, "sentiment_label": "BULLISH" if sentiment >= 0.2 else "BEARISH" if sentiment <= -0.2 else "NEUTRAL",
-        "sentiment_source": "intraday OHLC + multi-timeframe trend + option OI PCR + top-five bid/ask depth",
+        "sentiment_source": "intraday OHLC + multi-timeframe trend + option OI PCR + top-five bid/ask depth" + (" + last-24h Exa/Tavily headlines" if news_score is not None else ""),
+        "technical_sentiment_score": technical_sentiment,
+        "news_sentiment": news_sentiment,
         "sentiment_components": sentiment_components, "pcr": pcr,
         "session_open": day_open, "session_high": day_high, "session_low": day_low,
         "session_range_position": round(day_range_position, 4),
@@ -1113,6 +1142,7 @@ def _get_signals(force: bool = False) -> dict[str, Any]:
     try:
         rows = _load_master()
         _start_stream(adapter, rows)
+        _schedule_news_refresh(list(INDEXES))
         signals: dict[str, Any] = {}
         market: dict[str, Any] = {}
         for index in INDEXES:
