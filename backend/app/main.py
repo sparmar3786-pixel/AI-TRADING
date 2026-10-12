@@ -54,6 +54,7 @@ _signal_cache: dict[str, Any] | None = None
 _signal_cache_at = 0.0
 _confirmation_states: dict[str, dict[str, Any]] = {}
 _last_market: dict[str, Any] = {}
+_option_history: dict[str, dict[str, float]] = {}
 
 
 class ConnectRequest(BaseModel):
@@ -378,12 +379,12 @@ def _wait_signal(index: str, reason: str) -> dict[str, Any]:
     }
 
 
-def _greeks_map(adapter: AngelOneReadOnly, name: str, expiry: str) -> dict[tuple[float, str], float]:
+def _greeks_map(adapter: AngelOneReadOnly, name: str, expiry: str) -> dict[tuple[float, str], dict[str, float | None]]:
     try:
         data = adapter.option_greeks(name, expiry).get("data") or []
     except Exception:
         return {}
-    mapped: dict[tuple[float, str], float] = {}
+    mapped: dict[tuple[float, str], dict[str, float | None]] = {}
     for row in data:
         if not isinstance(row, dict):
             continue
@@ -392,10 +393,54 @@ def _greeks_map(adapter: AngelOneReadOnly, name: str, expiry: str) -> dict[tuple
             continue
         kind = str(row.get("optionType") or row.get("optiontype") or "").upper()
         kind = "CALL" if kind in ("CE", "CALL") else "PUT" if kind in ("PE", "PUT") else ""
-        delta = _number(row.get("delta"))
-        if kind and delta is not None:
-            mapped[(strike, kind)] = delta
+        if not kind:
+            continue
+        mapped[(strike, kind)] = {
+            "delta": _number(row.get("delta")),
+            "gamma": _number(row.get("gamma")),
+            "theta": _number(row.get("theta")),
+            "vega": _number(row.get("vega")),
+            "iv": _number(row.get("impliedVolatility") or row.get("impliedvolatility") or row.get("iv")),
+        }
     return mapped
+
+
+def _market_chain_rows(options: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Map normalized live quotes to the Flutter option-chain schema.
+
+    OI and premium changes are deltas between observed snapshots, not invented
+    values. The first observation has null changes until a prior quote exists.
+    """
+    now = _utc_now()
+    output: list[dict[str, Any]] = []
+    for item in options:
+        token = str(item.get("token") or "")
+        ltp = _number(item.get("ltp"))
+        oi = _number(item.get("oi"))
+        previous = _option_history.get(token, {}) if token else {}
+        oi_change = oi - previous["oi"] if oi is not None and previous.get("oi") is not None else None
+        premium_change = (ltp - previous["ltp"]) / previous["ltp"] if ltp is not None and previous.get("ltp") not in (None, 0) else None
+        if token and (ltp is not None or oi is not None):
+            _option_history[token] = {"ltp": ltp, "oi": oi}  # type: ignore[dict-item]
+        stamp = _iso(item.get("timestamp"))
+        parsed = datetime.fromisoformat(stamp) if stamp else None
+        age = (now - parsed).total_seconds() if parsed else None
+        kind = str(item.get("option_type") or "").upper()
+        output.append({
+            "symbol": item.get("symbol"), "token": token,
+            "side": "CE" if kind == "CALL" else "PE" if kind == "PUT" else None,
+            "option_type": kind, "strike": item.get("strike"), "expiry": item.get("expiry"),
+            "ltp": ltp, "bid": item.get("bid"), "ask": item.get("ask"),
+            "volume": item.get("volume"), "oi": oi, "oi_change": oi_change,
+            "premium_change": premium_change, "iv": item.get("iv"),
+            "delta": item.get("delta"), "gamma": item.get("gamma"),
+            "theta": item.get("theta"), "vega": item.get("vega"),
+            "age_seconds": round(age, 2) if age is not None else None,
+            "timestamp": stamp, "source_timestamp": stamp,
+            "live": age is not None and 0 <= age <= 60,
+            "buy_depth": item.get("buy_depth"), "sell_depth": item.get("sell_depth"),
+        })
+    return output
 
 
 def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index: str) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -478,7 +523,8 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
         obid, oask, _, _ = _book(quote)
         volume = _number(quote.get("tradeVolume") or quote.get("volume"))
         oi = _number(quote.get("opnInterest") or quote.get("openInterest") or quote.get("oi"))
-        delta = greeks.get((strike or -1, kind or ""))
+        greek = greeks.get((strike or -1, kind or ""), {})
+        delta = _number(greek.get("delta"))
         timestamp = _quote_timestamp(quote)
         if not timestamp:
             # Never promote the spot timestamp or server fetch time to an option's timestamp.
@@ -546,11 +592,39 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
     if selected:
         result["strike"] = selected["strike"] if result.get("strike") is not None else None
         result["expiry"] = selected["expiry"] if result.get("expiry") is not None else None
+    result["reason"] = list(result.get("reasons") or [])
+    result["guards"] = list(result.get("reasons") or [])
+    result["option_side"] = "CE" if result.get("option_type") == "CALL" else "PE" if result.get("option_type") == "PUT" else None
+    result["confidence"] = None  # No calibrated probability model is available.
+    result["timeframe_analysis"] = {
+        "entry_timeframe": "5m", "setup_timeframe": "5m", "regime_timeframe": "15m",
+        "research_pack": {
+            "candidate_alignment": result.get("layers", {}).get("trend_sentiment", {}).get("trend", "UNKNOWN"),
+            "evidence_score": None,
+            "checks": {
+                "trend_following": {"state": result.get("layers", {}).get("trend_sentiment", {}).get("trend", "UNKNOWN")},
+                "mean_reversion": {"state": "NOT_COMPUTED"},
+                "option_oi_premium_flow": {"state": "PARTIAL" if normalized_options else "UNKNOWN"},
+                "execution_liquidity": {"state": "PASS" if result.get("layers", {}).get("option_selection", {}).get("pass") else "BLOCKED"},
+            },
+            "safety_note": "Deterministic gates only; no calibrated win probability or news sentiment.",
+        },
+    }
+    result["live_validation"] = {
+        "decision": result.get("decision", "WAIT"),
+        "verdict": "PASS" if result.get("decision") in ("CALL BUY", "PUT BUY") else "WARN",
+        "market_direction": result.get("layers", {}).get("trend_sentiment", {}).get("trend", "UNKNOWN"),
+        "market_age_seconds": result.get("layers", {}).get("data_quality", {}).get("age_seconds"),
+        "option_age_seconds": next((item.get("age_seconds") for item in _market_chain_rows(normalized_options) if item.get("strike") == result.get("strike")), None),
+        "ai_decision": "NOT_CONFIGURED",
+        "blocks": list(result.get("reasons") or []),
+    }
     market = {
         "ltp": spot, "age_seconds": result.get("layers", {}).get("data_quality", {}).get("age_seconds"),
         "feed_mode": "REST_FULL_DEPTH", "source": "angelone_smartapi",
-        "source_timestamp": spot_ts, "day_move_pct": round(day_move * 100, 3),
+        "source_timestamp": spot_ts, "timestamp": spot_ts, "day_move_pct": round(day_move * 100, 3),
         "sentiment_score": sentiment, "sentiment_label": "BULLISH" if sentiment >= 0.2 else "BEARISH" if sentiment <= -0.2 else "NEUTRAL",
+        "option_chain": _market_chain_rows(normalized_options),
     }
     return result, market
 
@@ -559,8 +633,8 @@ def _empty_payload(reason: str) -> dict[str, Any]:
     now = _utc_now().isoformat()
     return {
         "live": False, "last_fetch": None,
-        "feed": {"authenticated": False, "connected": False, "mode": "REST_FULL_DEPTH", "message": reason},
-        "store": {"source": "angelone_smartapi", "fresh": False, "message": reason},
+        "feed": {"authenticated": False, "connected": False, "mode": "REST_FULL_DEPTH", "message": reason, "stream_started": False, "stream_open": False, "tick_count": 0, "unique_tokens_seen": 0, "last_tick_age_seconds": None, "last_error": reason},
+        "store": {"source": "angelone_smartapi", "fresh": False, "message": reason, "update_count": 0, "last_update_age_seconds": None, "unique_tokens": 0},
         "ai": {"status": "not_configured", "message": "AI validation is not used to fabricate market data."},
         "market": {key: {"ltp": None, "age_seconds": None, "feed_mode": "NO_DATA"} for key in INDEXES},
         "signals": {key: _wait_signal(key, reason) for key in INDEXES},
@@ -756,11 +830,15 @@ def option_chain(index: str = Query(default="NIFTY"), _: str = Depends(_device))
             "ltp": _number(quote.get("ltp")), "bid": bid, "ask": ask,
             "volume": _number(quote.get("tradeVolume") or quote.get("volume")),
             "oi": _number(quote.get("opnInterest") or quote.get("openInterest") or quote.get("oi")),
-            "delta": greek_map.get((strike or -1, kind or "")),
+            "delta": (greek_map.get((strike or -1, kind or "")) or {}).get("delta"),
+            "gamma": (greek_map.get((strike or -1, kind or "")) or {}).get("gamma"),
+            "theta": (greek_map.get((strike or -1, kind or "")) or {}).get("theta"),
+            "vega": (greek_map.get((strike or -1, kind or "")) or {}).get("vega"),
+            "iv": (greek_map.get((strike or -1, kind or "")) or {}).get("iv"),
             "buy_depth": buy_depth, "sell_depth": sell_depth,
-            "source_timestamp": _quote_timestamp(quote),
+            "timestamp": _quote_timestamp(quote), "source_timestamp": _quote_timestamp(quote),
         })
-    return {"index": index, "spot": spot, "expiry": expiries[0].isoformat(), "contracts": output, "source": "angelone_smartapi", "observed_at": _utc_now().isoformat(), "signal_only": True}
+    return {"index": index, "spot": spot, "expiry": expiries[0].isoformat(), "contracts": output, "option_chain": _market_chain_rows(output), "source": "angelone_smartapi", "observed_at": _utc_now().isoformat(), "signal_only": True}
 
 
 @app.get("/v1/market/sentiment")
