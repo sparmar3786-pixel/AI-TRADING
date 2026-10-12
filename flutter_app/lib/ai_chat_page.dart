@@ -1,9 +1,4 @@
-import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:llama_flutter_android/llama_flutter_android.dart' as llama;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:stream_chat_flutter_ai/stream_chat_flutter_ai.dart';
 import 'api.dart';
@@ -23,10 +18,6 @@ class _AiChatPageState extends State<AiChatPage> {
   final ScrollController _scrollController = ScrollController();
   final List<Map<String, String>> _messages = [];
   bool _busy = false;
-  bool _localMode = false;
-  bool _localLoaded = false;
-  String? _localModelPath;
-  llama.LlamaController? _localController;
   String _aiProvider = 'unknown';
   String _aiModel = 'unknown';
   String _providerStatus = 'not checked';
@@ -44,115 +35,7 @@ class _AiChatPageState extends State<AiChatPage> {
   void initState() {
     super.initState();
     _selectedIndex = widget.selectedIndex;
-    _localMode = false; // AI Chat is cloud-only; local model management lives in AI Access.
     _checkAiProvider();
-    _restoreLocalModelPath();
-  }
-
-  Future<void> _restoreLocalModelPath() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final savedPaths = prefs.getStringList('fresh_local_qwen_model_paths') ?? <String>[];
-      final legacyPath = prefs.getString('fresh_local_qwen_model_path');
-      final paths = <String>{
-        ...savedPaths.where((path) => path.trim().isNotEmpty),
-        if (legacyPath != null && legacyPath.trim().isNotEmpty) legacyPath,
-      }.toList();
-      final selected = prefs.getString('fresh_local_qwen_selected_model_path') ?? legacyPath;
-      if (mounted) {
-        setState(() {
-          _localModelPaths = paths;
-          _localModelPath = selected != null && paths.contains(selected)
-              ? selected
-              : (paths.isNotEmpty ? paths.first : null);
-        });
-      }
-    } catch (_) {
-      // A moved or cleared model file is simply selected again by the user.
-    }
-  }
-
-  Future<void> _sendLocal(String question, List<Map<String, String>> history) async {
-    final controller = _localController;
-    if (!_localLoaded || controller == null) {
-      throw Exception('Local Qwen is not loaded. Choose the GGUF file and tap LOAD OFFLINE QWEN.');
-    }
-    Map<String, dynamic> engineContext = const {};
-    try {
-      engineContext = await FreshApi(widget.backendUrl).getJson(
-        '/v1/ai/local-context?index=${Uri.encodeQueryComponent(_selectedIndex)}',
-      );
-    } catch (_) {
-      // Offline chat remains available; explicitly tell the model context was unavailable.
-      engineContext = const {'context_fetch_status': 'OFFLINE_OR_UNAVAILABLE'};
-    }
-    final contextText = jsonEncode(engineContext);
-    final boundedContext = contextText.length > 14000
-        ? '${contextText.substring(0, 14000)} [context truncated]'
-        : contextText;
-    final promptMessages = <llama.ChatMessage>[
-      llama.ChatMessage(
-        role: 'system',
-        content: 'You are Fresh Local Qwen, running on this phone. You are an advisory validator, not an order engine. The JSON context below may include the APK/backend market snapshot, deterministic strategy, cloud AI decision, and Exa/Tavily evidence. Read it before answering. If context_fetch_status is OFFLINE_OR_UNAVAILABLE, or market_data_status is not LIVE_FRESH, explicitly say live context is unavailable/stale and do not issue actionable entries. Never invent prices, option strikes, entry, exit, stop-loss, target, P&L, source links, or dates. Cross-check proposed values against supplied quotes and flag missing/stale/conflicting fields. Output a concise verdict (PASS / WARN / REJECT), exact mismatches, missing data, and risk checks. Never promise zero mistakes or guaranteed profit. Deterministic engine, price freshness, and risk gates remain authoritative. Current engine context JSON: ' + boundedContext,
-      ),
-      ...history.map((message) => llama.ChatMessage(
-        role: message['role']!,
-        content: message['content']!,
-      )),
-      llama.ChatMessage(role: 'user', content: question),
-    ];
-    final answerIndex = _messages.length;
-    setState(() => _messages.add({'role': 'assistant', 'content': ''}));
-    final output = StringBuffer();
-    final done = Completer<void>();
-    controller.generateChat(
-      messages: promptMessages,
-      template: 'chatml',
-      temperature: 0.35,
-      maxTokens: 512,
-    ).listen(
-      (token) {
-        output.write(token);
-        if (mounted) {
-          setState(() => _messages[answerIndex]['content'] = output.toString());
-          _scrollToBottom();
-        }
-      },
-      onError: (Object error, StackTrace stack) {
-        if (!done.isCompleted) done.completeError(error, stack);
-      },
-      onDone: () {
-        if (!done.isCompleted) done.complete();
-      },
-      cancelOnError: true,
-    );
-    await done.future;
-    if (output.toString().trim().isEmpty) {
-      throw Exception('Local model returned an empty answer.');
-    }
-    final validationRequest = RegExp(
-      r'validate|validation|review engine|check (?:the )?(?:signal|trade|entry|exit)|stop.?loss|target|strike',
-      caseSensitive: false,
-    ).hasMatch(question);
-    if (validationRequest) {
-      try {
-        await FreshApi(widget.backendUrl).postJson('/v1/ai/local-validation', {
-          'index': _selectedIndex,
-          'model_name': File(_localModelPath!).uri.pathSegments.last,
-          'response': output.toString(),
-          'context_market_data_status': (engineContext['market_data_status'] ?? 'UNKNOWN').toString(),
-        });
-      } catch (_) {
-        // A local response must remain usable when the phone is offline.
-      }
-    }
-    if (mounted) {
-      setState(() {
-        _aiProvider = 'local';
-        _aiModel = File(_localModelPath!).uri.pathSegments.last;
-        _providerStatus = 'OFFLINE';
-      });
-    }
   }
 
   Future<void> _checkAiProvider() async {
@@ -182,20 +65,10 @@ class _AiChatPageState extends State<AiChatPage> {
   void dispose() {
     _composerController.dispose();
     _scrollController.dispose();
-    final controller = _localController;
-    _localController = null;
-    _localLoaded = false;
-    // State.dispose is synchronous; make native cleanup errors visible in logs.
-    if (controller != null) {
-      controller.dispose().catchError((Object error, StackTrace stack) {
-        debugPrint('FRESH_QWEN_DISPOSE_ERROR: $error');
-      });
-    }
     super.dispose();
   }
 
   Future<void> _send(String rawText) async {
-    _localMode = false; // Cloud chat uses Gemini with configured provider failover; Qwen stays on-device.
     final question = rawText.trim();
     if (question.isEmpty || _busy) return;
     final history = _messages.map((message) => {
@@ -211,36 +84,6 @@ class _AiChatPageState extends State<AiChatPage> {
     _scrollToBottom();
 
     try {
-      if (_localMode && _localLoaded) {
-        try {
-          await _sendLocal(question, history);
-          return;
-        } catch (localError) {
-          // Remove the empty streaming placeholder created by a failed local inference.
-          if (_messages.isNotEmpty &&
-              _messages.last['role'] == 'assistant' &&
-              (_messages.last['content'] ?? '').isEmpty) {
-            _messages.removeLast();
-          }
-          if (!mounted) return;
-          setState(() {
-            _localLoaded = false;
-            _localMode = false;
-            _providerStatus = 'CLOUD FALLBACK • LOCAL INFERENCE FAILED';
-            _error = 'Offline Qwen inference failed; switched to Cloud AI. Local error: ${localError.toString().replaceFirst('Exception: ', '')}';
-          });
-          // Continue through the normal cloud request below.
-        }
-      } else if (_localMode) {
-        // The user selected local mode but no model is loaded; transparently use cloud.
-        if (mounted) {
-          setState(() {
-            _localMode = false;
-            _providerStatus = 'CLOUD FALLBACK • MODEL NOT LOADED';
-            _error = 'Offline Qwen is not loaded. Using Cloud AI for this message.';
-          });
-        }
-      }
       final response = await FreshApi(widget.backendUrl).aiChat(
         index: _selectedIndex,
         question: question,
