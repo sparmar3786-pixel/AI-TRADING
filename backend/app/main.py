@@ -1186,7 +1186,7 @@ def _commodity_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]]) -
                     parsed_time = datetime.fromisoformat(candle_time) if candle_time else None
                     if parsed_time is not None and parsed_time.astimezone(IST).date() == today:
                         today_rows.append(candle)
-                if len(closes) >= 30:
+                if len(closes) >= 30 and live:
                     trend = "BULLISH" if closes[-1] > closes[-2] > closes[-3] else "BEARISH" if closes[-1] < closes[-2] < closes[-3] else "MIXED"
                     indicators = _indicator_snapshot(closes, candle_rows, today_rows)
                     session_open = _number(today_rows[0][1]) if today_rows else closes[-1]
