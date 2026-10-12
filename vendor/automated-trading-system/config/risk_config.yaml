@@ -1,0 +1,85 @@
+# Risk Management Configuration
+
+# Portfolio Risk Limits
+portfolio_limits:
+  max_drawdown: 0.20  # 20% maximum drawdown
+  max_daily_loss: 0.05  # 5% maximum daily loss  
+  max_weekly_loss: 0.10  # 10% maximum weekly loss
+  var_confidence: 0.05  # 5% Value at Risk confidence level
+  
+# Position Risk Limits  
+position_limits:
+  max_position_size: 0.30  # 30% maximum per position
+  max_positions: 20  # Maximum number of positions
+  min_position_size: 0.01  # 1% minimum position size
+  concentration_limit: 0.40  # 40% max in any sector
+
+# Sector Allocation Limits
+sector_limits:
+  Technology: 0.40  # 40% max in technology
+  Healthcare: 0.25
+  Financials: 0.25  
+  Consumer: 0.20
+  Industrial: 0.20
+  Energy: 0.15
+  Utilities: 0.10
+  Materials: 0.15
+  "Real Estate": 0.10
+  Telecommunications: 0.10
+
+# Kelly Criterion Settings
+kelly:
+  enabled: true
+  safety_fraction: 0.25  # Use 25% of Kelly recommendation
+  min_win_rate: 0.4  # Minimum win rate to use Kelly
+  min_trades: 30  # Minimum trades for Kelly calculation
+
+# Correlation Limits
+correlation:
+  max_correlation: 0.8  # Maximum correlation between positions
+  correlation_lookback: 252  # Days for correlation calculation
+  
+# Volatility Controls
+volatility:
+  max_portfolio_volatility: 0.20  # 20% annual volatility
+  volatility_lookback: 60  # Days for volatility calculation
+  volatility_target: 0.15  # Target portfolio volatility
+
+# Stop Loss Settings
+stop_loss:
+  enabled: true
+  individual_stop: 0.15  # 15% stop loss per position
+  trailing_stop: true
+  portfolio_stop: 0.10  # 10% portfolio stop loss
+
+# Emergency Risk Controls
+emergency:
+  circuit_breaker: 0.15  # 15% daily loss triggers emergency stop
+  liquidation_threshold: 0.25  # 25% drawdown triggers full liquidation
+  margin_threshold: 1.5  # 150% margin requirement
+  
+# Risk Monitoring
+monitoring:
+  real_time_checks: true
+  risk_report_frequency: "daily"
+  alert_thresholds:
+    position_limit_breach: 0.05  # 5% over limit triggers alert
+    sector_limit_breach: 0.03    # 3% over sector limit
+    correlation_breach: 0.85     # 85% correlation triggers alert
+
+# Stress Testing
+stress_test:
+  enabled: true
+  scenarios:
+    - name: "Market Crash"
+      market_shock: -0.30  # 30% market drop
+    - name: "Volatility Spike"  
+      volatility_multiplier: 3.0
+    - name: "Correlation Spike"
+      correlation_floor: 0.9  # All positions 90% correlated
+
+# Backtesting Risk Parameters  
+backtest_risk:
+  max_leverage: 1.0  # No leverage in backtests
+  transaction_costs: 0.001  # 0.1% transaction costs
+  slippage: 0.0005  # 0.05% slippage assumption

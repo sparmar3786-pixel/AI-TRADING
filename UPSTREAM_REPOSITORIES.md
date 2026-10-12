@@ -100,3 +100,15 @@ Destination: https://github.com/sparmar3786-pixel/AI-TRADING
 
 ## Current status
 The original research toolkit is documented in `INTEGRATION_GUIDE.md`. Most upstream sources remain reference-only/pending review. See `UPSTREAM_AUDIT.md` and `COPY_STATUS.md`. This inventory intentionally does not claim that every repository has been copied.
+
+ 
+## Continuation import status (updated 2026-10-12)
+
+The separate branch `continue-upstream-import-20261012` and [PR #4](https://github.com/sparmar3786-pixel/AI-TRADING/pull/4) now contain selected vendor snapshots from the upstream sources below. This is **not** a statement that all listed sources—or 500 repositories—have been completely cloned.
+
+- MIT: `qrak/LLM_trader`, `asavinov/intelligent-trading-bot`, `Sebacaraballo/Trading-Bot`, `FalconTrading06/llm-tradebot`, `karimcodes/systematic-trading`, `Jaydot33/automated-trading-system`, `Open-Finance-Lab/FinLLM-Leaderboard`, `AI4Finance-Foundation/FinRL`, `virattt/ai-hedge-fund`, `schen9999/financial-agent`, `zerodha/pykiteconnect`.
+- Apache-2.0: `tripolskypetr/backtest-kit` is MIT (TypeScript); `QuantConnect/Lean` and `RuchiTanmay/nselib` are Apache-2.0.
+- CC0-1.0 catalog: `georgezouq/awesome-ai-in-finance`.
+- `TradingAgents`, `FinGPT`, `FinRobot`, and `Qlib` had prior partial vendor trees documented before this continuation.
+
+The branch currently represents **15 distinct upstream projects across 149 vendored files** (licenses, documentation, configuration/dependency metadata, examples, tests and source combined). Most projects are partial subsets; `vendor/nselib/` and `vendor/pykiteconnect/` contain their tracked textual Python source/examples/tests/config as inspected in the fetched repository tree, with IDE-only metadata excluded. All code remains isolated under `vendor/`; no third-party strategy or broker client was wired into production execution. Tests, dependency installs, security checks and Railway deployment are pending.
