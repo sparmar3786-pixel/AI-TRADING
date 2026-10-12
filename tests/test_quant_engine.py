@@ -80,6 +80,23 @@ class FiveLayerEngineTests(unittest.TestCase):
         self.assertEqual(result["decision"], "WAIT")
         self.assertFalse(result["layers"]["trend_sentiment"]["pass"])
 
+    def test_indicator_alignment_blocks_conflicting_ema_or_macd(self):
+        self.snapshot["indicators"] = {
+            "ema_fast_8": 22010,
+            "ema_slow_21": 22000,
+            "rsi_14": 61,
+            "macd_histogram": 2.5,
+            "vwap": 21980,
+        }
+        aligned = evaluate_five_layer_signal(self.snapshot, now=self.now)
+        self.assertTrue(aligned["layers"]["trend_sentiment"]["pass"])
+
+        self.snapshot["indicators"]["ema_fast_8"] = 21990
+        self.snapshot["indicators"]["ema_slow_21"] = 22000
+        conflicted = evaluate_five_layer_signal(self.snapshot, now=self.now)
+        self.assertFalse(conflicted["layers"]["trend_sentiment"]["pass"])
+        self.assertEqual(conflicted["decision"], "WAIT")
+
     def test_wide_option_spread_blocks_contract_selection(self):
         self.snapshot["option_chain"][0]["bid"] = 90
         self.snapshot["option_chain"][0]["ask"] = 110
