@@ -1,0 +1,26 @@
+# Environments
+venv/
+.venv/
+pyvenv.cfg
+
+# Python cached files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+nselib.egg-info/
+
+# Data files
+*.csv
+*.xml
+
+# IDE & OS files
+.idea/
+.vscode/
+.DS_Store
+.github
+docs/
