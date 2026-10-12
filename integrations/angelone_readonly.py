@@ -7,6 +7,7 @@ placement, modification, or cancellation methods.
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 from datetime import datetime, timezone
@@ -116,7 +117,14 @@ class AngelOneReadOnly:
             api_key = self._credential("ANGEL_API_KEY")
             client_code = self._credential("ANGEL_CLIENT_CODE")
             pin = self._credential("ANGEL_PIN")
-            totp_secret = self._credential("ANGEL_TOTP_SECRET")
+            # The mobile form supplies a current six-digit TOTP code. Server
+            # environment configuration may instead supply the TOTP seed.
+            totp_code = (self._credentials.get("angel_totp_code") or self._credentials.get("angel_totp") or "").strip()
+            totp_secret = (self._credentials.get("angel_totp_secret") or self._credentials.get("totp_secret") or os.getenv("ANGEL_TOTP_SECRET", "")).strip()
+            if not totp_code and not totp_secret:
+                raise AngelOneConfigError("Missing current TOTP code or ANGEL_TOTP_SECRET")
+            if totp_code and not re.fullmatch(r"\d{6}", totp_code):
+                raise ValueError("Current TOTP must be a six-digit code")
             try:
                 import pyotp
                 from SmartApi import SmartConnect
@@ -125,8 +133,9 @@ class AngelOneReadOnly:
                     "Install the optional Angel One dependencies: smartapi-python and pyotp"
                 ) from exc
 
+            otp = totp_code if totp_code else pyotp.TOTP(totp_secret).now()
             client = SmartConnect(api_key=api_key)
-            response = _ok(client.generateSession(client_code, pin, pyotp.TOTP(totp_secret).now()))
+            response = _ok(client.generateSession(client_code, pin, otp))
             data = response.get("data") or {}
             # SDK generateSession may return a profile object after it has
             # already populated these token properties.
