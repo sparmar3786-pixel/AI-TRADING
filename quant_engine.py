@@ -284,3 +284,137 @@ def evaluate_five_layer_signal(
         "score_semantics": "Layer pass status is a rule checklist, not probability of profit",
         "signal_only": True,
     }
+
+
+def evaluate_futures_signal(
+    snapshot: dict[str, Any],
+    *,
+    now: datetime | None = None,
+    confirmation_state: dict[str, Any] | None = None,
+    max_data_age_seconds: float = 60.0,
+    confirmation_seconds: int = 600,
+    max_confirmation_gap_seconds: int = 60,
+) -> dict[str, Any]:
+    """Five-layer read-only signal evaluator for liquid MCX futures.
+
+    Futures use the underlying ATR and a 2R target; no option strike is fabricated.
+    """
+    now_utc = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    reasons: list[str] = []
+    layers: dict[str, dict[str, Any]] = {}
+
+    observed = _timestamp(snapshot.get("observed_at"))
+    age = (now_utc - observed).total_seconds() if observed else None
+    ltp = _number(snapshot.get("underlying_ltp"))
+    data_ok = observed is not None and age is not None and 0 <= age <= max_data_age_seconds and ltp is not None and ltp > 0
+    layers["data_quality"] = {"pass": data_ok, "age_seconds": round(age, 2) if age is not None else None, "max_age_seconds": max_data_age_seconds}
+    if not data_ok:
+        reasons.append("Commodity quote is missing, invalid, future-dated or stale")
+
+    raw_tfs = snapshot.get("timeframe_closes")
+    raw_tfs = raw_tfs if isinstance(raw_tfs, dict) else {}
+    timeframe_states = {str(tf): _closes_direction(values) for tf, values in raw_tfs.items()}
+    directional = [value for value in timeframe_states.values() if value in ("BULLISH", "BEARISH")]
+    trend = "UNKNOWN" if len(directional) < 2 else "CONFLICT" if len(set(directional)) > 1 else directional[0]
+    sentiment = _number(snapshot.get("sentiment_score"))
+    sentiment_direction = "BULLISH" if sentiment is not None and sentiment >= 0.2 else "BEARISH" if sentiment is not None and sentiment <= -0.2 else "NEUTRAL" if sentiment is not None and -1 <= sentiment <= 1 else "UNKNOWN"
+    indicators = snapshot.get("indicators") if isinstance(snapshot.get("indicators"), dict) else {}
+    checks: dict[str, bool] = {}
+    fast, slow = _number(indicators.get("ema_fast_8")), _number(indicators.get("ema_slow_21"))
+    if fast is not None and slow is not None:
+        checks["ema_alignment"] = ("BULLISH" if fast > slow else "BEARISH" if fast < slow else "NEUTRAL") == trend
+    rsi = _number(indicators.get("rsi_14"))
+    if rsi is not None:
+        checks["rsi_not_extreme"] = not ((trend == "BULLISH" and rsi >= 75) or (trend == "BEARISH" and rsi <= 25))
+    macd = _number(indicators.get("macd_histogram"))
+    if macd is not None:
+        checks["macd_alignment"] = macd > 0 if trend == "BULLISH" else macd < 0 if trend == "BEARISH" else False
+    vwap = _number(indicators.get("vwap"))
+    if vwap is not None and ltp is not None:
+        checks["vwap_alignment"] = ltp >= vwap if trend == "BULLISH" else ltp <= vwap if trend == "BEARISH" else False
+    indicators_ok = all(checks.values()) if checks else True
+    layer2_ok = trend in ("BULLISH", "BEARISH") and sentiment_direction in (trend, "NEUTRAL") and indicators_ok
+    layers["trend_sentiment"] = {
+        "pass": layer2_ok, "trend": trend, "timeframes": timeframe_states,
+        "sentiment_score": sentiment, "sentiment_direction": sentiment_direction,
+        "indicator_checks": checks, "indicators_pass": indicators_ok,
+    }
+    if not layer2_ok:
+        reasons.append("Commodity trend, indicators or session sentiment are conflicting")
+
+    flow = snapshot.get("order_flow") if isinstance(snapshot.get("order_flow"), dict) else {}
+    bid, ask, flow_ltp = map(_number, (flow.get("bid"), flow.get("ask"), flow.get("ltp")))
+    buy_volume, sell_volume = map(_number, (flow.get("buy_volume"), flow.get("sell_volume")))
+    flow_ok = (
+        bid is not None and ask is not None and bid > 0 and ask > bid
+        and flow_ltp is not None and bid <= flow_ltp <= ask
+        and buy_volume is not None and sell_volume is not None
+        and buy_volume + sell_volume > 0
+        and ((buy_volume >= sell_volume) if trend == "BULLISH" else (sell_volume >= buy_volume) if trend == "BEARISH" else False)
+    )
+    spread_pct = ((ask - bid) / ((ask + bid) / 2) * 100) if bid is not None and ask is not None and ask > bid else None
+    flow_ok = flow_ok and spread_pct is not None and spread_pct <= 0.5
+    layers["order_flow"] = {"pass": flow_ok, "bid": bid, "ask": ask, "spread_pct": round(spread_pct, 4) if spread_pct is not None else None, "buy_volume": buy_volume, "sell_volume": sell_volume}
+    if not flow_ok:
+        reasons.append("Commodity bid/ask, depth imbalance or spread does not pass the execution gate")
+
+    contract = snapshot.get("contract") if isinstance(snapshot.get("contract"), dict) else {}
+    volume, oi, lot_size = map(_number, (contract.get("volume"), contract.get("oi"), contract.get("lot_size")))
+    expiry_text = str(contract.get("expiry") or "")
+    expiry = _timestamp(expiry_text + "T23:59:00+00:00") if expiry_text else None
+    contract_ok = volume is not None and volume > 0 and oi is not None and oi > 0 and lot_size is not None and lot_size > 0 and expiry is not None and expiry > now_utc
+    layers["contract_selection"] = {"pass": contract_ok, "symbol": contract.get("symbol"), "expiry": expiry_text or None, "volume": volume, "oi": oi, "lot_size": lot_size, "spread_pct": round(spread_pct, 4) if spread_pct is not None else None}
+    if not contract_ok:
+        reasons.append("Active commodity contract lacks valid expiry, volume, OI or lot size")
+
+    atr = _number(indicators.get("underlying_atr_14"))
+    entry = ask if trend == "BULLISH" else bid if trend == "BEARISH" else None
+    risk_distance = 1.5 * atr if atr is not None and atr > 0 else None
+    stop = target = None
+    if entry is not None and risk_distance is not None:
+        if trend == "BULLISH":
+            stop, target = entry - risk_distance, entry + 2.0 * risk_distance
+        else:
+            stop, target = entry + risk_distance, entry - 2.0 * risk_distance
+    risk_ok = entry is not None and entry > 0 and stop is not None and target is not None and stop > 0 and target > 0 and risk_distance is not None
+    layers["risk_levels"] = {
+        "pass": risk_ok, "entry_reference": entry,
+        "stop_loss": round(stop, 4) if stop is not None else None,
+        "target": round(target, 4) if target is not None else None,
+        "reward_risk": 2.0 if risk_ok else None,
+        "method": "1.5 x underlying ATR stop; 2R target; signal only",
+    }
+    if not risk_ok:
+        reasons.append("Commodity ATR or valid positive stop/target levels are missing")
+
+    all_pass = data_ok and layer2_ok and flow_ok and contract_ok and risk_ok
+    side = "BUY FUTURE" if trend == "BULLISH" else "SELL FUTURE" if trend == "BEARISH" else None
+    candidate = f"{contract.get('symbol')}|{contract.get('expiry')}|{side}" if all_pass and side else None
+    state = confirmation_state if isinstance(confirmation_state, dict) else {}
+    since, last_seen = _timestamp(state.get("since_utc")), _timestamp(state.get("last_seen_utc"))
+    gap = (now_utc - last_seen).total_seconds() if last_seen else None
+    matches = candidate is not None and state.get("candidate_key") == candidate
+    if not all_pass or candidate is None:
+        new_state, decision, stability = {}, "WAIT", "BLOCKED"
+    elif not matches or since is None or last_seen is None or gap is None or gap < 0 or gap > max_confirmation_gap_seconds:
+        new_state = {"candidate_key": candidate, "since_utc": now_utc.isoformat(), "last_seen_utc": now_utc.isoformat()}
+        decision, stability = "WAIT", "CONFIRMING"
+        reasons.append("New commodity candidate or refresh gap: restarting 10-minute confirmation")
+    else:
+        elapsed = (now_utc - since).total_seconds()
+        new_state = {"candidate_key": candidate, "since_utc": since.isoformat(), "last_seen_utc": now_utc.isoformat()}
+        if elapsed < confirmation_seconds:
+            decision, stability = "WAIT", "CONFIRMING"
+            reasons.append(f"Commodity signal stability gate: {int(confirmation_seconds - elapsed)} seconds remaining")
+        else:
+            decision, stability = side, "CONFIRMED"
+    layers["confirmation"] = {"pass": decision in ("BUY FUTURE", "SELL FUTURE"), "state": stability, "required_seconds": confirmation_seconds}
+    return {
+        "decision": decision, "candidate_decision": side if candidate else "WAIT",
+        "direction": trend, "entry": round(entry, 4) if candidate and entry is not None else None,
+        "stop_loss": round(stop, 4) if candidate and stop is not None else None,
+        "target": round(target, 4) if candidate and target is not None else None,
+        "layers": layers, "reasons": reasons, "confirmation_state": new_state,
+        "signal_stability": {"state": stability, "required_minutes": 10, "required_seconds": confirmation_seconds},
+        "signal_only": True, "order_placement_enabled": False,
+    }
