@@ -130,3 +130,10 @@ Verified current branch tree count: **204 vendored files across selected upstrea
 Continued copying the remaining core Python modules from the Apache-2.0 PyAlgoTrade source package, including strategy analyzers, optimizer modules, plotting/TALib adapters, BitcoinCharts and Bitstamp adapters, utilities, Twitter feed and websocket modules. Files remain isolated under vendor/PyAlgoTrade; external credentials/services and optional dependencies are not configured here.
 
 Verified current branch tree count: **246 vendored files across selected upstream snapshots**, including **91 PyAlgoTrade files**. PyAlgoTrade source package inventory: **89 Python modules; 89 present under vendor/PyAlgoTrade; 0 still missing** by path comparison. This does not indicate complete import of all other upstream repositories or all 500 claimed URLs. No tests or runtime integration are claimed.
+
+
+## PyAlgoTrade sample strategies and tutorials added — 2026-10-12
+
+Added selected upstream sample strategies and tutorials for RSI, SMA crossover, VWAP momentum, event studies, market timing, statistical arbitrage, technical indicators, and local/server optimizer examples. These are source examples only; any external data feeds and optional services remain unconfigured, and the examples have not been executed in this project.
+
+Verified current branch tree count: **267 vendored files across selected upstream snapshots**, including **112 PyAlgoTrade files**. These are selected snapshots, not full clones of every upstream repository. The original complete list of 500 claimed repository URLs is still needed to reconcile the remaining sources accurately.
