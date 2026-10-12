@@ -62,6 +62,7 @@ class FreshHome extends StatefulWidget {
 
 class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
   String backendUrl = AppConfig.backendUrl;
+  String signalBackendUrl = AppConfig.signalBackendUrl;
   String selectedIndex = 'NIFTY';
   bool apiOnline = false;
   bool signalsEndpointOnline = false;
@@ -119,6 +120,19 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           row['strike'] != null && row['option_side'] != null &&
           row['entry'] != null && row['stop_loss'] != null && row['target'] != null &&
           validation['verdict'] == 'PASS' && guards.isEmpty;
+      final serverStability = Map<String, dynamic>.from(row['signal_stability'] as Map? ?? const {});
+      if (isCandidate && row['data_fresh'] == true && serverStability['state'] == 'CONFIRMED') {
+        // The server already enforced 600 seconds of continuous market evidence;
+        // don't accidentally impose a second ten-minute wait on the same signal.
+        stableIndices.add(index);
+        row['signal_stability'] = <String, dynamic>{
+          ...serverStability,
+          'required_minutes': 10,
+          'server_confirmed': true,
+        };
+        rawSignals[entry.key] = row;
+        continue;
+      }
       final storageKey = 'ai_trading_signal_gate_$index';
       if (!isCandidate) {
         await prefs.remove(storageKey);
@@ -214,23 +228,24 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     Map<String, dynamic> latestSystemDiagnostics = const {};
     String? latestSystemDiagnosticsError;
     try {
+      // Keep the existing AI/chat backend intact while live market data and
+      // Angel One authentication use the dedicated AI-TRADING signal service.
       final api = FreshApi(backendUrl);
+      final signalApi = FreshApi(signalBackendUrl);
       await api.health();
-      // Broker/session diagnostics must not prevent the independent signal
-      // endpoint from being queried. A broken /v1/angel/status route used to
-      // abort refresh here and incorrectly mask signal/API diagnostics.
       Map<String,dynamic> a = const {};
       String? angelStatusError;
       try {
-        a = await api.angelStatus();
+        a = await signalApi.angelStatus();
       } catch (e) {
         angelStatusError = e.toString().replaceFirst('Exception: ', '');
       }
       Map<String,dynamic> liveStatus = const {};
-      try { liveStatus = await api.liveExecutionStatus(); } catch (_) {}
+      try { liveStatus = await signalApi.liveExecutionStatus(); } catch (_) {}
       Map<String,dynamic> s;
       try {
-        s = await api.signals(emaFast: emaFast, emaSlow: emaSlow);
+        await signalApi.health();
+        s = await signalApi.signals(emaFast: emaFast, emaSlow: emaSlow);
         s = await _applyTenMinuteSignalGate(s);
         // API success is independent of local cache persistence. A full device,
         // oversized cached payload or SharedPreferences write error must not
@@ -247,7 +262,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         s = _makeCachedSignalsNonActionable(await _loadCachedSignals());
       }
       try {
-        latestSystemDiagnostics = await api.systemDiagnostics();
+        latestSystemDiagnostics = await signalApi.systemDiagnostics();
         latestSystemDiagnosticsError = null;
       } catch (e) {
         latestSystemDiagnostics = const {};
@@ -438,10 +453,11 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         RiskPage(index:selectedIndex,signal:_signal(selectedIndex),plans:tradePlans),
         CommodityPage(items:commodities),
         BacktestingPage(backendUrl: backendUrl),
-        ApiPage(backendUrl:backendUrl,feed:feed,storeDiagnostics:storeDiagnostics,market:market,onSaved:(url){setState(()=>backendUrl=url);refresh();}),
+        ApiPage(backendUrl:backendUrl,signalBackendUrl:signalBackendUrl,feed:feed,storeDiagnostics:storeDiagnostics,market:market,onSaved:(url){setState(()=>backendUrl=url);refresh();}),
         AiAccessPage(backendUrl:backendUrl, onOpenLocalQwen: () => DefaultTabController.of(context).animateTo(tabs.indexOf('AI Chat'))),
         DataHealthPage(
           backendUrl: backendUrl,
+          signalBackendUrl: signalBackendUrl,
           apiOnline: apiOnline,
           signalsOnline: signalsEndpointOnline,
           angelOnline: angelOnline,
@@ -523,6 +539,7 @@ IconData _tabIcon(int index) => switch (index) {
 class DataHealthPage extends StatelessWidget {
   const DataHealthPage({
     required this.backendUrl,
+    required this.signalBackendUrl,
     required this.apiOnline,
     required this.signalsOnline,
     required this.angelOnline,
@@ -535,6 +552,7 @@ class DataHealthPage extends StatelessWidget {
     super.key,
   });
   final String backendUrl;
+  final String signalBackendUrl;
   final bool apiOnline, signalsOnline, angelOnline;
   final String status;
   final Map<String, dynamic> diagnostics;
@@ -553,7 +571,8 @@ class DataHealthPage extends StatelessWidget {
         _healthRow('Backend / Railway API', apiOnline),
         _healthRow('Signals API response', signalsOnline),
         _healthRow('Angel One authenticated session', angelOnline),
-        ListTile(leading: const Icon(Icons.link), title: const Text('Configured backend'), subtitle: SelectableText(backendUrl)),
+        ListTile(leading: const Icon(Icons.link), title: const Text('AI / chat backend'), subtitle: SelectableText(backendUrl)),
+        ListTile(leading: const Icon(Icons.show_chart), title: const Text('Live signals backend'), subtitle: SelectableText(signalBackendUrl)),
         ListTile(leading: const Icon(Icons.info_outline), title: const Text('Current service status'), subtitle: Text(status)),
         ListTile(leading: const Icon(Icons.history), title: const Text('Last market snapshot'), subtitle: Text(lastFetch ?? 'No successful market fetch recorded')),
       ])),
@@ -1745,8 +1764,9 @@ class CommodityPage extends StatelessWidget {
 }
 
 class ApiPage extends StatefulWidget {
-  const ApiPage({required this.backendUrl,required this.feed,required this.storeDiagnostics,required this.market,required this.onSaved,super.key});
+  const ApiPage({required this.backendUrl,required this.signalBackendUrl,required this.feed,required this.storeDiagnostics,required this.market,required this.onSaved,super.key});
   final String backendUrl;
+  final String signalBackendUrl;
   final Map<String,dynamic> feed,storeDiagnostics,market;
   final ValueChanged<String> onSaved;
   @override State<ApiPage> createState()=>_ApiPageState();
@@ -1766,7 +1786,7 @@ class _ApiPageState extends State<ApiPage> {
 
   Future<void> loadSavedStatus() async {
     try {
-      final result=await FreshApi(widget.backendUrl.trim()).angelStatus();
+      final result=await FreshApi(widget.signalBackendUrl.trim()).angelStatus();
       if(!mounted)return;
       setState(()=>savedStatus=result);
       if(result['stored_session']==true) {
@@ -1786,7 +1806,7 @@ class _ApiPageState extends State<ApiPage> {
   Future<void> connect() async {
     setState(()=>working=true);
     try {
-      final api=FreshApi(widget.backendUrl.trim());
+      final api=FreshApi(widget.signalBackendUrl.trim());
       final result=await api.connectAngel(payload());
       if (result['authenticated'] != true ||
           result['has_jwt_token'] != true ||
@@ -1810,6 +1830,12 @@ class _ApiPageState extends State<ApiPage> {
 
   @override Widget build(BuildContext context)=>ListView(padding:const EdgeInsets.all(10),children:[
     const Section('Angel One • SmartAPI'),
+    ListTile(
+      dense: true,
+      leading: const Icon(Icons.cloud_done_outlined),
+      title: const Text('Live signal service'),
+      subtitle: SelectableText(widget.signalBackendUrl),
+    ),
     if(savedStatus['stored_session']==true) Card(child:ListTile(
       leading:const Icon(Icons.verified_user,color:Colors.greenAccent),
       title:const Text('Remembered Angel credentials'),
