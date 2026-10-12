@@ -24,11 +24,8 @@ class _AiChatPageState extends State<AiChatPage> {
   final List<Map<String, String>> _messages = [];
   bool _busy = false;
   bool _localMode = false;
-  bool _localLoading = false;
-  bool _pickerActive = false;
   bool _localLoaded = false;
   String? _localModelPath;
-  List<String> _localModelPaths = [];
   llama.LlamaController? _localController;
   String _aiProvider = 'unknown';
   String _aiModel = 'unknown';
@@ -72,54 +69,6 @@ class _AiChatPageState extends State<AiChatPage> {
       }
     } catch (_) {
       // A moved or cleared model file is simply selected again by the user.
-    }
-  }
-
-  Future<void> _chooseLocalModel() async {
-    // Android's file picker is a single active platform activity. Ignore
-    // duplicate taps (including LOAD calling this method while it is open).
-    if (_pickerActive || _localLoading || _busy) return;
-    setState(() {
-      _pickerActive = true;
-      _error = null;
-    });
-    try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: const ['gguf'],
-        allowMultiple: true,
-        withData: false,
-      );
-      if (result == null) return;
-      final pickedPaths = result.files
-          .map((file) => file.path)
-          .whereType<String>()
-          .where((path) => path.toLowerCase().endsWith('.gguf'))
-          .where((path) => File(path).existsSync())
-          .toList();
-      if (pickedPaths.isEmpty) {
-        throw Exception('Select accessible .gguf model file(s). Copy/export models to Downloads first.');
-      }
-      final prefs = await SharedPreferences.getInstance();
-      final paths = <String>{..._localModelPaths, ...pickedPaths}.toList();
-      final selected = pickedPaths.last;
-      await prefs.setStringList('fresh_local_qwen_model_paths', paths);
-      await prefs.setString('fresh_local_qwen_selected_model_path', selected);
-      await prefs.setString('fresh_local_qwen_model_path', selected);
-      if (!mounted) return;
-      setState(() {
-        _localModelPaths = paths;
-        _localModelPath = selected;
-        _localLoaded = false;
-        _error = null;
-      });
-    } catch (e) {
-      final message = e.toString();
-      if (mounted && !message.contains('already_active')) {
-        setState(() => _error = 'Could not select model: ${message.replaceFirst('Exception: ', '')}');
-      }
-    } finally {
-      if (mounted) setState(() => _pickerActive = false);
     }
   }
 
