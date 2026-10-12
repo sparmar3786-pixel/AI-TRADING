@@ -136,7 +136,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         } catch (_) { saved = null; }
       }
       final lastSeen = DateTime.tryParse(saved?['last_seen_utc']?.toString() ?? '')?.toUtc();
-      final gapTooLong = lastSeen == null || now.difference(lastSeen).inSeconds > 15;
+      final gapTooLong = lastSeen == null || now.difference(lastSeen).inSeconds > 60;
       if (saved == null || saved['candidate'] != candidateKey || saved['since_utc'] == null || gapTooLong) {
         saved = <String, dynamic>{'candidate': candidateKey, 'since_utc': now.toIso8601String()};
       }

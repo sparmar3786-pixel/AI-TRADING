@@ -8,7 +8,7 @@ https://nse-algo-backend-final-production.up.railway.app
 
 - The app has no order-submission method or button; it cannot place, modify, or cancel broker orders.
 - A CALL BUY / PUT BUY candidate must pass backend validation and keep the same side and strike for 10 continuous minutes before the UI exposes it as actionable.
-- A candidate change, failed validation, or gap longer than 15 seconds between successful app refreshes resets the stability window.
+- A candidate change, failed validation, or gap longer than 60 seconds between successful app refreshes resets the stability window.
 - Cached data is display-only. If the live API request fails, actionable signals are changed to WAIT and cross-index trade plans are cleared.
 - The ten-minute stability gate is a confirmation filter, not a guarantee that a trade will remain profitable or should be held for ten minutes. Verify quote freshness, spread, liquidity, slippage, and risk.
 
