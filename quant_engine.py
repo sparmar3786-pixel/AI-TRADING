@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from math import isfinite
 from typing import Any
 
+from risk.position_sizing import atr_stop_target
+
 
 def _number(value: Any) -> float | None:
     try:
