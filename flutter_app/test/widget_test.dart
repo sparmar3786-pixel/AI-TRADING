@@ -217,7 +217,7 @@ void main() {
       of: find.byType(ListView).last,
       matching: find.byType(Scrollable),
     );
-    final riskLayer = find.text('RISK & VALIDATION');
+    final riskLayer = find.text('RISK & 10-MINUTE STABILITY');
     await tester.scrollUntilVisible(riskLayer, 250, scrollable: engineScrollable);
     expect(riskLayer, findsOneWidget);
     final monitorLayer = find.text('READ-ONLY BROKER MONITOR');
