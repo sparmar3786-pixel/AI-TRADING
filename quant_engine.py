@@ -98,10 +98,39 @@ def evaluate_five_layer_signal(
         "BEARISH" if sentiment is not None and sentiment <= -0.2 else
         "NEUTRAL" if sentiment_ok else "UNKNOWN"
     )
-    layer2_ok = trend in ("BULLISH", "BEARISH") and sentiment_direction in (trend, "NEUTRAL")
+    indicator_data = snapshot.get("indicators")
+    indicator_data = indicator_data if isinstance(indicator_data, dict) else {}
+    indicator_checks: dict[str, bool] = {}
+    ema_fast = _number(indicator_data.get("ema_fast_8"))
+    ema_slow = _number(indicator_data.get("ema_slow_21"))
+    if ema_fast is not None and ema_slow is not None:
+        ema_direction = "BULLISH" if ema_fast > ema_slow else "BEARISH" if ema_fast < ema_slow else "NEUTRAL"
+        indicator_checks["ema_8_21_alignment"] = ema_direction == trend
+    rsi = _number(indicator_data.get("rsi_14"))
+    if rsi is not None:
+        indicator_checks["rsi_not_extreme"] = not (
+            (trend == "BULLISH" and rsi >= 75.0) or
+            (trend == "BEARISH" and rsi <= 25.0)
+        )
+    macd_histogram = _number(indicator_data.get("macd_histogram"))
+    if macd_histogram is not None:
+        indicator_checks["macd_histogram_alignment"] = (
+            macd_histogram > 0 if trend == "BULLISH" else
+            macd_histogram < 0 if trend == "BEARISH" else False
+        )
+    vwap = _number(indicator_data.get("vwap"))
+    underlying_for_vwap = _number(snapshot.get("underlying_ltp"))
+    if vwap is not None and underlying_for_vwap is not None:
+        indicator_checks["vwap_alignment"] = (
+            underlying_for_vwap >= vwap if trend == "BULLISH" else
+            underlying_for_vwap <= vwap if trend == "BEARISH" else False
+        )
+    indicators_ok = all(indicator_checks.values()) if indicator_checks else True
+    layer2_ok = trend in ("BULLISH", "BEARISH") and sentiment_direction in (trend, "NEUTRAL") and indicators_ok
     layers["trend_sentiment"] = {
         "pass": layer2_ok, "trend": trend, "timeframes": trend_states,
         "sentiment_score": sentiment, "sentiment_direction": sentiment_direction,
+        "indicator_checks": indicator_checks, "indicators_pass": indicators_ok,
     }
     if not layer2_ok:
         reasons.append("Trend and session sentiment are unknown, mixed or conflicting")
