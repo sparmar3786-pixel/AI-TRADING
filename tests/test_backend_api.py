@@ -48,6 +48,22 @@ class BackendApiTests(unittest.TestCase):
             with self.assertRaises(Exception):
                 api._encryption_key()
 
+    def test_encrypted_credential_store_never_persists_totp(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(api, "_credential_path", return_value=Path(tmp) / "angel.enc"), \
+             patch.dict(os.environ, {"CREDENTIALS_ENCRYPTION_KEY": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}, clear=False):
+            api._save_credentials({
+                "angel_api_key": "example-key",
+                "angel_client_code": "example-client",
+                "angel_pin": "example-pin",
+                "angel_totp_code": "654321",
+            })
+            stored = (Path(tmp) / "angel.enc").read_text()
+            loaded = api._load_credentials()
+        self.assertNotIn("654321", stored)
+        self.assertNotIn("angel_totp", loaded)
+        self.assertEqual(loaded["angel_client_code"], "example-client")
+
     def test_book_parser_does_not_invent_quotes_or_depth(self):
         self.assertEqual(api._book({}), (None, None, 0, 0))
         bid, ask, buy, sell = api._book({
