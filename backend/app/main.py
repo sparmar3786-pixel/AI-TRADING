@@ -33,6 +33,7 @@ from integrations.news_sentiment import cached_market_news_sentiment, fetch_mark
 from quant_engine import evaluate_five_layer_signal, evaluate_futures_signal
 
 from strategies.technical import atr as technical_atr, ema as technical_ema, rsi as technical_rsi, rsi_reversion, sma as technical_sma
+from strategies.advanced import bollinger_bands, macd as advanced_macd, donchian_channels
 from risk.position_sizing import position_size
 
 app = FastAPI(title="AI-TRADING Read-only Signals API", version="1.0.0")
@@ -73,6 +74,17 @@ class ConnectRequest(BaseModel):
     angel_pin: str | None = Field(default=None, max_length=128)
     angel_totp: str | None = Field(default=None, max_length=128)
     remember_credentials: bool = True
+
+
+class ResearchIndicatorsRequest(BaseModel):
+    """Caller-supplied OHLCV candles; this endpoint does not claim they are live."""
+    candles: list[list[Any]] = Field(min_length=30, max_length=500)
+    ema_fast: int = Field(default=8, ge=2, le=50)
+    ema_slow: int = Field(default=21, ge=3, le=100)
+    rsi_period: int = Field(default=14, ge=2, le=50)
+    atr_period: int = Field(default=14, ge=2, le=50)
+    band_period: int = Field(default=20, ge=2, le=100)
+    channel_period: int = Field(default=20, ge=2, le=100)
 
 
 class BacktestRequest(BaseModel):
@@ -1316,6 +1328,65 @@ def _commodity_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]]) -
         except Exception:
             result.append({"name": name, "symbol": str(contract.get("symbol") or name), "status": "WAIT", "live": False, "reason": "Angel One quote/candle request failed", "ltp": None, "source": "angelone_smartapi"})
     return result
+
+
+@app.post("/v1/research/indicators")
+def research_indicators(body: ResearchIndicatorsRequest, _: str = Depends(_device)) -> dict[str, Any]:
+    """Run the repository's deterministic indicators on explicitly supplied OHLCV candles.
+
+    Candle row format: [timestamp, open, high, low, close, volume].
+    Results are research diagnostics only; no live-data claim or trade order is produced.
+    """
+    if body.ema_fast >= body.ema_slow:
+        raise HTTPException(status_code=422, detail="ema_fast must be smaller than ema_slow")
+    rows: list[tuple[str, float, float, float, float, float]] = []
+    for i, row in enumerate(body.candles):
+        if not isinstance(row, (list, tuple)) or len(row) != 6:
+            raise HTTPException(status_code=422, detail=f"candle {i} must contain timestamp, open, high, low, close, volume")
+        try:
+            stamp = str(row[0])
+            o, h, lo, cl, vol = (float(v) for v in row[1:])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail=f"candle {i} contains non-numeric OHLCV data") from None
+        if not stamp or any(not __import__("math").isfinite(v) for v in (o, h, lo, cl, vol)):
+            raise HTTPException(status_code=422, detail=f"candle {i} contains invalid values")
+        if min(o, h, lo, cl) <= 0 or vol < 0 or h < max(o, cl, lo) or lo > min(o, cl, h):
+            raise HTTPException(status_code=422, detail=f"candle {i} has inconsistent OHLCV values")
+        rows.append((stamp, o, h, lo, cl, vol))
+    if any(rows[i][0] >= rows[i + 1][0] for i in range(len(rows) - 1)):
+        raise HTTPException(status_code=422, detail="candle timestamps must be strictly increasing")
+    closes = [r[4] for r in rows]
+    highs = [r[2] for r in rows]
+    lows = [r[3] for r in rows]
+    volumes = [r[5] for r in rows]
+    fast = technical_ema(closes, body.ema_fast)
+    slow = technical_ema(closes, body.ema_slow)
+    rsi_values = technical_rsi(closes, body.rsi_period)
+    atr_values = technical_atr(highs, lows, closes, body.atr_period)
+    bands = bollinger_bands(closes, body.band_period)
+    macd_values = advanced_macd(closes)
+    channels = donchian_channels(highs, lows, body.channel_period)
+    def latest(series):
+        value = series[-1] if series else None
+        return round(float(value), 6) if value is not None else None
+    last_fast, last_slow = latest(fast), latest(slow)
+    trend = "UNKNOWN" if last_fast is None or last_slow is None else ("BULLISH" if last_fast > last_slow else "BEARISH" if last_fast < last_slow else "MIXED")
+    return {
+        "status": "ok", "source": "caller_supplied_candles", "is_live_verified": False,
+        "candle_count": len(rows), "first_timestamp": rows[0][0], "last_timestamp": rows[-1][0],
+        "latest": {
+            "close": round(closes[-1], 6), "ema_fast": last_fast, "ema_slow": last_slow,
+            "trend": trend, "rsi": latest(rsi_values), "atr": latest(atr_values),
+            "macd": latest(macd_values["line"]), "macd_signal": latest(macd_values["signal"]),
+            "macd_histogram": latest(macd_values["histogram"]),
+            "bollinger_lower": latest(bands["lower"]), "bollinger_middle": latest(bands["middle"]),
+            "bollinger_upper": latest(bands["upper"]),
+            "donchian_lower": latest(channels["lower"]), "donchian_upper": latest(channels["upper"]),
+            "volume": round(volumes[-1], 6),
+        },
+        "series": {"ema_fast": fast, "ema_slow": slow, "rsi": rsi_values, "atr": atr_values},
+        "disclaimer": "Research indicators only. Input candles are not authenticated as live; this endpoint never submits orders.",
+    }
 
 
 @app.get("/v1/signals")
