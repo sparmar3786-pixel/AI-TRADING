@@ -102,3 +102,10 @@ Other submitted links that lacked a verifiable redistribution license, or used a
 The earlier five-file PyAlgoTrade snapshot was expanded with additional Apache-2.0 upstream modules under `vendor/PyAlgoTrade/`, including core bar structures, dispatcher/event loop, logger, broker package scaffolding and fill strategy. Files remain namespaced and are not wired into the main engine. The upstream project has cross-module dependencies and an older dependency stack; no claim of standalone execution or tests is made.
 
 Verified current branch tree count: **168 vendored files total**, including **13 PyAlgoTrade files**. This is a file count across selected upstream snapshots, not the number of complete repositories cloned. The submitted list of 500 URLs is still not available as a verified complete list.
+
+
+## PyAlgoTrade technical indicators added — 2026-10-12
+
+Added selected Apache-2.0 technical-indicator modules under `vendor/PyAlgoTrade/pyalgotrade/technical/`: package initializer, ATR, Bollinger bands, crossover, moving average, MACD, RSI and VWAP. These are vendored reference modules only; their complete dependency graph and compatibility have not been tested, and they are not wired into the active trading engine.
+
+Verified current branch tree count: **176 vendored files across selected upstream snapshots**, including **21 PyAlgoTrade files**. This does not mean 500 complete repositories have been copied.
