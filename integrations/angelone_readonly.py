@@ -48,11 +48,60 @@ class AngelOneReadOnly:
     }
     SESSION_RELOGIN_SECONDS = 18 * 60 * 60
 
-    def __init__(self) -> None:
+    def __init__(self, credentials: dict[str, str] | None = None) -> None:
         self._client = None
         self._refresh_token: str | None = None
+        self._jwt_token: str | None = None
+        self._feed_token: str | None = None
+        self._client_code: str | None = None
+        # Credentials supplied by the HTTPS connect endpoint are kept only in
+        # this process's memory. Otherwise use Railway environment variables.
+        self._credentials = {str(k): str(v) for k, v in (credentials or {}).items() if v}
         self._logged_in_at: float | None = None
         self._lock = threading.RLock()
+
+    def _credential(self, name: str) -> str:
+        aliases = {
+            "ANGEL_API_KEY": ("angel_api_key", "api_key"),
+            "ANGEL_CLIENT_CODE": ("angel_client_code", "client_code"),
+            "ANGEL_PIN": ("angel_pin", "pin", "mpin"),
+            "ANGEL_TOTP_SECRET": ("angel_totp_secret", "totp_secret"),
+        }
+        for key in aliases.get(name, ()):
+            value = self._credentials.get(key, "").strip()
+            if value:
+                return value
+        return _required_env(name)
+
+    @property
+    def authenticated(self) -> bool:
+        with self._lock:
+            return bool(self._client is not None and self._refresh_token and self._jwt_token and self._feed_token)
+
+    @property
+    def has_jwt_token(self) -> bool:
+        with self._lock:
+            return bool(self._jwt_token)
+
+    @property
+    def has_feed_token(self) -> bool:
+        with self._lock:
+            return bool(self._feed_token)
+
+    @property
+    def client_code(self) -> str | None:
+        return self._client_code
+
+    def status(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "authenticated": self.authenticated,
+                "has_jwt_token": bool(self._jwt_token),
+                "has_feed_token": bool(self._feed_token),
+                "client_code": self._client_code,
+                "session_age_seconds": round(time.monotonic() - self._logged_in_at, 1) if self._logged_in_at else None,
+                "source": "angelone_smartapi",
+            }
 
     def _login(self):
         with self._lock:
@@ -64,10 +113,10 @@ class AngelOneReadOnly:
             ):
                 return self._client
 
-            api_key = _required_env("ANGEL_API_KEY")
-            client_code = _required_env("ANGEL_CLIENT_CODE")
-            pin = _required_env("ANGEL_PIN")
-            totp_secret = _required_env("ANGEL_TOTP_SECRET")
+            api_key = self._credential("ANGEL_API_KEY")
+            client_code = self._credential("ANGEL_CLIENT_CODE")
+            pin = self._credential("ANGEL_PIN")
+            totp_secret = self._credential("ANGEL_TOTP_SECRET")
             try:
                 import pyotp
                 from SmartApi import SmartConnect
@@ -91,8 +140,44 @@ class AngelOneReadOnly:
                     "Angel One login returned no refresh token in SDK state or response; "
                     "check the installed SmartAPI SDK version."
                 )
+            jwt_token = (
+                getattr(client, "access_token", None)
+                or getattr(client, "jwt_token", None)
+                or data.get("jwtToken")
+                or data.get("jwt_token")
+            )
+            feed_token = (
+                getattr(client, "feed_token", None)
+                or data.get("feedToken")
+                or data.get("feed_token")
+            )
+            # SmartAPI versions may populate JWT/feed token state only after
+            # generateToken(refreshToken). Never expose these tokens to callers.
+            if not jwt_token or not feed_token:
+                generate_token = getattr(client, "generateToken", None)
+                if callable(generate_token):
+                    try:
+                        token_response = generate_token(str(refresh_token))
+                        if isinstance(token_response, dict) and token_response.get("status") is True:
+                            token_data = token_response.get("data") or {}
+                            jwt_token = jwt_token or getattr(client, "access_token", None) or token_data.get("jwtToken") or token_data.get("jwt_token")
+                            feed_token = feed_token or getattr(client, "feed_token", None) or token_data.get("feedToken") or token_data.get("feed_token")
+                    except Exception:
+                        # Profile/REST reads may still be available; connect status
+                        # remains unauthenticated for streaming until both tokens exist.
+                        pass
+            if not feed_token:
+                get_feed_token = getattr(client, "getfeedToken", None)
+                if callable(get_feed_token):
+                    try:
+                        feed_token = get_feed_token()
+                    except Exception:
+                        pass
             self._client = client
             self._refresh_token = str(refresh_token)
+            self._jwt_token = str(jwt_token) if jwt_token else None
+            self._feed_token = str(feed_token) if feed_token else None
+            self._client_code = client_code
             self._logged_in_at = time.monotonic()
             return client
 
