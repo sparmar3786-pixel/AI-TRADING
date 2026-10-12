@@ -32,7 +32,7 @@ Environment-variable-only setup is also supported with ANGEL_API_KEY, ANGEL_CLIE
 
 ## Honest limitations
 
-- The current feed mode is REST FULL-depth polling, not a claimed WebSocket stream. /v1/stream/start reports this explicitly.
+- SmartWebSocketV2 is started after successful Angel One login and subscribes to index/active MCX tokens; nearby option tokens are subscribed as they are discovered. REST FULL-depth quotes are the fallback when a fresh WebSocket tick or required bid/ask depth is missing. Diagnostics distinguish WebSocket-open from actual fresh ticks.
 - The signal service uses market-structure sentiment from price and depth. News sentiment / Exa / Tavily are not wired into this service yet.
 - Angel One SmartAPI's returned fields can differ by SDK and instrument; if a source timestamp or required field is absent, the affected signal stays WAIT.
 - Index option selection uses the current nearest unexpired expiry and nearby strikes. Validate exchange symbol-master values, expiry conventions and live option depth against the account before relying on it.
