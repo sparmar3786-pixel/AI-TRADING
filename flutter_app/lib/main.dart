@@ -13,8 +13,9 @@ import 'quant_research_hub_page.dart';
 import 'quant_repositories_page.dart';
 import 'ai_chat_page.dart';
 import 'quant_engine_lab_page.dart';
+import 'order_flow_page.dart';
 
-const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Repository Library','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','PDF Report & Repositories','Quant Research Hub','Quant & Trading Repositories','AI Chat','Quant Engine Lab'];
+const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Repository Library','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','PDF Report & Repositories','Quant Research Hub','Quant & Trading Repositories','AI Chat','Order Flow','Quant Engine Lab'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
 
 void main() {
@@ -493,6 +494,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         const QuantResearchHubPage(),
         const QuantRepositoriesPage(),
         AiChatPage(backendUrl: backendUrl, selectedIndex: selectedIndex),
+        OrderFlowPage(backendUrl: backendUrl),
         Builder(
           builder: (tabContext) => QuantEngineLabPage(
             backendUrl: backendUrl,
@@ -530,6 +532,7 @@ IconData _tabIcon(int index) => switch (index) {
   19 => Icons.science_outlined,
   20 => Icons.library_books_outlined,
   21 => Icons.chat_bubble_outline,
+  22 => Icons.show_chart,
   _ => Icons.layers_outlined,
 };
 
