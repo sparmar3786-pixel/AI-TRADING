@@ -1,0 +1,64 @@
+# Trading System Configuration
+
+# Broker Settings
+broker:
+  name: "IBKR"  # Interactive Brokers
+  paper_trading: true
+  connection_timeout: 30
+  retry_attempts: 3
+
+# Strategy Settings  
+strategy:
+  name: "ML_Momentum_Strategy"
+  lookback_days: 252
+  rebalance_frequency: "daily"  # daily, weekly, monthly
+  
+# Execution Settings
+execution:
+  default_order_type: "market"  # market, limit
+  use_limit_orders: true
+  limit_order_offset: 0.001  # 0.1% offset for limit orders
+  order_timeout: 300  # seconds
+  max_slippage: 0.005  # 0.5%
+
+# Scheduling
+schedule:
+  run_time: "16:30"  # After market close
+  timezone: "US/Eastern"
+  trading_days_only: true
+  
+# Portfolio Settings
+portfolio:
+  max_positions: 20
+  max_position_size: 0.30  # 30% max per position
+  max_portfolio_allocation: 0.95  # Leave 5% cash
+  min_position_size: 0.01  # 1% minimum
+
+# Data Sources
+data:
+  primary_source: "yahoo"  # yahoo, alpha_vantage, quandl
+  backup_source: "alpha_vantage"
+  cache_duration: 3600  # seconds
+
+# Notifications
+notifications:
+  email:
+    enabled: false
+    smtp_server: "smtp.gmail.com"
+    port: 587
+  sms:
+    enabled: false
+  slack:
+    enabled: false
+
+# Logging
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  max_file_size: 10485760  # 10MB
+  backup_count: 5
+  
+# Performance Tracking
+performance:
+  save_frequency: "daily"
+  metrics_lookback: 252  # days
+  benchmark: "SPY"
