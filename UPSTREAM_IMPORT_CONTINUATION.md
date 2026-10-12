@@ -64,3 +64,13 @@ This pass added selected files from six further upstream projects (not whole rep
 - `tripolskypetr/backtest-kit` — MIT; 9 files: `LICENSE`, `README.md`, `package.json`, `src/index.ts`, `src/classes/Position.ts`, `src/client/ClientExchange.ts`, `src/function/exchange.ts`, `src/lib/services/core/ExchangeCoreService.ts`, `src/lib/services/connection/ExchangeConnectionService.ts`. TypeScript/Node, not part of the Python runtime; not standalone as copied.
 
 Combined with the earlier `qrak/LLM_trader` snapshot, this branch now has **7 distinct upstream repositories represented by 55 vendored files** (including licenses, READMEs and dependency manifests). This is not 55 whole repositories. The list of all 500 claimed URLs is not available as a verified complete machine-readable list in the accessible chat/library context, so this is not a claim that all 500 have been copied.
+
+## Superseding count after catalog + FinLLM additions — 2026-10-12
+
+Two further user-listed sources were added after the previous count:
+- `Open-Finance-Lab/FinLLM-Leaderboard` — MIT, 4 files: license, README, requirements, and the requested `docs/source/demos_of_finagents/trading_agent.rst`.
+- `georgezouq/awesome-ai-in-finance` — CC0-1.0, 2 files: license and its curated AI-in-finance repository catalog. This is a link catalog, not an executable application.
+
+The current branch therefore contains **9 distinct upstream projects represented by 61 vendored files**, including licenses, READMEs, dependency manifests and reference docs. Of those, only selected files are present; this is not a full copy of 9 entire repository trees and does not satisfy a claim that 500 repositories were copied.
+
+Other submitted links that lacked a verifiable redistribution license, or used a custom agreement not yet reviewed for intended redistribution, remain un-copied. No API keys, model weights, binaries, caches, broker secrets or account data were imported.
