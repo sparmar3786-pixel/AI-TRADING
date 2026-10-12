@@ -1379,8 +1379,8 @@ def historical_backtest(body: BacktestRequest, _: str = Depends(_device)) -> dic
         risk_distance = float(position["risk_distance"])
         gross_r = (exit_price - float(position["entry_price"])) / risk_distance
         net_r = gross_r - body.slippage_r - body.transaction_cost_r
-        risk_cash = equity * 0.01
-        pnl = net_r * risk_cash
+        units = position_size(equity, 0.01, float(position["entry_price"]), float(position["stop_loss"]), lot_size=1)
+        pnl = net_r * risk_distance * units
         equity += pnl
         equity_curve_r += net_r
         peak_r = max(peak_r, equity_curve_r)
@@ -1396,6 +1396,7 @@ def historical_backtest(body: BacktestRequest, _: str = Depends(_device)) -> dic
             "gross_r": round(gross_r, 4), "net_r": round(net_r, 4),
             "r": round(net_r, 4), "pnl": round(pnl, 2),
             "bars_held": max(1, exit_index - position["entry_index"] + 1),
+            "units": units, "risk_budget_fraction": 0.01,
             "exit_reason": reason,
         })
         position = None
