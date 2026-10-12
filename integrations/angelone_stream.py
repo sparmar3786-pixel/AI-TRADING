@@ -77,9 +77,19 @@ class AngelOneStream:
 
     def start(self, subscriptions: dict[int, list[str]] | None = None) -> dict[str, Any]:
         with self._lock:
+            added: dict[int, list[str]] = {}
             for exchange_type, tokens in (subscriptions or {}).items():
-                self._desired.setdefault(int(exchange_type), set()).update(str(t) for t in tokens if str(t))
+                bucket = self._desired.setdefault(int(exchange_type), set())
+                delta = sorted({str(t) for t in tokens if str(t)} - bucket)
+                bucket.update(str(t) for t in tokens if str(t))
+                if delta:
+                    added[int(exchange_type)] = delta
             if self._client is not None and self._thread is not None and self._thread.is_alive():
+                client = self._client
+                opened = self._open
+                for exchange_type, tokens in added.items():
+                    if opened:
+                        self._send_subscription(client, exchange_type, tokens)
                 return self.status()
             credentials = self._adapter.websocket_credentials()
             try:
