@@ -41,3 +41,12 @@ python -m unittest discover -s tests -v
 ```
 
 Do not commit API keys, passwords, MPINs, TOTP seeds, JWTs, feed tokens or other account secrets.
+
+## Continuation pass — 2026-10-12
+
+- Added `UPSTREAM_IMPORT_CONTINUATION.md` with a deduplicated source list, initial README access checks, import decisions and strict no-overlap rules.
+- Added `vendor/LLM_trader/src/trading/trading_strategy.py` from `qrak/LLM_trader` (source blob `ad0dcedb53dd94b485830908ac92a6374922b3f2`) and retained its MIT license at `vendor/LLM_trader/LICENSE.md`.
+- This is an isolated vendor snapshot, **not wired into the main strategy engine**. The upstream module imports many sibling modules and services that are not yet imported, so it is not runnable standalone. No live trading is enabled.
+- The three repeated submissions of the fsaavedra0003 URL are recorded once.
+- README checks returned 404 for the exact supplied URLs `wangzhe3224/awesome-systematic-trading`, `nkaz001/hftbacktest`, and `ranaroussi/qtpylib`; these are blocked pending corrected URLs/default branches.
+- Tests have not been executed in this connector pass. The PR/CI must confirm syntax and test status before merge.
