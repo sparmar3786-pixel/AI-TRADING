@@ -213,10 +213,13 @@ void main() {
 
     expect(find.text('TRADE ENGINE'), findsOneWidget);
     expect(find.text('SIGNAL ENGINE'), findsOneWidget);
+    final engineList = find.byKey(const ValueKey('trade-engine-primary-list'));
+    expect(engineList, findsOneWidget);
     final engineScrollable = find.descendant(
-      of: find.byType(ListView).last,
+      of: engineList,
       matching: find.byType(Scrollable),
     );
+    expect(engineScrollable, findsOneWidget);
     final riskLayer = find.text('RISK & 10-MINUTE STABILITY');
     await tester.scrollUntilVisible(riskLayer, 250, scrollable: engineScrollable);
     expect(riskLayer, findsOneWidget);
