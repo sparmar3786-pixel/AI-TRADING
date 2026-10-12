@@ -50,15 +50,15 @@ jobs:
           set -euo pipefail
           APK="build/app/outputs/flutter-apk/app-release.apk"
           test -s "$APK"
-          mapfile -t CODE_FILES < <(unzip -Z1 "$APK" | grep -E '(^classes[0-9]*\\.dex$|^lib/[^/]+/libapp\\.so$)' || true)
-          test "\${#CODE_FILES[@]}" -gt 0
-          COMPILED_STRINGS=$(for file in "\${CODE_FILES[@]}"; do unzip -p "$APK" "$file" | strings; done)
-          if printf '%s\\n' "$COMPILED_STRINGS" | grep -E 'http://10\\.0\\.2\\.2:8000|http://localhost:8000|http://127\\.0\\.0\\.1:8000' >/dev/null; then
+          mapfile -t CODE_FILES < <(unzip -Z1 "$APK" | grep -E '(^classes[0-9]*[.]dex$|^lib/[^/]+/libapp[.]so$)' || true)
+          test "${#CODE_FILES[@]}" -gt 0
+          COMPILED_STRINGS=$(for file in "${CODE_FILES[@]}"; do unzip -p "$APK" "$file" | strings; done)
+          if printf '%s\n' "$COMPILED_STRINGS" | grep -E 'http://10[.]0[.]2[.]2:8000|http://localhost:8000|http://127[.]0[.]0[.]1:8000' >/dev/null; then
             echo "Forbidden local/emulator backend URL found"
             exit 1
           fi
-          printf '%s\\n' "$COMPILED_STRINGS" | grep -F 'nse-algo-backend-final-production.up.railway.app' >/dev/null
-          if printf '%s\\n' "$COMPILED_STRINGS" | grep -E '/v1/live/execute-signal|PLACE_REAL_ANGEL_ORDER|PLACE REAL ANGEL ONE ORDER' >/dev/null; then
+          printf '%s\n' "$COMPILED_STRINGS" | grep -F 'nse-algo-backend-final-production.up.railway.app' >/dev/null
+          if printf '%s\n' "$COMPILED_STRINGS" | grep -E '/v1/live/execute-signal|PLACE_REAL_ANGEL_ORDER|PLACE REAL ANGEL ONE ORDER' >/dev/null; then
             echo "Order-placement capability unexpectedly found in APK"
             exit 1
           fi
