@@ -5,11 +5,11 @@ const _prototypeIndexes = <String>[
   'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX',
 ];
 
-/// A separate broker-home prototype inspired by common Indian investing apps.
+/// The integrated Broker Home screen uses the app's existing Angel One-backed market snapshot.
 /// All market quotes come from Fresh's existing Angel One-backed market snapshot.
 /// This screen deliberately contains no Groww API, SDK, endpoint, or credentials.
-class BrokerHomePrototypePage extends StatefulWidget {
-  const BrokerHomePrototypePage({
+class BrokerHomePage extends StatefulWidget {
+  const BrokerHomePage({
     required this.backendUrl,
     required this.market,
     required this.signals,
@@ -27,10 +27,10 @@ class BrokerHomePrototypePage extends StatefulWidget {
   final ValueChanged<String> onIndexSelected;
 
   @override
-  State<BrokerHomePrototypePage> createState() => _BrokerHomePrototypePageState();
+  State<BrokerHomePage> createState() => _BrokerHomePageState();
 }
 
-class _BrokerHomePrototypePageState extends State<BrokerHomePrototypePage> {
+class _BrokerHomePageState extends State<BrokerHomePage> {
   String _section = 'Watchlist';
   String _query = '';
   bool _portfolioLoading = false;
@@ -206,7 +206,7 @@ class _BrokerHomePrototypePageState extends State<BrokerHomePrototypePage> {
         ],
         const SizedBox(height: 10),
         const Text(
-          'Prototype note: this is an additional screen. Existing Fresh Algo Signal pages and navigation are retained. Quotes appear only when the Angel One-backed backend supplies them; missing prices remain “—”.',
+          'Broker Home shares the same selected instrument and Angel One-backed feed as the rest of the app. Quotes appear only when the Angel One-backed backend supplies them; missing prices remain “—”.',
           style: TextStyle(fontSize: 11, color: Colors.white54),
         ),
       ],

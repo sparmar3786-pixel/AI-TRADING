@@ -14,7 +14,7 @@ import 'quant_repositories_page.dart';
 import 'ai_chat_page.dart';
 import 'quant_engine_lab_page.dart';
 
-const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Repository Library','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home (Prototype)','PDF Report & Repositories','Quant Research Hub','Quant & Trading Repositories','AI Chat','Quant Engine Lab'];
+const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Repository Library','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','PDF Report & Repositories','Quant Research Hub','Quant & Trading Repositories','AI Chat','Quant Engine Lab'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
 
 void main() {
@@ -451,7 +451,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         CommodityPage(items:commodities),
         BacktestingPage(backendUrl: backendUrl),
         ApiPage(backendUrl:backendUrl,signalBackendUrl:signalBackendUrl,feed:feed,storeDiagnostics:storeDiagnostics,market:market,onSaved:(url){setState(()=>backendUrl=url);refresh();}),
-        AiAccessPage(backendUrl:backendUrl, onOpenLocalQwen: () => DefaultTabController.of(context).animateTo(tabs.indexOf('AI Chat'))),
+        AiAccessPage(backendUrl:backendUrl),
         DataHealthPage(
           backendUrl: backendUrl,
           signalBackendUrl: signalBackendUrl,
@@ -481,7 +481,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           lastFetch: lastFetch,
           onIndexChanged: (value) => setState(() => selectedIndex = value),
         ),
-        BrokerHomePrototypePage(
+        BrokerHomePage(
           backendUrl: backendUrl,
           market: market,
           signals: signals,

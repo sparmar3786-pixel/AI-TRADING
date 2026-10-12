@@ -38,10 +38,10 @@ void main() {
     }
   });
 
-  testWidgets('additional broker-home prototype uses Angel One-backed market data', (tester) async {
+  testWidgets('Broker Home uses Angel One-backed market data', (tester) async {
     await tester.pumpWidget(const FreshApp());
     final tabBarContext = tester.element(find.byType(TabBar).first);
-    DefaultTabController.of(tabBarContext).animateTo(tabs.indexOf('Broker Home (Prototype)'));
+    DefaultTabController.of(tabBarContext).animateTo(tabs.indexOf('Broker Home'));
     await tester.pumpAndSettle();
     expect(find.text('Invest'), findsOneWidget);
     expect(find.text('INDIAN MARKET WATCH'), findsOneWidget);
