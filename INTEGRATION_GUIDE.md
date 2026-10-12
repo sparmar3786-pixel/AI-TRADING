@@ -7,6 +7,7 @@ The repository contains original strategy/backtest/risk helpers and selected, pa
 - `strategies/technical.py`: SMA, EMA, RSI, ATR, EMA crossover and RSI reversion.
 - `strategies/advanced.py`: Bollinger bands/re-entry, MACD, Donchian channels/breakout and cumulative VWAP.
 - `strategy_engine.py`: explainable confluence diagnostics for a proposed CALL BUY / PUT BUY / WAIT candidate.
+- `quant_engine.py`: five-layer fail-closed signal research gate for data freshness, multi-timeframe trend/session sentiment, bid/ask order flow, liquid option selection, ATR-based risk levels and continuous 10-minute candidate confirmation.
 - `backtesting/engine.py`: close-to-close backtest with one-bar signal delay, estimated fee/slippage, equity curve and drawdown metrics.
 - `risk/position_sizing.py`: equity-risk position sizing and ATR stop/target helpers.
 - `risk/controls.py`: fail-closed proposed-order checks for stale data, daily loss, max positions, per-trade risk, notional and kill switch.
@@ -43,3 +44,8 @@ The included engine is a starter for research, not a realistic broker simulator.
 - Do not commit API keys, passwords, MPINs, TOTP seeds, JWTs, feed tokens or account data.
 - Third-party code stays under `vendor/` with import notes and notices; review each project's license before redistribution.
 - Strategy scores are not probabilities of profit. Missing/stale inputs should produce WAIT/NO TRADE.
+
+
+## Five-layer engine status
+
+`quant_engine.py` is a tested, broker-neutral evaluator for normalized snapshots. It does not log in to Angel One, fetch an option chain, infer news sentiment, or submit orders. The Flutter app displays the five validation layers when the backend includes `quant_engine`/`five_layer_engine` fields; the existing Railway `/v1/signals` backend has not yet been wired to call this new Python module. Until that server integration and live-feed validation are completed, the app's five-layer panel correctly shows `DATA REQUIRED` rather than inventing evidence. MPIN, TOTP seed, client ID and broker/session tokens must remain in server-side secret storage, never in APK source or app preferences.
