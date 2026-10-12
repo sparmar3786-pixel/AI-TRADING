@@ -216,6 +216,21 @@ class AngelOneStream:
                 return None
             return dict(tick)
 
+    def stop(self) -> None:
+        with self._lock:
+            client = self._client
+            self._open = False
+            self._client = None
+            self._thread = None
+            self._started_at = None
+        if client is not None:
+            try:
+                close = getattr(client, "close_connection", None) or getattr(client, "close", None)
+                if callable(close):
+                    close()
+            except Exception:
+                pass
+
     def status(self) -> dict[str, Any]:
         with self._lock:
             last_age = time.monotonic() - self._last_tick_at if self._last_tick_at else None
