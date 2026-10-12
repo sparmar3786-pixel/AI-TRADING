@@ -137,3 +137,10 @@ Verified current branch tree count: **246 vendored files across selected upstrea
 Added selected upstream sample strategies and tutorials for RSI, SMA crossover, VWAP momentum, event studies, market timing, statistical arbitrage, technical indicators, and local/server optimizer examples. These are source examples only; any external data feeds and optional services remain unconfigured, and the examples have not been executed in this project.
 
 Verified current branch tree count: **267 vendored files across selected upstream snapshots**, including **112 PyAlgoTrade files**. These are selected snapshots, not full clones of every upstream repository. The original complete list of 500 claimed repository URLs is still needed to reconcile the remaining sources accurately.
+
+
+## PyAlgoTrade samples and documentation expanded — 2026-10-12
+
+Added further Bitstamp/Twitter/BitcoinCharts and strategy-analyzer examples plus reference documentation for technical indicators, strategy, bar feeds, data series, analyzers and optimizers. Samples/docs are vendored reference material only and have not been executed or integrated into production paths.
+
+Verified current branch tree count: **277 vendored files across selected upstream snapshots**, including **122 PyAlgoTrade files**. The 500-source completion target remains unverified because the full submitted source URL manifest is not available in a single complete, verifiable list.
