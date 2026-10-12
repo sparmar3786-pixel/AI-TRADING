@@ -198,7 +198,7 @@ void main() {
     expect(systemFlow, findsOneWidget);
   });
 
-  testWidgets('3-Layer Trade Engine shows signal, validation and monitoring layers', (tester) async {
+  testWidgets('5-Layer Quant Signal Engine shows signal, validation and monitoring layers', (tester) async {
     await tester.pumpWidget(const FreshApp());
     await tester.tap(find.byKey(const ValueKey('open-navigation-menu')));
     await tester.pumpAndSettle();
@@ -206,7 +206,7 @@ void main() {
       of: find.byType(Drawer),
       matching: find.byType(Scrollable),
     );
-    final engineTab = find.byKey(const ValueKey('drawer-tab-3-Layer Trade Engine'));
+    final engineTab = find.byKey(const ValueKey('drawer-tab-5-Layer Quant Signal Engine'));
     await tester.scrollUntilVisible(engineTab, 250, scrollable: drawerScrollable);
     await tester.tap(engineTab);
     await tester.pumpAndSettle();
@@ -220,7 +220,7 @@ void main() {
     final riskLayer = find.text('RISK & VALIDATION');
     await tester.scrollUntilVisible(riskLayer, 250, scrollable: engineScrollable);
     expect(riskLayer, findsOneWidget);
-    final monitorLayer = find.text('TRADE MONITOR');
+    final monitorLayer = find.text('READ-ONLY BROKER MONITOR');
     await tester.scrollUntilVisible(monitorLayer, 250, scrollable: engineScrollable);
     expect(monitorLayer, findsOneWidget);
     final orderBookButton = find.text('LOAD / REFRESH ANGEL ONE ORDER BOOK');
