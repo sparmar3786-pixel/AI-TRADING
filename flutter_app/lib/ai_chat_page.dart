@@ -30,7 +30,6 @@ class _AiChatPageState extends State<AiChatPage> {
   String? _localModelPath;
   List<String> _localModelPaths = [];
   llama.LlamaController? _localController;
-  bool? _aiHealthy;
   String _aiProvider = 'unknown';
   String _aiModel = 'unknown';
   String _providerStatus = 'not checked';
@@ -124,117 +123,6 @@ class _AiChatPageState extends State<AiChatPage> {
     }
   }
 
-  Future<void> _loadLocalModel() async {
-    if (_localLoading || _busy) return;
-    try {
-      var path = _localModelPath;
-      if (path == null || !await File(path).exists()) {
-        await _chooseLocalModel();
-        path = _localModelPath;
-      }
-      if (path == null) return;
-      final modelFile = File(path);
-      if (!await modelFile.exists()) {
-        throw Exception('Model file is missing. Re-add the GGUF from phone storage.');
-      }
-      final modelBytes = await modelFile.length();
-      if (modelBytes < 64 * 1024 * 1024) {
-        throw Exception('GGUF file is too small to be a usable language model (under 64 MB). The file may be incomplete; download it again.');
-      }
-      // Probe currently free RAM before native llama.cpp allocation. A 5+ GB
-      // GGUF may work on some 12 GB devices, but only if enough memory is free.
-      // Keep a conservative 1.5 GB reserve for context/KV cache and app overhead.
-      final memoryProbe = llama.LlamaController();
-      final deviceMemory = await memoryProbe.detectGpu();
-      await memoryProbe.dispose();
-      const safetyReserveBytes = 1536 * 1024 * 1024;
-      final minimumFreeRamBytes = modelBytes + safetyReserveBytes;
-      if (deviceMemory.freeRamBytes < minimumFreeRamBytes) {
-        final sizeGb = (modelBytes / (1024 * 1024 * 1024)).toStringAsFixed(1);
-        final freeGb = (deviceMemory.freeRamBytes / (1024 * 1024 * 1024)).toStringAsFixed(1);
-        final neededGb = (minimumFreeRamBytes / (1024 * 1024 * 1024)).toStringAsFixed(1);
-        // Hybrid mode: do not attempt a native allocation when free RAM is low.
-        // Keep the cloud chat available and tell the user why local mode was skipped.
-        if (!mounted) return;
-        setState(() {
-          _localLoaded = false;
-          _localMode = false;
-          _aiHealthy = null;
-          _providerStatus = 'CLOUD FALLBACK • LOW RAM';
-          _error = 'Offline Qwen needs about ${neededGb} GB free RAM; currently ${freeGb} GB is free for a ${sizeGb} GB GGUF. Switched to Cloud AI automatically. Close background apps and retry local loading later.';
-        });
-        return;
-      }
-      setState(() {
-        _localLoading = true;
-        _error = null;
-      });
-      // Release previous native runtime before creating another.
-      final previousController = _localController;
-      _localController = null;
-      _localLoaded = false;
-      if (previousController != null) await previousController.dispose();
-
-      final controller = llama.LlamaController();
-      _localController = controller;
-      debugPrint('FRESH_QWEN_LOAD_START: bytes=$modelBytes path=$path');
-      await controller.loadModel(
-        modelPath: path,
-        threads: 2,
-        contextSize: 1024,
-      );
-
-      // Test token generation before marking the model as ready.
-      final smokeOutput = StringBuffer();
-      final smokeDone = Completer<void>();
-      controller.generateChat(
-        messages: [
-          llama.ChatMessage(role: 'user', content: 'Reply with OK.'),
-        ],
-        template: 'chatml',
-        temperature: 0.1,
-        maxTokens: 8,
-      ).listen(
-        (token) => smokeOutput.write(token),
-        onError: (Object error, StackTrace stack) {
-          if (!smokeDone.isCompleted) smokeDone.completeError(error, stack);
-        },
-        onDone: () {
-          if (!smokeDone.isCompleted) smokeDone.complete();
-        },
-        cancelOnError: true,
-      );
-      await smokeDone.future.timeout(const Duration(seconds: 45));
-      if (smokeOutput.toString().trim().isEmpty) {
-        throw Exception('Model loaded but offline smoke test returned no tokens.');
-      }
-      debugPrint('FRESH_QWEN_SMOKE_TEST_OK: output=${smokeOutput.toString().trim()}');
-
-      if (!mounted) {
-        await controller.dispose();
-        if (identical(_localController, controller)) _localController = null;
-        return;
-      }
-      setState(() {
-        _localLoaded = true;
-        _localMode = true;
-        _aiHealthy = true;
-        _aiProvider = 'local';
-        _aiModel = modelFile.uri.pathSegments.last;
-        _providerStatus = 'OFFLINE • INFERENCE TEST PASSED';
-      });
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _localLoaded = false;
-          _error = 'Local Qwen load failed: ${e.toString().replaceFirst('Exception: ', '')}. Check GGUF compatibility and available RAM.';
-        });
-      }
-    } finally {
-      if (mounted) setState(() => _localLoading = false);
-    }
-  }
-
   Future<void> _sendLocal(String question, List<Map<String, String>> history) async {
     final controller = _localController;
     if (!_localLoaded || controller == null) {
@@ -311,7 +199,6 @@ class _AiChatPageState extends State<AiChatPage> {
     }
     if (mounted) {
       setState(() {
-        _aiHealthy = true;
         _aiProvider = 'local';
         _aiModel = File(_localModelPath!).uri.pathSegments.last;
         _providerStatus = 'OFFLINE';
@@ -390,7 +277,6 @@ class _AiChatPageState extends State<AiChatPage> {
           setState(() {
             _localLoaded = false;
             _localMode = false;
-            _aiHealthy = null;
             _providerStatus = 'CLOUD FALLBACK • LOCAL INFERENCE FAILED';
             _error = 'Offline Qwen inference failed; switched to Cloud AI. Local error: ${localError.toString().replaceFirst('Exception: ', '')}';
           });
@@ -438,7 +324,6 @@ class _AiChatPageState extends State<AiChatPage> {
       }
       if (!mounted) return;
       setState(() {
-        _aiHealthy = true;
         _aiProvider = (response['provider'] ?? _aiProvider).toString();
         _aiModel = (response['model'] ?? _aiModel).toString();
         _providerStatus = 'CONNECTED';
@@ -449,7 +334,6 @@ class _AiChatPageState extends State<AiChatPage> {
       if (!mounted) return;
       final errorText = e.toString().replaceFirst('Exception: ', '');
       setState(() {
-        _aiHealthy = false;
         _providerStatus = errorText.toLowerCase().contains('recovery cooldown')
             ? 'COOLDOWN'
             : 'ERROR';
