@@ -372,10 +372,13 @@ def evaluate_futures_signal(
     risk_distance = 1.5 * atr if atr is not None and atr > 0 else None
     stop = target = None
     if entry is not None and risk_distance is not None:
-        if trend == "BULLISH":
-            stop, target = entry - risk_distance, entry + 2.0 * risk_distance
-        else:
-            stop, target = entry + risk_distance, entry - 2.0 * risk_distance
+        try:
+            levels = atr_stop_target(entry, atr, "LONG" if trend == "BULLISH" else "SHORT", stop_multiple=1.5, reward_risk=2.0)
+            stop, target = levels["stop"], levels["target"]
+            risk_distance = levels["risk_per_unit"]
+        except ValueError:
+            stop = target = None
+            risk_distance = None
     risk_ok = entry is not None and entry > 0 and stop is not None and target is not None and stop > 0 and target > 0 and risk_distance is not None
     layers["risk_levels"] = {
         "pass": risk_ok, "entry_reference": entry,
