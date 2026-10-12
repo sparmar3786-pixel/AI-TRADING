@@ -1,0 +1,3 @@
+# Optional dependencies for integrations/angelone_readonly.py
+smartapi-python>=1.4.0
+pyotp>=2.9.0
