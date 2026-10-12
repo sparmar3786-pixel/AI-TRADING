@@ -18,9 +18,16 @@ This repository is a research workspace for systematic strategies and an eventua
 - `risk/position_sizing.py` and `risk/controls.py`: sizing, ATR levels and fail-closed proposed-order checks.
 - `vendor/`: partial imports of TradingAgents, FinGPT, FinRobot and Qlib with per-project import notes/licenses.
 
+## Read-only live backend
+
+The deployable FastAPI service lives in `backend/` and is configured by the root `railway.json`/`Dockerfile`. It exposes health, Angel One connection/status, market quotes/option-chain, timestamp-validated five-layer signal analysis, and historical candle backtesting. The API is signal-only: it does not submit, modify, or cancel broker orders. Deploy this service as a **separate Railway service** from the existing Fresh-Apk backend so the older app is not disrupted. Configure `ANGEL_API_KEY`, `ANGEL_CLIENT_CODE`, `ANGEL_PIN`, `ANGEL_TOTP_SECRET`, and a strong 32-byte `CREDENTIALS_ENCRYPTION_KEY` in the new service's Railway variables. For encrypted remembered credentials, attach a persistent volume at `/data`. Never put broker credentials or tokens in the APK or Git.
+
+The Android APK currently has a separate configured backend URL. After deploying this service, switch the APK's `BACKEND_URL` build define to the new service's verified HTTPS domain, then rebuild and test with a real Angel One account.
+
 ## Run tests
 
 ```bash
+python -m pip install -r backend/requirements.txt
 python -m unittest discover -s tests -v
 ```
 
