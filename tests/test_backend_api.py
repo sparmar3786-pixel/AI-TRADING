@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -82,6 +83,39 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(request.index, "NIFTY")
         self.assertEqual(request.fast_ema, 8)
         self.assertEqual(request.from_date, "2026-10-01")
+
+    def test_historical_backtest_returns_flutter_report_shape(self):
+        start = datetime(2026, 10, 1, 9, 15, tzinfo=timezone.utc)
+        closes = [150 - i for i in range(30)]
+        closes += [120 + i for i in range(30)]
+        closes += [150 - i for i in range(40)]
+        candles = []
+        for index, close in enumerate(closes):
+            stamp = (start + timedelta(minutes=5 * index)).isoformat()
+            candles.append([stamp, close, close + 1, close - 1, close, 1000])
+        class FakeAdapter:
+            def candles(self, exchange, token, interval, fromdate, todate):
+                self.last_request = (exchange, token, interval, fromdate, todate)
+                return {"candles": candles}
+
+        with patch.object(api, "_require_adapter", return_value=FakeAdapter()):
+            response = self.client.post(
+                "/v1/backtest/historical",
+                headers=self.device_headers,
+                json={
+                    "index": "NIFTY", "from_date": "2026-10-01", "to_date": "2026-10-02",
+                    "interval": "FIVE_MINUTE", "fast_ema": 8, "slow_ema": 13,
+                    "atr_period": 14, "stop_atr": 1.5, "target_r": 2.0,
+                    "max_hold_bars": 30, "slippage_r": 0.02, "transaction_cost_r": 0.02,
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        report = response.json()["report"]
+        self.assertEqual(report["candle_count"], 100)
+        self.assertIn("metrics", report)
+        self.assertIn("trades", report)
+        self.assertIn("n", report["metrics"])
+        self.assertTrue(report["assumptions"])
 
     def test_book_parser_does_not_invent_quotes_or_depth(self):
         self.assertEqual(api._book({}), (None, None, 0, 0))
