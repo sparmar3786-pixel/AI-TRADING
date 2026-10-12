@@ -1286,29 +1286,63 @@ Future<void> _openExternal(BuildContext context, String url) async {
 class DashboardPage extends StatelessWidget {
   const DashboardPage({required this.index,required this.connected,required this.status,required this.signals,required this.market,required this.tradePlans,required this.qualifiedCount,required this.lastFetch,required this.onSelected,super.key});
   final String index; final bool connected; final String status;
-  final Map<String,dynamic> signals, market; final List<dynamic> tradePlans; final int qualifiedCount; final String? lastFetch;
-  final ValueChanged<String> onSelected;
-  @override Widget build(BuildContext context) {
-    final s=Map<String,dynamic>.from(signals[index] as Map? ?? const {});
-    final m=Map<String,dynamic>.from(market[index] as Map? ?? const {});
-    return ListView(padding:const EdgeInsets.all(10),children:[
-      StatusCard(text:status,good:status == 'LIVE market feed connected.'),
-      if (lastFetch != null) Card(child: ListTile(leading: const Icon(Icons.history), title: const Text('Last market fetch'), subtitle: Text(lastFetch!), trailing: Text(status == 'LIVE market feed connected.' ? 'LIVE' : 'CACHED'))),
-      DropdownButtonFormField<String>(initialValue:index,decoration:const InputDecoration(labelText:'Select Index'),items:indexes.map((i)=>DropdownMenuItem(value:i,child:Text(i))).toList(),onChanged:(v){if(v!=null)onSelected(v);}),
-      Card(child:Padding(padding:const EdgeInsets.all(14),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-        Text(index,style:const TextStyle(fontSize:24,fontWeight:FontWeight.w900)),
-        InfoRow('LTP',_val(m['ltp'])),InfoRow('Decision',s['decision']?.toString()??'NO DATA'),
-        InfoRow('Confidence',(s['confidence']??0).toString()+'%'),InfoRow('Regime',s['regime']?.toString()??'—'),
-        InfoRow('Last fetch',m['timestamp']?.toString()??'—'),
-      ]))),
-      Row(children:[Expanded(child:Metric(title:'Qualified trades',value:qualifiedCount.toString()+' / 5')),Expanded(child:Metric(title:'Feed',value:status == 'LIVE market feed connected.'?'LIVE':'LAST'))]),
-      const Section('Trade Plan — best qualified candidates'),
-      if(tradePlans.isEmpty) const StatusCard(text:'0 qualified trades — no candidate passed all gates.',good:true)
-      else ...tradePlans.asMap().entries.map((e)=>TradePlanCard(rank:e.key+1,plan:Map<String,dynamic>.from(e.value as Map))),
-      const Section('Indian F&O Index Board'),
-      GridView.count(shrinkWrap:true,physics:const NeverScrollableScrollPhysics(),crossAxisCount:2,childAspectRatio:1.48,crossAxisSpacing:8,mainAxisSpacing:8,children:indexes.map((i){final x=Map<String,dynamic>.from(signals[i] as Map? ?? const {});final mx=Map<String,dynamic>.from(market[i] as Map? ?? const {});final decision=(x['decision']??'NO DATA').toString();final bullish=decision=='CALL BUY';final bearish=decision=='PUT BUY';final color=bullish?Colors.greenAccent:bearish?Colors.redAccent:Colors.orangeAccent;return InkWell(onTap:()=>onSelected(i),borderRadius:BorderRadius.circular(14),child:Card(child:Padding(padding:const EdgeInsets.all(10),child:Column(crossAxisAlignment:CrossAxisAlignment.start,mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[Row(children:[Expanded(child:Text(i,style:const TextStyle(fontWeight:FontWeight.w900,fontSize:15))),Icon(Icons.show_chart,color:color,size:18)]),Text('₹ ${_val(mx['ltp'])}',style:const TextStyle(fontSize:17,fontWeight:FontWeight.w800)),Container(padding:const EdgeInsets.symmetric(horizontal:7,vertical:4),decoration:BoxDecoration(color:color.withOpacity(.12),borderRadius:BorderRadius.circular(7)),child:Text(decision,style:TextStyle(fontSize:10,color:color,fontWeight:FontWeight.w900))),Text('${(x['confidence']??0)}% • ${(x['regime']??'—')}',style:const TextStyle(fontSize:10,color:Colors.white70))]))));}).toList()),
+  final Map<String,dynamic> signals,market; final List<dynamic> tradePlans; final int qualifiedCount; final String? lastFetch; final ValueChanged<String> onSelected;
+  bool _has(dynamic v)=>v!=null&&v.toString().trim().isNotEmpty;
+  double _n(dynamic v)=>v is num?v.toDouble():double.tryParse(v?.toString()??'')??0;
+  @override Widget build(BuildContext context){
+    final s=Map<String,dynamic>.from(signals[index] as Map? ?? const{}),m=Map<String,dynamic>.from(market[index] as Map? ?? const{});
+    final f=Map<String,dynamic>.from(s['order_flow'] as Map? ?? m['order_flow'] as Map? ?? const{}),i=Map<String,dynamic>.from(s['indicators'] as Map? ?? const{}),v=Map<String,dynamic>.from(s['live_validation'] as Map? ?? const{}),g=(s['guards'] as List? ?? const[]);
+    final d=(s['decision']??'WAIT').toString().toUpperCase(),fresh=s['data_fresh']==true&&connected,buy=_n(f['buy_volume']),sell=_n(f['sell_volume']),total=buy+sell;
+    final layers=<List<dynamic>>[
+      ['Market data integrity','Angel One quote + freshness',_has(m['ltp'])&&fresh],
+      ['Trend structure','EMA alignment',_has(i['ema_fast'])&&_has(i['ema_slow'])],
+      ['Momentum','RSI evidence',_has(i['rsi'])],
+      ['Volatility','ATR evidence',_has(i['atr14'])],
+      ['Market regime','Trend / range state',_has(s['regime'])],
+      ['Order flow','Buy/sell volume evidence',f.isNotEmpty],
+      ['Options analytics','Strike and side',_has(s['strike'])&&_has(s['option_side'])],
+      ['Strategy consensus','Backend decision',_has(s['decision'])],
+      ['Quant scoring','Quant evidence',_has(s['quant_score'])||_has(s['quant'])],
+      ['Risk management','Entry, stop, target',_has(s['entry'])&&_has(s['stop_loss'])&&_has(s['target'])&&g.isEmpty],
+    ];
+    final stable=Map<String,dynamic>.from(s['signal_stability'] as Map? ?? const{})['state']=='CONFIRMED';
+    final gates=<List<dynamic>>[
+      ['Freshness gate','Fresh broker data',fresh],['Live validation','Backend verdict PASS',v['verdict']=='PASS'],
+      ['Strategy agreement','Actionable candidate',d=='CALL BUY'||d=='PUT BUY'],
+      ['Risk gate','No blockers; stop and target',g.isEmpty&&_has(s['stop_loss'])&&_has(s['target'])],
+      ['Final decision gate','Stable confirmed trade plan',stable&&tradePlans.any((p)=>p is Map&&(p['index']??'').toString().toUpperCase()==index.toUpperCase())],
+    ];
+    final c=d=='CALL BUY'?const Color(0xFF35D39A):d=='PUT BUY'?const Color(0xFFFF6577):const Color(0xFFF5B84B);
+    return ListView(padding:const EdgeInsets.fromLTRB(14,12,14,28),children:[
+      const Text('AI TRADING TERMINAL',style:TextStyle(fontSize:11,letterSpacing:2,color:Color(0xFF6DDBFF),fontWeight:FontWeight.w900)),
+      const SizedBox(height:4),const Text('Market command center',style:TextStyle(fontSize:25,fontWeight:FontWeight.w900)),
+      const SizedBox(height:14),
+      Container(padding:const EdgeInsets.all(16),decoration:BoxDecoration(gradient:const LinearGradient(colors:[Color(0xFF142536),Color(0xFF101722)]),borderRadius:BorderRadius.circular(20),border:Border.all(color:const Color(0xFF294052))),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+        Row(children:[Expanded(child:DropdownButtonFormField<String>(value:index,decoration:const InputDecoration(labelText:'Market',border:InputBorder.none),items:indexes.map((x)=>DropdownMenuItem(value:x,child:Text(x))).toList(),onChanged:(x){if(x!=null)onSelected(x);})),Container(padding:const EdgeInsets.all(8),decoration:BoxDecoration(color:c.withOpacity(.12),borderRadius:BorderRadius.circular(8)),child:Text(d,style:TextStyle(color:c,fontWeight:FontWeight.w900,fontSize:11)))]),
+        Text('₹ '+(_has(m['ltp'])?_n(m['ltp']).toStringAsFixed(2):'—'),style:const TextStyle(fontSize:34,fontWeight:FontWeight.w900)),
+        const SizedBox(height:12),Row(children:[Expanded(child:_metric('CONFIDENCE',(s['confidence']??0).toString()+'%')),Expanded(child:_metric('REGIME',(s['regime']??'—').toString())),Expanded(child:_metric('QUALIFIED',qualifiedCount.toString()+' / 5'))]),
+      ])),
+      const SizedBox(height:10),_status('Market feed',fresh?'LIVE VERIFIED':'NOT VERIFIED',fresh),
+      const SizedBox(height:18),const Text('ORDER FLOW',style:TextStyle(fontSize:15,fontWeight:FontWeight.w900,letterSpacing:1)),
+      const SizedBox(height:8),Container(padding:const EdgeInsets.all(14),decoration:BoxDecoration(color:const Color(0xFF101722),borderRadius:BorderRadius.circular(16),border:Border.all(color:const Color(0xFF202D3A))),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+        Row(children:[Expanded(child:_metric('BUY VOLUME',f.isEmpty?'—':_fmt(buy),const Color(0xFF35D39A))),Expanded(child:_metric('SELL VOLUME',f.isEmpty?'—':_fmt(sell),const Color(0xFFFF6577))),Expanded(child:_metric('DELTA',f.isEmpty?'—':_fmt(buy-sell),(buy-sell)>=0?const Color(0xFF35D39A):const Color(0xFFFF6577)))]),
+        const SizedBox(height:14),if(total>0)ClipRRect(borderRadius:BorderRadius.circular(6),child:SizedBox(height:12,child:Row(children:[Expanded(flex:(buy/total*1000).round().clamp(1,1000),child:Container(color:const Color(0xFF35D39A))),Expanded(flex:(sell/total*1000).round().clamp(1,1000),child:Container(color:const Color(0xFFFF6577)))])))else Container(height:12,color:const Color(0xFF202D3A)),
+        const SizedBox(height:8),Text(f.isEmpty?'Order-flow unavailable. Waiting for broker evidence; no synthetic live chart is shown.':'Volume split is indicative and is not guaranteed exchange aggressor-side data.',style:const TextStyle(fontSize:11,color:Colors.white60)),
+      ])),
+      const SizedBox(height:18),Row(children:[const Expanded(child:Text('10-LAYER TRADING ENGINE',style:TextStyle(fontSize:14,fontWeight:FontWeight.w900))),Text(layers.where((x)=>x[2]==true).length.toString()+'/10 READY',style:const TextStyle(color:Color(0xFF6DDBFF),fontWeight:FontWeight.w800))]),
+      const SizedBox(height:8),...layers.asMap().entries.map((e)=>_layer(e.key+1,e.value[0].toString(),e.value[1].toString(),e.value[2]==true)),
+      const SizedBox(height:18),Row(children:[const Expanded(child:Text('5-LAYER FINAL VALIDATION',style:TextStyle(fontSize:14,fontWeight:FontWeight.w900))),Text(gates.where((x)=>x[2]==true).length.toString()+'/5 PASS',style:const TextStyle(color:Color(0xFFF5B84B),fontWeight:FontWeight.w800))]),
+      const SizedBox(height:8),...gates.asMap().entries.map((e)=>_layer(e.key+1,e.value[0].toString(),e.value[1].toString(),e.value[2]==true)),
+      const SizedBox(height:12),Container(padding:const EdgeInsets.all(12),decoration:BoxDecoration(color:const Color(0xFF171B22),borderRadius:BorderRadius.circular(12),border:Border.all(color:const Color(0xFF4B3C20))),child:Text(gates.every((x)=>x[2]==true)?'Validation gates passed for this candidate; verify broker data before trading.':'FINAL DECISION: WAIT. Missing or unverified evidence blocks an actionable signal. Readiness badges reflect received backend fields, not proof that every independent engine is implemented.',style:const TextStyle(fontSize:12,height:1.4))),
+      const SizedBox(height:18),const Text('BEST QUALIFIED CANDIDATES',style:TextStyle(fontSize:14,fontWeight:FontWeight.w900)),
+      if(tradePlans.isEmpty)const Padding(padding:EdgeInsets.symmetric(vertical:12),child:Text('No trade plan passed all gates. WAIT is the safe default.',style:TextStyle(color:Colors.white60)))else ...tradePlans.take(5).toList().asMap().entries.map((e)=>TradePlanCard(rank:e.key+1,plan:Map<String,dynamic>.from(e.value as Map))),
+      if(lastFetch!=null)Padding(padding:const EdgeInsets.only(top:12),child:Text('Last fetch: '+lastFetch!,style:const TextStyle(fontSize:10,color:Colors.white38))),
     ]);
   }
+  Widget _metric(String a,String b,[Color c=const Color(0xFFE7EEF7)])=>Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(a,style:const TextStyle(fontSize:9,letterSpacing:.7,color:Colors.white54,fontWeight:FontWeight.w800)),const SizedBox(height:4),Text(b,maxLines:1,overflow:TextOverflow.ellipsis,style:TextStyle(fontSize:13,fontWeight:FontWeight.w900,color:c))]);
+  Widget _status(String a,String b,bool ok)=>Container(padding:const EdgeInsets.all(12),decoration:BoxDecoration(color:const Color(0xFF101722),borderRadius:BorderRadius.circular(12),border:Border.all(color:const Color(0xFF202D3A))),child:Row(children:[Icon(Icons.circle,size:9,color:ok?const Color(0xFF35D39A):const Color(0xFFFF6577)),const SizedBox(width:9),Text(a,style:const TextStyle(fontWeight:FontWeight.w800)),const Spacer(),Flexible(child:Text(b,textAlign:TextAlign.end,style:TextStyle(fontSize:10,color:ok?const Color(0xFF35D39A):const Color(0xFFFF6577),fontWeight:FontWeight.w800)))]));
+  Widget _layer(int n,String a,String b,bool ok)=>Container(margin:const EdgeInsets.only(bottom:6),padding:const EdgeInsets.symmetric(horizontal:11,vertical:10),decoration:BoxDecoration(color:const Color(0xFF101722),borderRadius:BorderRadius.circular(11),border:Border.all(color:const Color(0xFF202D3A))),child:Row(children:[Container(width:28,height:28,alignment:Alignment.center,decoration:BoxDecoration(color:(ok?const Color(0xFF35D39A):const Color(0xFFFF6577)).withOpacity(.12),borderRadius:BorderRadius.circular(8)),child:Text(n.toString().padLeft(2,'0'),style:TextStyle(fontSize:10,fontWeight:FontWeight.w900,color:ok?const Color(0xFF35D39A):const Color(0xFFFF6577)))),const SizedBox(width:10),Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(a,style:const TextStyle(fontSize:12,fontWeight:FontWeight.w800)),Text(b,style:const TextStyle(fontSize:10,color:Colors.white54))])),Icon(ok?Icons.check_circle:Icons.lock_outline,size:17,color:ok?const Color(0xFF35D39A):const Color(0xFFFF6577))]));
+  String _fmt(double n)=>n.abs()>=10000000?(n/10000000).toStringAsFixed(2)+'Cr':n.abs()>=100000?(n/100000).toStringAsFixed(2)+'L':n.abs()>=1000?(n/1000).toStringAsFixed(1)+'k':n.toStringAsFixed(0);
 }
 
 class MarketPage extends StatelessWidget {
