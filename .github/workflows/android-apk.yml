@@ -121,6 +121,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          LATEST_SHA=$(gh api repos/sparmar3786-pixel/AI-TRADING/commits/main --jq .sha)
+          if [ "$GITHUB_SHA" != "$LATEST_SHA" ]; then
+            echo "Skipping release upload for stale commit $GITHUB_SHA; main is now $LATEST_SHA"
+            exit 0
+          fi
           TAG="ai-trading-signal-latest"
           APK="flutter_app/build/app/outputs/flutter-apk/app-release.apk"
           ARM64_APK="flutter_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk"
