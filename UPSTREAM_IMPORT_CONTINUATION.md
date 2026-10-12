@@ -80,3 +80,11 @@ Other submitted links that lacked a verifiable redistribution license, or used a
 - `virattt/ai-hedge-fund` — MIT; 5 files copied into `vendor/ai-hedge-fund/`: `LICENSE`, `README.md`, `hedge_fund/models.py`, `hedge_fund/backtesting/engine.py`, and `hedge_fund/backtesting/fund.py`.
 - Upstream README explicitly states it is educational/research-only and does not itself execute trades. It uses an external Financial Datasets API and LLM provider keys; those secrets were not copied. This partial snapshot is not production trading integration.
 - Current total on this branch: **11 distinct upstream projects represented by 71 vendored files** (license/docs/manifests/source combined). It is not 71 complete repository copies and it is not a claim that all 500 submitted URLs are copied.
+
+## Additional vendor snapshots — 2026-10-12 (India market + broker SDKs)
+
+- `RuchiTanmay/nselib` — Apache-2.0. **32 files** copied under `vendor/nselib/`: LICENSE, README/changelog, setup/requirements/manifest files, NSE capital market/cash market/derivatives/indices/debt/mutual-fund/FPI modules, utility modules, and the two upstream tests found in the recursive source tree. No data was fetched from live NSE by this import; source endpoints/data freshness still require verification.
+- `zerodha/pykiteconnect` — MIT. **35 text files** copied under `vendor/pykiteconnect/`: LICENSE, README, setup/config, the `kiteconnect` client and ticker modules, examples, tests, and CI metadata. This is a Zerodha Kite SDK reference only, not Angel One SmartAPI; its integration tests were copied but not run, and it is not connected to live orders.
+- `QuantConnect/Lean` — Apache-2.0. 4 selected files under `vendor/QuantConnect-Lean/` (license, order, order-request, security-holding C# reference files); the larger .NET engine is not copied as a whole.
+- `schen9999/financial-agent` — MIT. 7 files under `vendor/financial-agent/` (license, README, MCP/API entrypoints, grounding check, requirements and an MCP test).
+- Latest total in this branch: **15 distinct upstream projects represented by 149 vendored files** including license, README, build/dependency metadata, examples/tests/reference code. These are not 149 repositories or 15 complete repository clones. The two near-complete text/source snapshots are `nselib` and `pykiteconnect`; other projects are selected subsets.
