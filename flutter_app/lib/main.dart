@@ -1640,7 +1640,9 @@ class SignalPage extends StatelessWidget {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           InfoRow('EMA 8 / EMA 21', '${_val(indicatorSummary['ema_fast_8'])} / ${_val(indicatorSummary['ema_slow_21'])}'),
           InfoRow('EMA alignment', (indicatorSummary['ema_alignment'] ?? 'UNKNOWN').toString()),
+          InfoRow('SMA 20 / SMA 50', '${_val(indicatorSummary['sma_20'])} / ${_val(indicatorSummary['sma_50'])}'),
           InfoRow('RSI 14', _val(indicatorSummary['rsi_14'])),
+          InfoRow('RSI reversion', (indicatorSummary['rsi_reversion_signal'] ?? 'WAIT').toString()),
           InfoRow('MACD histogram', _val(indicatorSummary['macd_histogram'])),
           InfoRow('Underlying ATR 14', _val(indicatorSummary['underlying_atr_14'])),
           InfoRow('Session VWAP', _val(indicatorSummary['vwap'])),
