@@ -78,6 +78,27 @@ def _post_json(url: str, body: dict[str, Any], headers: dict[str, str]) -> dict[
     return payload if isinstance(payload, dict) else {}
 
 
+def cached_market_news_sentiment(index: str) -> dict[str, Any]:
+    """Return cached evidence immediately without performing network I/O."""
+    key = index.strip().upper()
+    with _lock:
+        cached = _cache.get(key)
+        if cached and time.monotonic() - cached[0] < _CACHE_TTL_SECONDS:
+            return cached[1]
+    if not (os.getenv("EXA_API_KEY", "").strip() or os.getenv("TAVILY_API_KEY", "").strip()):
+        return {
+            "status": "NOT_CONFIGURED", "label": "UNKNOWN", "score": None,
+            "article_count": 0, "sources": [], "articles": [],
+            "window_hours": 24,
+            "message": "Configure Exa or Tavily server-side to enable headline context.",
+        }
+    return {
+        "status": "PENDING", "label": "UNKNOWN", "score": None,
+        "article_count": 0, "sources": [], "articles": [],
+        "window_hours": 24, "message": "Refreshing last-24-hour headline context in the background.",
+    }
+
+
 def fetch_market_news_sentiment(
     index: str,
     exa_api_key: str | None = None,
