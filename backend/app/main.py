@@ -554,9 +554,14 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
             today_rows.append(candle)
     day_open = _number(today_rows[0][1]) if today_rows else closes[-1]
     day_move = (spot - day_open) / day_open if day_open else 0.0
+    today_highs = [_number(row[2]) for row in today_rows if len(row) > 2]
+    today_lows = [_number(row[3]) for row in today_rows if len(row) > 3]
+    day_high = max((value for value in today_highs if value is not None), default=spot)
+    day_low = min((value for value in today_lows if value is not None), default=spot)
+    day_range_position = (spot - day_low) / (day_high - day_low) if day_high > day_low else 0.5
     up_count = sum(1 for tf in timeframe_closes.values() if len(tf) >= 3 and tf[-1] > tf[-2] > tf[-3])
     down_count = sum(1 for tf in timeframe_closes.values() if len(tf) >= 3 and tf[-1] < tf[-2] < tf[-3])
-    sentiment = max(-1.0, min(1.0, (0.25 if day_move > 0 else -0.25 if day_move < 0 else 0.0) + (0.25 if up_count >= 2 else -0.25 if down_count >= 2 else 0.0)))
+    sentiment = 0.0  # Recalculated below from today's price, trend, option OI and order-book depth.
     chain_rows = [
         row for row in rows
         if str(row.get("exch_seg", "")).upper() == ("BFO" if index in ("SENSEX", "BANKEX") else "NFO")
@@ -611,8 +616,29 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
             "strike": strike, "expiry": selected_expiry.isoformat(),
             "symbol": str(row.get("symbol", "")), "bid": obid, "ask": oask,
             "ltp": ltp, "volume": volume, "oi": oi, "delta": delta,
+            "gamma": greek.get("gamma"), "theta": greek.get("theta"),
+            "vega": greek.get("vega"), "iv": greek.get("iv"),
+            "buy_depth": _book(quote)[2], "sell_depth": _book(quote)[3],
             "timestamp": timestamp,
         })
+    call_oi = sum((_number(item.get("oi")) or 0.0) for item in normalized_options if item.get("option_type") == "CALL")
+    put_oi = sum((_number(item.get("oi")) or 0.0) for item in normalized_options if item.get("option_type") == "PUT")
+    pcr = put_oi / call_oi if call_oi > 0 else None
+    depth_total = buy_volume + sell_volume
+    depth_imbalance = (buy_volume - sell_volume) / depth_total if depth_total > 0 else 0.0
+    day_move_component = max(-0.30, min(0.30, day_move * 10.0))
+    trend_component = 0.25 if up_count >= 2 else -0.25 if down_count >= 2 else 0.0
+    depth_component = 0.20 * max(-1.0, min(1.0, depth_imbalance))
+    pcr_component = 0.15 if pcr is not None and pcr >= 1.10 else -0.15 if pcr is not None and pcr <= 0.80 else 0.0
+    range_component = 0.10 * max(-1.0, min(1.0, (day_range_position - 0.5) * 2.0))
+    sentiment_components = {
+        "day_move": round(day_move_component, 4),
+        "multi_timeframe_trend": round(trend_component, 4),
+        "top5_depth_imbalance": round(depth_component, 4),
+        "option_pcr_bias": round(pcr_component, 4),
+        "session_range_position": round(range_component, 4),
+    }
+    sentiment = max(-1.0, min(1.0, sum(sentiment_components.values())))
     trend_5 = timeframe_closes["5m"]
     trend = "BULLISH" if len(trend_5) >= 3 and trend_5[-1] > trend_5[-2] > trend_5[-3] else "BEARISH" if len(trend_5) >= 3 and trend_5[-1] < trend_5[-2] < trend_5[-3] else "MIXED"
     preferred_type = "CALL" if trend == "BULLISH" else "PUT" if trend == "BEARISH" else None
@@ -702,6 +728,11 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
         "source_timestamp": spot_ts, "timestamp": spot_ts,
         "live": result.get("data_fresh") is True, "day_move_pct": round(day_move * 100, 3),
         "sentiment_score": sentiment, "sentiment_label": "BULLISH" if sentiment >= 0.2 else "BEARISH" if sentiment <= -0.2 else "NEUTRAL",
+        "sentiment_source": "intraday OHLC + multi-timeframe trend + option OI PCR + top-five bid/ask depth",
+        "sentiment_components": sentiment_components, "pcr": pcr,
+        "session_open": day_open, "session_high": day_high, "session_low": day_low,
+        "session_range_position": round(day_range_position, 4),
+        "depth_imbalance": round(depth_imbalance, 4),
         "option_chain": chain_payload,
     }
     return result, market
