@@ -15,7 +15,7 @@ import 'ai_chat_page.dart';
 import 'quant_engine_lab_page.dart';
 import 'order_flow_page.dart';
 
-const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Repository Library','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','PDF Report & Repositories','Quant Research Hub','Quant & Trading Repositories','AI Chat','Quant Engine Lab','Order Flow'];
+const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Repository Library','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','PDF Report & Repositories','Quant Research Hub','Quant & Trading Repositories','AI Chat','Order Flow','Quant Engine Lab'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
 
 void main() {
@@ -532,8 +532,8 @@ IconData _tabIcon(int index) => switch (index) {
   19 => Icons.science_outlined,
   20 => Icons.library_books_outlined,
   21 => Icons.chat_bubble_outline,
-  22 => Icons.layers_outlined,
-  _ => Icons.show_chart,
+  22 => Icons.show_chart,
+  _ => Icons.layers_outlined,
 };
 
 class DataHealthPage extends StatelessWidget {
