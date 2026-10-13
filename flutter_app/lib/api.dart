@@ -76,6 +76,7 @@ class FreshApi {
     '/v1/paper/trades',
     '/v1/paper/report',
     '/v1/smc/analyze',
+    '/v1/strategies/evaluate',
   };
 
   Uri _uri(String path) {
