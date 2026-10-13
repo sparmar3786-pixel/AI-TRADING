@@ -13,6 +13,7 @@ import os
 import re
 import sys
 import threading
+from concurrent.futures import ThreadPoolExecutor
 import time
 import urllib.error
 import urllib.request
@@ -84,6 +85,8 @@ _news_lock = threading.Lock()
 _saved_meta: dict[str, Any] = {}
 _master_rows: list[dict[str, Any]] = []
 _master_loaded_at = 0.0
+_market_data_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="market-data")
+
 _signal_cache: dict[str, Any] | None = None
 _signal_cache_at = 0.0
 # Signal computation is refreshed in the background so a cold/slow broker
@@ -857,10 +860,21 @@ def _market_chain_rows(options: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return output
 
 
-def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index: str) -> tuple[dict[str, Any], dict[str, Any]]:
+def _index_snapshot(
+    adapter: AngelOneReadOnly,
+    rows: list[dict[str, Any]],
+    index: str,
+    spot_quote: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     config = _find_index_contract(rows, index)
     start, end = _session_range()
-    spot_quote = _quotes(adapter, config["exchange"], [config["token"]]).get(config["token"])
+    # Start the slower historical request while the current quote and option
+    # contracts are being normalized. It is rate-limited centrally by the adapter.
+    candle_future = _market_data_executor.submit(
+        adapter.candles, config["exchange"], config["token"], "FIVE_MINUTE", start, end
+    )
+    if spot_quote is None:
+        spot_quote = _quotes(adapter, config["exchange"], [config["token"]]).get(config["token"])
     if not spot_quote:
         raise RuntimeError("Angel One did not return a spot quote for this index")
     spot = _number(spot_quote.get("ltp"))
@@ -869,7 +883,7 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
     spot_ts = _quote_timestamp(spot_quote)
     if not spot_ts:
         raise RuntimeError("Angel One quote omitted its exchange feed timestamp; fail-closed freshness gate")
-    candle_result = adapter.candles(config["exchange"], config["token"], "FIVE_MINUTE", start, end)
+    candle_result = candle_future.result()
     candle_rows = candle_result.get("candles") or []
     closes = _candle_closes(candle_rows)
     if len(closes) < 36:
@@ -927,9 +941,15 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
     if not candidates:
         raise RuntimeError("No near-ATM option tokens found")
     exchange = "BFO" if index in ("SENSEX", "BANKEX") else "NFO"
-    option_quotes = _quotes(adapter, exchange, [str(row["token"]) for row in candidates[:40]])
     greek_expiry = selected_expiry.strftime("%d%b%Y").upper()
-    greeks = _greeks_map(adapter, index, greek_expiry)
+    option_future = _market_data_executor.submit(
+        _quotes, adapter, exchange, [str(row["token"]) for row in candidates[:40]]
+    )
+    greeks_future = _market_data_executor.submit(_greeks_map, adapter, index, greek_expiry)
+    # Quote batches and Greeks use different broker endpoints/rate buckets, so
+    # overlap the requests without violating either endpoint's throttle.
+    option_quotes = option_future.result()
+    greeks = greeks_future.result()
     normalized_options: list[dict[str, Any]] = []
     quote_time_by_token: dict[str, str] = {}
     for row in candidates[:40]:
@@ -1831,10 +1851,32 @@ def _get_signals_uncached(force: bool = False) -> dict[str, Any]:
         _schedule_news_refresh(list(INDEXES))
         signals: dict[str, Any] = {}
         market: dict[str, Any] = {}
+        # Batch all index spot tokens by exchange once instead of issuing one
+        # REST quote request per index before the candle/options pipeline.
+        spot_quotes: dict[str, dict[str, Any]] = {}
+        spot_contracts: dict[str, dict[str, Any]] = {}
+        for index in INDEXES:
+            try:
+                spot_contracts[index] = _find_index_contract(rows, index)
+            except Exception:
+                continue
+        by_exchange: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+        for index, contract in spot_contracts.items():
+            by_exchange.setdefault(str(contract["exchange"]), []).append((index, contract))
+        for exchange, contracts in by_exchange.items():
+            try:
+                batch = _quotes(adapter, exchange, [str(contract["token"]) for _, contract in contracts])
+                for index, contract in contracts:
+                    quote = batch.get(str(contract["token"]))
+                    if quote is not None:
+                        spot_quotes[index] = quote
+            except Exception:
+                # Each index has a single-token fallback inside _index_snapshot.
+                continue
         for index in INDEXES:
             index_started = time.perf_counter()
             try:
-                result, quote = _index_snapshot(adapter, rows, index)
+                result, quote = _index_snapshot(adapter, rows, index, spot_quote=spot_quotes.get(index))
                 elapsed_index_ms = round((time.perf_counter() - index_started) * 1000, 2)
                 result["performance"] = {**dict(result.get("performance") or {}), "index_snapshot_ms": elapsed_index_ms}
                 quote["performance"] = {"index_snapshot_ms": elapsed_index_ms}
