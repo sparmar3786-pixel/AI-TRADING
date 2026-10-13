@@ -1177,6 +1177,16 @@ class ResearchEnginesPage extends StatelessWidget {
         InfoRow('PCR', _val(oi['pcr'])),
         InfoRow('OI regime', (oi['selected_oi_regime'] ?? oi['classification'] ?? 'UNKNOWN').toString()),
         InfoRow('Live option rows', chain.length.toString()),
+        if (commodity != null) ...[
+          InfoRow('MCX CE quotes', chainRows.where((row) => (row['side'] ?? '').toString().toUpperCase() == 'CE').length.toString()),
+          InfoRow('MCX PE quotes', chainRows.where((row) => (row['side'] ?? '').toString().toUpperCase() == 'PE').length.toString()),
+          InfoRow(
+            'Commodity options gate',
+            chainRows.isEmpty
+                ? 'WAIT — no broker option quotes'
+                : 'WAIT until option Greeks, option ATR and risk inputs are verified',
+          ),
+        ],
         const Divider(height: 22),
         const Text('RESEARCH PACK & CONFLUENCE', style: TextStyle(fontWeight: FontWeight.w900)),
         InfoRow('Candidate alignment', (research['candidate_alignment'] ?? 'UNKNOWN').toString()),
