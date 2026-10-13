@@ -4,8 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 class OrderFlowPage extends StatefulWidget {
-  const OrderFlowPage({required this.backendUrl, required this.signalBackendUrl, super.key});
-  final String backendUrl;
+  const OrderFlowPage({required this.signalBackendUrl, super.key});
   final String signalBackendUrl;
   @override
   State<OrderFlowPage> createState() => _OrderFlowPageState();
