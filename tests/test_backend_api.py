@@ -47,6 +47,12 @@ class BackendApiTests(unittest.TestCase):
         conflicting_ai = api._live_validation_contract(result, layers, 2.0, {"ok": True, "decision": "PUT BUY"})
         self.assertEqual(conflicting_ai["verdict"], "WAIT")
         self.assertFalse(conflicting_ai["checks"]["ai_direction_consistent"])
+    def test_wait_signal_always_returns_fail_closed_validation_checks(self):
+        signal = api._wait_signal("NIFTY", "No fresh quote")
+        self.assertEqual(signal["decision"], "WAIT")
+        self.assertEqual(signal["live_validation"]["verdict"], "WAIT")
+        self.assertIn("checks", signal["live_validation"])
+        self.assertFalse(any(signal["live_validation"]["checks"].values()))
     def test_health_is_available_without_device_header(self):
         response = self.client.get("/health")
         self.assertEqual(response.status_code, 200)
