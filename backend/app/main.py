@@ -1623,7 +1623,10 @@ def option_chain(index: str = Query(default="NIFTY"), _: str = Depends(_device))
     wanted = set(strikes[max(0, atm - 10): min(len(strikes), atm + 11)])
     contracts = [row for row in contracts if _strike_value(row.get("strike"), spot) in wanted][:100]
     quote_map = _quotes(adapter, segment, [str(row.get("token", "")) for row in contracts if row.get("token")])
-    greek_map = {} if commodity else _greeks_map(adapter, index, expiries[0].strftime("%d%b%Y").upper())
+    # Request broker Greeks for MCX as well as index options. Some broker
+    # accounts/underlyings may not return MCX Greeks; _greeks_map fails closed
+    # to an empty map, so absent values remain null and cannot qualify a trade.
+    greek_map = _greeks_map(adapter, index, expiries[0].strftime("%d%b%Y").upper())
     output = []
     for row in contracts:
         token = str(row.get("token", ""))
