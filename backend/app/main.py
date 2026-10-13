@@ -1568,35 +1568,62 @@ def market_ticks(_: str = Depends(_device)) -> dict[str, Any]:
 @app.get("/v1/option-chain")
 def option_chain(index: str = Query(default="NIFTY"), _: str = Depends(_device)) -> dict[str, Any]:
     index = index.strip().upper()
-    if index not in INDEXES:
-        raise HTTPException(status_code=400, detail=f"Unsupported index. Choose from {', '.join(INDEXES)}.")
     adapter = _require_adapter()
     rows = _load_master()
-    config = _find_index_contract(rows, index)
-    spot_quote = _quotes(adapter, config["exchange"], [config["token"]]).get(config["token"])
-    spot = _number(spot_quote.get("ltp")) if spot_quote else None
-    if spot is None:
-        raise HTTPException(status_code=502, detail="Angel One spot quote is missing")
-    segment = "BFO" if index in ("SENSEX", "BANKEX") else "NFO"
+    commodity = index in COMMODITY_NAMES
+    if not commodity and index not in INDEXES:
+        raise HTTPException(status_code=400, detail=f"Unsupported underlying. Choose an index or supported MCX commodity: {', '.join(INDEXES)}; {', '.join(COMMODITY_NAMES)}.")
+
+    if commodity:
+        # MCX commodity options are OPTFUT contracts; use the nearest live
+        # FUTCOM contract as underlying reference, never fabricate a spot.
+        futures = [
+            row for row in rows
+            if str(row.get("exch_seg", "")).upper() == "MCX"
+            and str(row.get("name", "")).upper().replace(" ", "") == index
+            and str(row.get("instrumenttype", "")).upper() == "FUTCOM"
+            and _expiry_date(row.get("expiry")) is not None
+            and _expiry_date(row.get("expiry")) >= datetime.now(IST).date()
+        ]
+        if not futures:
+            raise HTTPException(status_code=404, detail=f"No unexpired MCX futures found for {index}; sync the current Angel One instrument master.")
+        future_expiries = sorted({_expiry_date(row.get("expiry")) for row in futures if _expiry_date(row.get("expiry"))})
+        future = next((row for row in futures if _expiry_date(row.get("expiry")) == future_expiries[0]), futures[0])
+        future_token = str(future.get("token", ""))
+        spot_quote = _quotes(adapter, "MCX", [future_token]).get(future_token)
+        spot = _number(spot_quote.get("ltp")) if spot_quote else None
+        segment = "MCX"
+        option_instrument = "OPTFUT"
+        option_name = index
+    else:
+        config = _find_index_contract(rows, index)
+        spot_quote = _quotes(adapter, config["exchange"], [config["token"]]).get(config["token"])
+        spot = _number(spot_quote.get("ltp")) if spot_quote else None
+        segment = "BFO" if index in ("SENSEX", "BANKEX") else "NFO"
+        option_instrument = "OPTIDX"
+        option_name = index
+    if spot is None or spot <= 0:
+        raise HTTPException(status_code=502, detail=f"Angel One underlying quote is missing for {index}; no option signal can be qualified.")
+
     contracts = [
         row for row in rows
         if str(row.get("exch_seg", "")).upper() == segment
-        and str(row.get("name", "")).upper().replace(" ", "") == index
-        and str(row.get("instrumenttype", "")).upper() == "OPTIDX"
+        and str(row.get("name", "")).upper().replace(" ", "") == option_name
+        and str(row.get("instrumenttype", "")).upper() == option_instrument
         and _option_type(row) is not None
         and _expiry_date(row.get("expiry")) is not None
         and _expiry_date(row.get("expiry")) >= datetime.now(IST).date()
     ]
     expiries = sorted({_expiry_date(row.get("expiry")) for row in contracts if _expiry_date(row.get("expiry"))})
     if not expiries:
-        return {"index": index, "spot": spot, "contracts": [], "status": "WAIT", "reason": "No unexpired option contracts found"}
+        return {"index": index, "spot": spot, "contracts": [], "option_chain": [], "status": "WAIT", "reason": f"No unexpired {option_instrument} option contracts found for {index}", "signal_only": True}
     contracts = [row for row in contracts if _expiry_date(row.get("expiry")) == expiries[0]]
     strikes = sorted({strike for row in contracts if (strike := _strike_value(row.get("strike"), spot)) is not None})
     atm = min(range(len(strikes)), key=lambda i: abs(strikes[i] - spot)) if strikes else 0
     wanted = set(strikes[max(0, atm - 10): min(len(strikes), atm + 11)])
     contracts = [row for row in contracts if _strike_value(row.get("strike"), spot) in wanted][:100]
     quote_map = _quotes(adapter, segment, [str(row.get("token", "")) for row in contracts if row.get("token")])
-    greek_map = _greeks_map(adapter, index, expiries[0].strftime("%d%b%Y").upper())
+    greek_map = {} if commodity else _greeks_map(adapter, index, expiries[0].strftime("%d%b%Y").upper())
     output = []
     for row in contracts:
         token = str(row.get("token", ""))
@@ -1606,21 +1633,20 @@ def option_chain(index: str = Query(default="NIFTY"), _: str = Depends(_device))
         strike = _strike_value(row.get("strike"), spot)
         kind = _option_type(row)
         bid, ask, buy_depth, sell_depth = _book(quote)
+        greek = greek_map.get((strike or -1, kind or ""), {})
         output.append({
             "symbol": row.get("symbol"), "token": token, "option_type": kind,
+            "side": "CE" if kind == "CALL" else "PE" if kind == "PUT" else None,
             "strike": strike, "expiry": expiries[0].isoformat(),
             "ltp": _number(quote.get("ltp")), "bid": bid, "ask": ask,
             "volume": _number(quote.get("tradeVolume") or quote.get("volume")),
             "oi": _number(quote.get("opnInterest") or quote.get("openInterest") or quote.get("oi")),
-            "delta": (greek_map.get((strike or -1, kind or "")) or {}).get("delta"),
-            "gamma": (greek_map.get((strike or -1, kind or "")) or {}).get("gamma"),
-            "theta": (greek_map.get((strike or -1, kind or "")) or {}).get("theta"),
-            "vega": (greek_map.get((strike or -1, kind or "")) or {}).get("vega"),
-            "iv": (greek_map.get((strike or -1, kind or "")) or {}).get("iv"),
+            "delta": greek.get("delta"), "gamma": greek.get("gamma"),
+            "theta": greek.get("theta"), "vega": greek.get("vega"), "iv": greek.get("iv"),
             "buy_depth": buy_depth, "sell_depth": sell_depth,
             "timestamp": _quote_timestamp(quote), "source_timestamp": _quote_timestamp(quote),
         })
-    return {"index": index, "spot": spot, "expiry": expiries[0].isoformat(), "contracts": output, "option_chain": _market_chain_rows(output), "source": "angelone_smartapi", "observed_at": _utc_now().isoformat(), "signal_only": True}
+    return {"index": index, "spot": spot, "expiry": expiries[0].isoformat(), "contracts": output, "option_chain": _market_chain_rows(output), "source": "angelone_smartapi", "observed_at": _utc_now().isoformat(), "signal_only": True, "underlying_type": "MCX_FUTURE" if commodity else "INDEX"}
 
 
 @app.get("/v1/market/sentiment")
