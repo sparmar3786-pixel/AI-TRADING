@@ -4,7 +4,7 @@ class AppConfig {
   // read-only account routes. They are intentionally separate in the APK.
   static const String backendUrl = String.fromEnvironment(
     'BACKEND_URL',
-    defaultValue: 'https://ai-trading-signals-api-production.up.railway.app',
+    defaultValue: 'https://nse-algo-backend-final-production.up.railway.app',
   );
 
   static const String signalBackendUrl = String.fromEnvironment(
