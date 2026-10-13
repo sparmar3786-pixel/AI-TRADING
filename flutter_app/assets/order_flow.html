@@ -51,13 +51,23 @@ const tz={timeZone:'Asia/Kolkata',hour12:false};
 const hm=t=>new Date(t*1000).toLocaleTimeString('en-GB',{...tz,hour:'2-digit',minute:'2-digit'});
 const dm=t=>new Date(t*1000).toLocaleDateString('en-GB',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short'});
 const f=n=>{const a=Math.abs(n);return a>=1e7?(n/1e7).toFixed(2)+'Cr':a>=1e5?(n/1e5).toFixed(1)+'L':a>=1e3?(n/1e3).toFixed(1)+'k':String(Math.round(n))};
+let wsBytesWindow=0,wsWindowAt=Date.now(),wsMessagesWindow=0,wsLastAt=0,wsRate=0,wsMps=0;
+function reportWsTelemetry(payload,m){
+ const now=Date.now(),size=new Blob([payload]).size;
+ wsBytesWindow+=size;wsMessagesWindow++;
+ const elapsed=now-wsWindowAt;
+ if(elapsed>=1000){wsRate=Math.round(wsBytesWindow*1000/elapsed);wsMps=Math.round(wsMessagesWindow*1000/elapsed*10)/10;wsBytesWindow=0;wsMessagesWindow=0;wsWindowAt=now}
+ const item={kind:'order_flow_ws',payload_bytes:size,bytes_per_second:wsRate,messages_per_second:wsMps,inter_message_ms:wsLastAt?now-wsLastAt:null,quote_age_ms:m.tick_age_ms??null,mode:String(m.mode||'wait').toLowerCase(),source_timestamp:m.source_timestamp||null,level_semantics:m.level_semantics||null};
+ wsLastAt=now;
+ try{if(window.Telemetry&&window.Telemetry.postMessage)window.Telemetry.postMessage(JSON.stringify(item))}catch(_){}
+}
 
 function connect(){
  if(ws){ws.onclose=null;ws.close()}
  raw=[];off=0;
  ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws?symbol='+sym);
  ws.onopen=()=>{retry=0};
- ws.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch(_){mode='wait';status();return}mode=String(m.mode||'wait').toLowerCase();
+ ws.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch(_){mode='wait';status();return}reportWsTelemetry(e.data,m);mode=String(m.mode||'wait').toLowerCase();
   if(mode==='demo'||mode.includes('sample')){raw=[];mode='wait';status();$('info').textContent='Demo/sample feed blocked. Waiting for broker-sourced data.';dirty=1;return}
   if(m.type==='snap'){raw=Array.isArray(m.candles)?m.candles:[];step=Number(m.step)||step}
   else if(m.type==='status'){if(Array.isArray(m.candles))raw=m.candles;$('info').textContent=String(m.message||'Waiting for broker data.');status();dirty=1;return}
