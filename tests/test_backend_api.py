@@ -542,7 +542,7 @@ class BackendApiTests(unittest.TestCase):
 
         with patch.object(api.urllib.request, "urlopen", return_value=FakeResponse()):
             result = api._run_ai_validation_probe(
-                "openai", "test-secret", "test-model", "https://api.openai.com/v1/chat/completions",
+                "openrouter", "test-secret", "test-model", "https://openrouter.ai/api/v1/chat/completions",
                 {"source": "angelone_smartapi", "source_timestamp": "2026-10-13T09:00:00+00:00",
                  "ltp": 25000.0, "age_seconds": 120.0, "live": False},
             )
@@ -560,7 +560,7 @@ class BackendApiTests(unittest.TestCase):
         )
         with patch.object(api.urllib.request, "urlopen", side_effect=error):
             result = api._run_ai_validation_probe(
-                "openai", "test-secret", "test-model", "https://api.openai.com/v1/chat/completions",
+                "openrouter", "test-secret", "test-model", "https://openrouter.ai/api/v1/chat/completions",
                 {"source": "angelone_smartapi", "source_timestamp": "2026-10-13T09:00:00+00:00",
                  "ltp": 25000.0, "age_seconds": 2.0, "live": True},
             )
