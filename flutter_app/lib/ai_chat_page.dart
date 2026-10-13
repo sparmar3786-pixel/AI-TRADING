@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:stream_chat_flutter_ai/stream_chat_flutter_ai.dart';
 import 'api.dart';
+import 'daily_ai_memory.dart';
 
 class AiChatPage extends StatefulWidget {
   const AiChatPage({required this.backendUrl, required this.selectedIndex, super.key});
@@ -113,6 +115,13 @@ class _AiChatPageState extends State<AiChatPage> {
       } else {
         displayAnswer += '\n\n**Live Search Evidence:** Search providers are not configured for this chat request.';
       }
+      unawaited(DailyAiMemory.saveChatTurn(
+        question: question,
+        answer: displayAnswer,
+        provider: (response['provider'] ?? 'unknown').toString(),
+        model: (response['model'] ?? 'unknown').toString(),
+        llmUsed: response['llm_used'] == true,
+      ));
       if (!mounted) return;
       setState(() {
         _aiProvider = (response['provider'] ?? _aiProvider).toString();
