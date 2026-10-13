@@ -289,7 +289,13 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       Map<String,dynamic> liveStatus = const {};
       try { liveStatus = await signalApi.liveExecutionStatus(); } catch (_) {}
       Map<String,dynamic> providerStatus = const {};
-      try { providerStatus = await signalApi.aiStatus(); } catch (providerError) { debugPrint('AI_PROVIDER_STATUS_FAILED: $providerError'); }
+      try {
+        // Cloud AI credentials/status belong to the AI/chat backend; market
+        // feed health remains owned by signalApi.
+        providerStatus = await api.aiStatus();
+      } catch (providerError) {
+        debugPrint('AI_PROVIDER_STATUS_FAILED: $providerError');
+      }
       Map<String,dynamic> s;
       try {
         await signalApi.health();
