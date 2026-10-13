@@ -85,7 +85,7 @@ class _AiChatPageState extends State<AiChatPage> {
     _scrollToBottom();
 
     try {
-      final response = await FreshApi(widget.backendUrl).aiChat(
+      final response = await FreshApi(widget.backendUrl).geminiChat(
         index: _selectedIndex,
         question: question,
         history: history,
