@@ -1210,6 +1210,8 @@ class ResearchEnginesPage extends StatelessWidget {
         InfoRow('Strategy candidate', (s['decision'] ?? 'NO DATA').toString()),
         InfoRow('Validated decision', (validation['decision'] ?? 'WAIT').toString()),
         InfoRow('Validation verdict', (validation['verdict'] ?? 'NOT VALIDATED').toString()),
+        InfoRow('Engine validation time', validation['validation_timing_ms'] == null ? 'n/a' : '${validation['validation_timing_ms']} ms'),
+        InfoRow('AI provider status', (aiRow['status'] ?? ai['status'] ?? 'NOT CONFIGURED').toString()),
         InfoRow('AI action', (aiRow['action'] ?? 'AI NOT READY').toString()),
         InfoRow('Blocked reasons', ((validation['blocks'] as List?) ?? const []).map((x) => x.toString()).join(', ').isEmpty ? 'None reported' : ((validation['blocks'] as List?) ?? const []).map((x) => x.toString()).join(', ')),
       ]))),
