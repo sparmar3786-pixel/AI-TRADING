@@ -117,8 +117,8 @@ class _RiskCalculatorState extends State<RiskCalculator> {
     final row = _row(_symbol);
     final ltp = _firstNum(row, ['ltp', 'last_price', 'lastPrice', 'close']);
     final age = _num(row['age_seconds'] ?? row['tick_age_seconds']);
-    final fresh = row['live'] == true ||
-        (row['data_fresh'] == true && age != null && age >= 0 && age <= 60);
+    final fresh = ltp != null && age != null && age >= 0 && age <= 60 &&
+        (row['live'] == true || row['data_fresh'] == true);
     final entry = _num(_entry.text);
     final stop = _num(_stop.text);
     final target = _num(_target.text);
