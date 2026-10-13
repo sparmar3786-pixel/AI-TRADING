@@ -14,6 +14,7 @@ import 'quant_engine_lab_page.dart';
 import 'order_flow_page.dart';
 import 'strategy_library_page.dart';
 import 'flow_monitor_page.dart';
+import 'risk_calculator_page.dart';
 import 'daily_ai_memory.dart';
 import 'daily_ai_memory_page.dart';
 
@@ -636,7 +637,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         OIPage(signals:signals, market:market, commodities:commodities, optionChains:optionChainsByIndex),
         IndicatorsPage(selected:selectedIndex,signal:_signal(selectedIndex),fast:emaFast,slow:emaSlow,onChanged:(f,s){setState((){emaFast=f;emaSlow=s;});refresh();},onIndex:(v)=>setState(()=>selectedIndex=v)),
         SignalPage(backendUrl:backendUrl,liveStatus:liveTrading,index:selectedIndex,signals:signals,ai:ai,aiProviders:aiProviderStatus,tradePlans:tradePlans,market:market,onChanged:(v)=>setState(()=>selectedIndex=v)),
-        RiskPage(index:selectedIndex,signal:_signal(selectedIndex),plans:tradePlans),
+        RiskPage(index:selectedIndex,signal:_signal(selectedIndex),plans:tradePlans,market:market,commodities:commodities),
         CommodityPage(items:commodities),
         BacktestingPage(backendUrl: backendUrl),
         ApiPage(backendUrl:backendUrl,signalBackendUrl:signalBackendUrl,feed:feed,storeDiagnostics:storeDiagnostics,market:market,onSaved:(url){setState(()=>backendUrl=url);refresh();}),
@@ -1957,10 +1958,12 @@ class SignalPage extends StatelessWidget {
 }
 
 class RiskPage extends StatelessWidget {
-  const RiskPage({required this.index, required this.signal, required this.plans, super.key});
+  const RiskPage({required this.index, required this.signal, required this.plans, required this.market, required this.commodities, super.key});
   final String index;
   final Map<String, dynamic> signal;
   final List<dynamic> plans;
+  final Map<String, dynamic> market;
+  final List<dynamic> commodities;
 
   @override
   Widget build(BuildContext context) {
@@ -1970,6 +1973,11 @@ class RiskPage extends StatelessWidget {
       padding: const EdgeInsets.all(10),
       children: [
         Section('Risk — ' + index),
+        RiskCalculator(
+          selectedIndex: index,
+          marketByIndex: market,
+          commodities: commodities,
+        ),
         InfoRow('Entry', _val(signal['entry'])),
         InfoRow('Stop Loss', _val(signal['stop_loss'])),
         InfoRow('Target', _val(signal['target'])),
