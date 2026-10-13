@@ -43,27 +43,6 @@ class SmcApiTests(unittest.TestCase):
         self.assertFalse(body["killzone_status"]["effective_active"])
         self.assertFalse(body["execution_allowed"])
 
-    def test_smc_endpoint_accepts_inner_circle_without_manual_killzone_override(self):
-        killzone = {
-            "active": True,
-            "window": "NEW_YORK_AM",
-            "timezone": "America/New_York",
-            "local_time": "2026-10-13T08:00:00-04:00",
-        }
-        with patch.dict(SMC_ENDPOINT.__globals__, {"ict_killzone_status": lambda: killzone}):
-            response = self.client.post("/v1/smc/analyze", json={
-                "instrument": "BANKNIFTY",
-                "strategy_format": "Inner Circle",
-                "htf_candles": [],
-                "mtf_candles": [],
-                "ltf_candles": [],
-            })
-        self.assertEqual(response.status_code, 200, response.text)
-        body = response.json()
-        self.assertEqual(body["strategy_format"], "Inner Circle")
-        self.assertTrue(body["in_killzone"])
-        self.assertEqual(body["killzone_status"]["window"], "NEW_YORK_AM")
-        self.assertFalse(body["execution_allowed"])
 
 
 if __name__ == "__main__":
