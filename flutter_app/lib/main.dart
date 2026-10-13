@@ -1545,7 +1545,7 @@ class DashboardPage extends StatelessWidget {
       const SizedBox(height:10),_status('Market feed',fresh?'LIVE VERIFIED':'NOT VERIFIED',fresh),
       const Section('AI PROVIDERS • GEMINI + OPENROUTER'),
       Card(child: Column(children: [
-        ListTile(leading: Icon(Icons.circle, color: gemini['ok'] == true ? Colors.greenAccent : Colors.redAccent, size: 12), title: const Text('Gemini'), subtitle: Text((gemini['status'] ?? 'STATUS NOT CHECKED').toString()), trailing: Text((aiProviders['model'] ?? '—').toString(), style: const TextStyle(fontSize: 10))),
+        ListTile(leading: Icon(Icons.circle, color: gemini['ok'] == true ? Colors.greenAccent : Colors.redAccent, size: 12), title: const Text('Gemini'), subtitle: Text((gemini['status'] ?? 'STATUS NOT CHECKED').toString()), trailing: Text((gemini['model'] ?? '—').toString(), style: const TextStyle(fontSize: 10))),
         ListTile(leading: Icon(Icons.circle, color: openrouter['ok'] == true ? Colors.greenAccent : Colors.redAccent, size: 12), title: const Text('OpenRouter'), subtitle: Text((openrouter['status'] ?? 'STATUS NOT CHECKED').toString()), trailing: Text((openrouter['model'] ?? '—').toString(), style: const TextStyle(fontSize: 10))),
       ])),
       const SizedBox(height:18),const Text('ORDER FLOW',style:TextStyle(fontSize:15,fontWeight:FontWeight.w900,letterSpacing:1)),
@@ -1885,6 +1885,7 @@ class SignalPage extends StatelessWidget {
     final researchChecks = Map<String, dynamic>.from(researchPack['checks'] as Map? ?? const {});
     final aiDecision = Map<String, dynamic>.from(ai[index] as Map? ?? const {});
     final providerMap = Map<String, dynamic>.from(aiProviders['providers'] as Map? ?? const {});
+    final geminiProvider = Map<String, dynamic>.from(providerMap['gemini'] as Map? ?? const {});
     final openrouterProvider = Map<String, dynamic>.from(providerMap['openrouter'] as Map? ?? const {});
     final agentAnalysis = Map<String, dynamic>.from(aiDecision['agent_analysis'] as Map? ?? const {});
     final specialists = Map<String, dynamic>.from(agentAnalysis['specialists'] as Map? ?? const {});
@@ -1966,7 +1967,9 @@ class SignalPage extends StatelessWidget {
       Card(child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          InfoRow('AI mode', (agentAnalysis['mode'] ?? (openrouterProvider['ok'] == true ? 'OPENROUTER CONNECTED • SECONDARY REVIEW' : 'WAITING FOR GEMINI / OPENROUTER PROVIDER TEST')).toString()),
+          InfoRow('AI mode', (agentAnalysis['mode'] ?? (geminiProvider['ok'] == true ? 'GEMINI CONNECTED • PRIMARY REVIEW' : openrouterProvider['ok'] == true ? 'OPENROUTER CONNECTED • FALLBACK REVIEW' : 'WAITING FOR GEMINI / OPENROUTER PROVIDER TEST')).toString()),
+          InfoRow('Gemini provider', (geminiProvider['status'] ?? 'STATUS NOT CHECKED').toString()),
+          InfoRow('Gemini model', (geminiProvider['model'] ?? '—').toString()),
           InfoRow('OpenRouter provider', (openrouterProvider['status'] ?? 'STATUS NOT CHECKED').toString()),
           InfoRow('OpenRouter model', (openrouterProvider['model'] ?? '—').toString()),
           InfoRow('Evidence supplied', (agentAnalysis['source_evidence_count'] ?? aiDecision['evidence_count'] ?? 0).toString()),
