@@ -218,6 +218,39 @@ class AngelOneReadOnly:
             "observed_at": datetime.now(timezone.utc).isoformat(),
         }
 
+    def account_snapshot(self) -> dict[str, Any]:
+        """Read authenticated holdings, positions and order book without mutations."""
+        client = self._login()
+        output: dict[str, Any] = {
+            "positions": [], "holdings": [], "orders": [],
+            "errors": [], "source": "angelone_smartapi",
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+            "read_only": True,
+        }
+        for field, sdk_method in (
+            ("positions", "position"),
+            ("holdings", "holding"),
+            ("orders", "orderBook"),
+        ):
+            reader = getattr(client, sdk_method, None)
+            if not callable(reader):
+                output["errors"].append(field + "_endpoint_not_supported")
+                continue
+            try:
+                response = _ok(reader())
+                data = response.get("data") or []
+                if isinstance(data, list):
+                    output[field] = [row for row in data if isinstance(row, dict)]
+                elif isinstance(data, dict):
+                    output[field] = [data]
+                else:
+                    output[field] = []
+            except Exception:
+                # Do not leak broker exception text, request details or account secrets.
+                output["errors"].append(field + "_request_failed")
+        output["status"] = "ok" if not output["errors"] else "partial" if any(output[key] for key in ("positions", "holdings", "orders")) else "unavailable"
+        return output
+
     def ltp(self, exchange: str, tradingsymbol: str, symboltoken: str) -> dict[str, Any]:
         """Fetch LTP for a known SmartAPI contract."""
         exchange = exchange.strip().upper()

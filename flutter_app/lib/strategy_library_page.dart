@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class StrategyLibraryPage extends StatefulWidget {
-  const StrategyLibraryPage({super.key});
+  const StrategyLibraryPage({required this.market, required this.signals, required this.selectedIndex, super.key});
+  final Map<String, dynamic> market;
+  final Map<String, dynamic> signals;
+  final String selectedIndex;
   @override
   State<StrategyLibraryPage> createState() => _StrategyLibraryPageState();
 }
@@ -45,12 +48,35 @@ class _StrategyLibraryPageState extends State<StrategyLibraryPage> {
   Widget build(BuildContext context) {
     final filtered = items.where((x) => (category == 'All' || x['group'] == category) && ('${x['name']} ${x['detail']} ${x['group']}'.toLowerCase().contains(search.text.toLowerCase()))).toList();
     final groups = ['All', ...items.map((x) => x['group']!).toSet()];
+    final marketRow = Map<String, dynamic>.from(widget.market[widget.selectedIndex] as Map? ?? const {});
+    final signalRow = Map<String, dynamic>.from(widget.signals[widget.selectedIndex] as Map? ?? const {});
+    final layers = Map<String, dynamic>.from(signalRow['layers'] as Map? ?? const {});
+    final passedLayers = layers.values.whereType<Map>().where((layer) => layer['pass'] == true).length;
+    final fresh = marketRow['live'] == true;
+    final ltp = marketRow['ltp'];
     return Scaffold(
       backgroundColor: const Color(0xFF070B12),
       body: SafeArea(child: ListView(padding: const EdgeInsets.all(14), children: [
         const Text('STRATEGY & QUANT LIBRARY', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: 1)),
         const SizedBox(height: 6),
         const Text('Research catalogue • strategies require data validation and backtesting before use.', style: TextStyle(color: Colors.white70)),
+        const SizedBox(height: 12),
+        Card(color: const Color(0xFF101722), child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('LIVE ENGINE CONTEXT • ${widget.selectedIndex}', style: const TextStyle(fontWeight: FontWeight.w900, color: Color(0xFF12D6FF))),
+            const SizedBox(height: 8),
+            Row(children: [
+              Expanded(child: Text('Spot LTP: ${ltp == null ? '—' : ltp.toString()}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800))),
+              Text(fresh ? 'FRESH QUOTE' : 'WAIT / STALE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: fresh ? Colors.greenAccent : Colors.orangeAccent)),
+            ]),
+            const SizedBox(height: 5),
+            Text('Signal: ${signalRow['decision'] ?? 'WAIT'} • Layers passed: $passedLayers / ${layers.length}', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+            Text('Source: ${marketRow['source'] ?? 'not available'} • Quote age: ${marketRow['age_seconds'] ?? 'unknown'} sec', style: const TextStyle(color: Colors.white54, fontSize: 11)),
+            if (marketRow['signal_error'] != null || marketRow['error'] != null)
+              Text('Signal blocked: ${marketRow['signal_error'] ?? marketRow['error']}', style: const TextStyle(color: Colors.orangeAccent, fontSize: 11)),
+          ]),
+        )),
         const SizedBox(height: 12),
         TextField(controller: search, onChanged: (_) => setState((){}), decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Search strategies, factors, risk…')),
         const SizedBox(height: 10),

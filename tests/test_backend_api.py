@@ -113,6 +113,14 @@ class BackendApiTests(unittest.TestCase):
         self.assertIsNotNone(indicators["rsi_14"])
         self.assertIsNotNone(indicators["underlying_atr_14"])
         self.assertIsNotNone(indicators["vwap"])
+        # Flutter pages consume these stable aliases; older backend keys alone
+        # made Dashboard/Market/Indicators appear blank despite valid candles.
+        self.assertEqual(indicators["ema_fast"], indicators["ema_fast_8"])
+        self.assertEqual(indicators["ema_slow"], indicators["ema_slow_21"])
+        self.assertEqual(indicators["rsi14"], indicators["rsi_14"])
+        self.assertEqual(indicators["atr14"], indicators["underlying_atr_14"])
+        self.assertIn("bb_upper", indicators)
+        self.assertIn("stochastic_k14", indicators)
 
     def test_backtest_accepts_flutter_form_payload(self):
         request = api.BacktestRequest(
@@ -179,6 +187,93 @@ class BackendApiTests(unittest.TestCase):
     def test_timestamp_parser_rejects_unknown_source_format(self):
         self.assertIsNone(api._iso("not-a-market-timestamp"))
         self.assertIsNotNone(api._iso("12-Oct-2026 10:00:00"))
+
+    def test_shared_workspace_endpoints_do_not_404_or_claim_fake_data(self):
+        ai = self.client.get("/v1/ai/status", headers=self.device_headers)
+        self.assertEqual(ai.status_code, 200, ai.text)
+        self.assertIn("status", ai.json())
+        search = self.client.post("/v1/providers/search/status", headers=self.device_headers, json={})
+        self.assertEqual(search.status_code, 200, search.text)
+        self.assertIn("exa", search.json()["providers"])
+        orders = self.client.get("/v1/live/orders", headers=self.device_headers)
+        self.assertEqual(orders.status_code, 200, orders.text)
+        self.assertFalse(orders.json()["order_placement_enabled"])
+        self.assertEqual(orders.json()["orders"], [])
+        portfolio = self.client.get("/v1/portfolio", headers=self.device_headers)
+        self.assertEqual(portfolio.status_code, 200, portfolio.text)
+        self.assertEqual(portfolio.json()["status"], "not_connected")
+        self.assertEqual(portfolio.json()["positions"], [])
+
+    def test_ai_chat_fallback_uses_real_payload_fields_and_discloses_no_llm(self):
+        payload = {
+            "market": {"NIFTY": {"ltp": 25000.0, "age_seconds": 3, "live": True}},
+            "signals": {"NIFTY": {"decision": "WAIT", "reasons": ["missing option evidence"], "live_validation": {"verdict": "WARN"}}},
+        }
+        with patch.object(api, "_get_signals", return_value=payload):
+            response = self.client.post(
+                "/v1/ai/chat",
+                headers=self.device_headers,
+                json={"index": "NIFTY", "question": "Explain the current signal", "history": []},
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertFalse(body["llm_used"])
+        self.assertEqual(body["provider"], "deterministic_fallback")
+        self.assertIn("25000.0", body["answer"])
+        self.assertIn("missing option evidence", body["answer"])
+
+    def test_paper_trade_open_close_and_report_deduct_costs(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(api, "_paper_trade_path", return_value=Path(tmp) / "paper.json"):
+            api._paper_trades_memory.clear()
+            opened = self.client.post(
+                "/v1/paper/trades/open",
+                headers=self.device_headers,
+                json={
+                    "trade_id": "test-paper-trade", "strategy_id": "unit-test",
+                    "index": "NIFTY", "side": "CALL BUY", "regime": "TEST",
+                    "slippage_r": 0.02, "transaction_cost_r": 0.02,
+                    "notes": "No broker order",
+                },
+            )
+            self.assertEqual(opened.status_code, 200, opened.text)
+            closed = self.client.post(
+                "/v1/paper/trades/test-paper-trade/close",
+                headers=self.device_headers,
+                json={"gross_r": 1.0, "notes": "test result"},
+            )
+            self.assertEqual(closed.status_code, 200, closed.text)
+            self.assertEqual(closed.json()["trade"]["net_r"], 0.96)
+            report = self.client.get("/v1/paper/report", headers=self.device_headers)
+            self.assertEqual(report.status_code, 200, report.text)
+            self.assertEqual(report.json()["metrics"]["trade_count"], 1)
+            self.assertEqual(report.json()["metrics"]["net_total_r"], 0.96)
+            api._paper_trades_memory.clear()
+
+    def test_index_quote_survives_signal_pipeline_failure(self):
+        quote = {
+            "ltp": 25000.0,
+            "exchange_timestamp": api._utc_now().isoformat(),
+            "best5Data": {
+                "buy": [{"price": 24999.5, "quantity": 10}],
+                "sell": [{"price": 25000.5, "quantity": 12}],
+            },
+        }
+        with patch.object(api, "_signal_cache", None), \
+             patch.object(api, "_signal_cache_at", 0), \
+             patch.object(api, "_require_adapter", return_value=object()), \
+             patch.object(api, "_load_master", return_value=[]), \
+             patch.object(api, "_start_stream"), \
+             patch.object(api, "_schedule_news_refresh"), \
+             patch.object(api, "_index_snapshot", side_effect=RuntimeError("insufficient candle history")), \
+             patch.object(api, "_quotes", side_effect=lambda adapter, exchange, tokens: {tokens[0]: quote}), \
+             patch.object(api, "_commodity_snapshot", return_value=[]), \
+             patch.object(api, "_stream", None):
+            result = api._get_signals(force=True)
+        self.assertEqual(result["market"]["NIFTY"]["ltp"], 25000.0)
+        self.assertTrue(result["market"]["NIFTY"]["live"])
+        self.assertEqual(result["signals"]["NIFTY"]["decision"], "WAIT")
+        self.assertIn("insufficient candle history", result["market"]["NIFTY"]["signal_error"])
 
 
 if __name__ == "__main__":

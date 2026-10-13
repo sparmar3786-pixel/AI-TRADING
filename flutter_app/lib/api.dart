@@ -20,7 +20,6 @@ class FreshApi {
   final http.Client? _testClient;
 
   static const Set<String> _signalRoutes = <String>{
-    '/health',
     '/v1/system/diagnostics',
     '/v1/metadata',
     '/v1/angel/status',
@@ -36,12 +35,17 @@ class FreshApi {
     '/api/signals',
     '/v1/backtest/historical',
     '/v1/research/indicators',
+    '/v1/portfolio',
+    '/v1/live/orders',
+    '/v1/paper/trades',
+    '/v1/paper/report',
   };
 
   Uri _uri(String path) {
     final suffix = path.startsWith('/') ? path : '/' + path;
     final suffixUri = Uri.parse(suffix);
-    final routeBase = _signalRoutes.contains(suffixUri.path) ? signalBackendUrl : baseUrl;
+    final useSignalBackend = _signalRoutes.contains(suffixUri.path) || suffixUri.path.startsWith('/v1/paper/trades/');
+    final routeBase = useSignalBackend ? signalBackendUrl : baseUrl;
     var normalized = routeBase.trim();
     while (normalized.endsWith('/')) {
       normalized = normalized.substring(0, normalized.length - 1);
@@ -194,7 +198,9 @@ class FreshApi {
   Future<Map<String, dynamic>> connectAngel(
     Map<String, dynamic> body,
   ) async {
-    await checkBackend();
+    // Broker credentials are submitted to the signal service, so health-check
+    // that same service rather than accidentally checking the separate AI host.
+    await FreshApi(signalBackendUrl, _testClient, signalBackendUrl).checkBackend();
     return postJson('/v1/angel/connect', body);
   }
 

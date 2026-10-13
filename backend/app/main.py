@@ -15,13 +15,14 @@ import sys
 import threading
 import time
 import urllib.request
+import asyncio
 from datetime import date, datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -536,21 +537,55 @@ def _indicator_snapshot(closes: list[float], candle_rows: list[Any], today_rows:
     atr_values = technical_atr(indicator_highs, indicator_lows, indicator_closes, 14) if len(indicator_closes) >= 14 else []
     sma20_values = technical_sma(closes, 20)
     sma50_values = technical_sma(closes, 50)
+    ema50_values = technical_ema(closes, 50)
+    ema200_values = technical_ema(closes, 200)
     reversion_values = rsi_reversion(closes, 14)
+    sma20 = sma20_values[-1] if sma20_values else None
+    bb_window = closes[-20:]
+    bb_mid = sum(bb_window) / len(bb_window) if len(bb_window) == 20 else None
+    bb_std = (sum((value - bb_mid) ** 2 for value in bb_window) / len(bb_window)) ** 0.5 if bb_mid is not None else None
+    bb_high = max(indicator_highs[-20:]) if len(indicator_highs) >= 20 else None
+    bb_low = min(indicator_lows[-20:]) if len(indicator_lows) >= 20 else None
+    stochastic_values: list[float] = []
+    for end_index in range(max(13, len(indicator_closes) - 22), len(indicator_closes)):
+        hi_window = indicator_highs[end_index - 13:end_index + 1]
+        lo_window = indicator_lows[end_index - 13:end_index + 1]
+        hi_value, lo_value = max(hi_window), min(lo_window)
+        stochastic_values.append((indicator_closes[end_index] - lo_value) / (hi_value - lo_value) * 100.0 if hi_value > lo_value else 50.0)
     return {
-        "ema_fast_8": fast_line[-1],
-        "ema_slow_21": slow_line[-1],
+        # Canonical names are kept for the quant engine; aliases below match
+        # the Flutter pages' documented schema so all tabs render the same data.
+        "ema_fast_8": fast_line[-1], "ema_slow_21": slow_line[-1],
+        "ema_fast": fast_line[-1], "ema_slow": slow_line[-1],
         "ema_alignment": "BULLISH" if fast_line[-1] > slow_line[-1] else "BEARISH" if fast_line[-1] < slow_line[-1] else "NEUTRAL",
-        "rsi_14": round(rsi, 2),
-        "sma_20": sma20_values[-1] if sma20_values else None,
+        "rsi_14": round(rsi, 2), "rsi14": round(rsi, 2), "rsi": round(rsi, 2),
+        "sma_20": sma20, "sma20": sma20,
         "sma_50": sma50_values[-1] if sma50_values else None,
+        "ema50": ema50_values[-1] if ema50_values else None,
+        "ema200": ema200_values[-1] if ema200_values else None,
         "rsi_reversion_signal": reversion_values[-1] if reversion_values else "WAIT",
         "macd_line": round(macd_line[-1], 4) if macd_line else None,
+        "macd": round(macd_line[-1], 4) if macd_line else None,
         "macd_signal": round(macd_signal[-1], 4) if macd_signal else None,
         "macd_histogram": round(macd_histogram, 4) if macd_histogram is not None else None,
+        "macd_hist": round(macd_histogram, 4) if macd_histogram is not None else None,
         "underlying_atr_14": atr_values[-1] if atr_values and atr_values[-1] is not None else None,
+        "atr14": atr_values[-1] if atr_values and atr_values[-1] is not None else None,
         "vwap": vwap_numerator / vwap_denominator if vwap_denominator > 0 else None,
         "vwap_source": "session OHLCV" if vwap_denominator > 0 else "UNAVAILABLE_NO_VOLUME",
+        "bb_mid": bb_mid, "bb_upper": bb_mid + 2 * bb_std if bb_mid is not None and bb_std is not None else None,
+        "bb_lower": bb_mid - 2 * bb_std if bb_mid is not None and bb_std is not None else None,
+        "stochastic_k14": stochastic_values[-1] if stochastic_values else None,
+        "stochastic_d3": sum(stochastic_values[-3:]) / 3 if len(stochastic_values) >= 3 else None,
+        "williams_r14": -100 * (max(indicator_highs[-14:]) - indicator_closes[-1]) / (max(indicator_highs[-14:]) - min(indicator_lows[-14:])) if len(indicator_closes) >= 14 and max(indicator_highs[-14:]) > min(indicator_lows[-14:]) else None,
+        "roc10_pct": ((closes[-1] / closes[-11]) - 1) * 100 if len(closes) >= 11 and closes[-11] else None,
+        "support20": min(indicator_lows[-20:]) if len(indicator_lows) >= 20 else None,
+        "resistance20": max(indicator_highs[-20:]) if len(indicator_highs) >= 20 else None,
+        "zscore20": (closes[-1] - bb_mid) / bb_std if bb_mid is not None and bb_std not in (None, 0) else None,
+        "realized_vol20": ((sum((((closes[i] / closes[i - 1]) - 1) ** 2) for i in range(len(closes) - 20, len(closes))) / 20) ** 0.5) * 100 if len(closes) >= 21 else None,
+        # ADX and Supertrend are intentionally null until a separately tested
+        # implementation is available; the UI must not invent these values.
+        "adx14": None, "supertrend_direction": None,
     }
 
 
@@ -819,6 +854,27 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
         confirmation_seconds=600,
         max_confirmation_gap_seconds=60,
     )
+    # Publish one normalized engine contract consumed by Dashboard, Signals,
+    # Risk, Trading Setup, the five-layer page and Quant Engine Lab.
+    engine_layers = dict(result.get("layers") or {})
+    passed_layers = sum(1 for layer in engine_layers.values() if isinstance(layer, dict) and layer.get("pass") is True)
+    result["five_layer_engine"] = {
+        "layers": engine_layers, "decision": result.get("decision", "WAIT"),
+        "passed_layers": passed_layers, "total_layers": len(engine_layers),
+        "score_semantics": "passed deterministic checks, not probability of profit",
+    }
+    result["quant_engine"] = result["five_layer_engine"]
+    result["quant_score"] = passed_layers
+    result["quant_score_semantics"] = "count of passed deterministic layers; not a win probability"
+    result["trend_sentiment"] = engine_layers.get("trend_sentiment", {})
+    result["option_validation"] = engine_layers.get("option_selection", {})
+    result["risk_validation"] = engine_layers.get("risk_levels", {})
+    result["regime"] = (engine_layers.get("trend_sentiment") or {}).get("trend", "UNKNOWN")
+    result["order_flow"] = {
+        **snapshot["order_flow"],
+        **(engine_layers.get("order_flow") or {}),
+        "semantics": "bid_ask_depth_not_classified_trade_volume",
+    }
     _confirmation_states[index] = result.get("confirmation_state") or {}
     chain_payload = _market_chain_rows(normalized_options)
     result.update({
@@ -878,6 +934,39 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
         "ai_decision": "NOT_CONFIGURED",
         "blocks": list(result.get("reasons") or []),
     }
+    chart_5m: list[dict[str, Any]] = []
+    for candle in candle_rows:
+        if not isinstance(candle, (list, tuple)) or len(candle) < 6:
+            continue
+        stamp = _iso(candle[0])
+        parsed_stamp = datetime.fromisoformat(stamp) if stamp else None
+        opened, high, low, closed = (_number(candle[i]) for i in (1, 2, 3, 4))
+        if parsed_stamp is None or any(value is None for value in (opened, high, low, closed)):
+            continue
+        chart_5m.append({
+            "t": int(parsed_stamp.timestamp()), "timestamp": stamp,
+            "open": opened, "high": high, "low": low, "close": closed,
+            "volume": _number(candle[5]),
+        })
+    chart_5m = chart_5m[-250:]
+    chart_15m: list[dict[str, Any]] = []
+    for offset in range(0, len(chart_5m) - 2, 3):
+        group = chart_5m[offset:offset + 3]
+        if len(group) != 3:
+            continue
+        volumes = [_number(row.get("volume")) for row in group]
+        chart_15m.append({
+            "t": group[-1]["t"], "timestamp": group[-1]["timestamp"],
+            "open": group[0]["open"], "high": max(row["high"] for row in group),
+            "low": min(row["low"] for row in group), "close": group[-1]["close"],
+            "volume": sum(value for value in volumes if value is not None) if any(value is not None for value in volumes) else None,
+        })
+    result["indicators"] = indicators
+    result["oi_summary"] = {
+        "call_oi": call_oi, "put_oi": put_oi, "pcr": pcr,
+        "classification": "PUT OI HEAVY" if pcr is not None and pcr >= 1.10 else "CALL OI HEAVY" if pcr is not None and pcr <= 0.80 else "BALANCED" if pcr is not None else "DATA REQUIRED",
+        "selected_oi_regime": "PUT OI HEAVY" if pcr is not None and pcr >= 1.10 else "CALL OI HEAVY" if pcr is not None and pcr <= 0.80 else "BALANCED" if pcr is not None else "DATA REQUIRED",
+    }
     market = {
         "ltp": spot, "age_seconds": result.get("layers", {}).get("data_quality", {}).get("age_seconds"),
         "feed_mode": spot_quote.get("_source_mode", "REST_FULL_DEPTH"), "source": "angelone_smartapi",
@@ -891,7 +980,13 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
         "session_open": day_open, "session_high": day_high, "session_low": day_low,
         "session_range_position": round(day_range_position, 4),
         "depth_imbalance": round(depth_imbalance, 4),
+        "order_flow": {
+            "bid": bid, "ask": ask, "buy_volume": buy_volume, "sell_volume": sell_volume,
+            "depth_imbalance": depth_imbalance,
+            "semantics": "bid_ask_depth_not_classified_trade_volume",
+        },
         "indicators": indicators,
+        "timeframes": {"1m": [], "5m": chart_5m, "15m": chart_15m},
         "option_chain": chain_payload,
     }
     return result, market
@@ -910,6 +1005,67 @@ def _empty_payload(reason: str) -> dict[str, Any]:
         "commodities": [{"symbol": name, "status": "WAIT", "reason": reason, "ltp": None} for name in COMMODITY_NAMES],
         "generated_at": now, "signal_only": True, "order_placement_enabled": False,
     }
+
+
+@app.websocket("/ws")
+async def market_snapshot_stream(websocket: WebSocket) -> None:
+    """Stream only broker-sourced spot snapshots; never fabricate market ticks.
+
+    The Flutter footprint view receives sampled quotes, not exchange trade prints.
+    Depth-derived delta is explicitly labelled as bid/ask depth, not aggressor volume.
+    """
+    await websocket.accept()
+    symbol = (websocket.query_params.get("symbol") or "NIFTY").strip().upper()
+    if symbol not in INDEXES:
+        await websocket.send_json({"type": "status", "mode": "WAIT", "message": "Unsupported index symbol"})
+        await websocket.close(code=1008)
+        return
+    candles: list[dict[str, Any]] = []
+    last_source_timestamp: str | None = None
+    try:
+        while True:
+            try:
+                payload = await asyncio.to_thread(_get_signals, False)
+                market_row = dict((payload.get("market") or {}).get(symbol) or {})
+                ltp = _number(market_row.get("ltp"))
+                source_timestamp = _iso(market_row.get("source_timestamp") or market_row.get("timestamp"))
+                parsed = datetime.fromisoformat(source_timestamp) if source_timestamp else None
+                age = (_utc_now() - parsed).total_seconds() if parsed else None
+                live = ltp is not None and ltp > 0 and age is not None and 0 <= age <= 60 and market_row.get("live") is True
+                if live and source_timestamp and source_timestamp != last_source_timestamp:
+                    flow = dict(market_row.get("order_flow") or {})
+                    bid_depth = _number(flow.get("buy_volume")) or 0.0
+                    ask_depth = _number(flow.get("sell_volume")) or 0.0
+                    epoch = int(parsed.timestamp()) if parsed else 0
+                    candles.append({
+                        "t": epoch, "o": ltp, "h": ltp, "l": ltp, "c": ltp,
+                        "v": bid_depth + ask_depth, "d": bid_depth - ask_depth,
+                        "source_timestamp": source_timestamp,
+                        "volume_semantics": "bid_ask_depth_not_trade_volume",
+                    })
+                    candles = candles[-250:]
+                    last_source_timestamp = source_timestamp
+                await websocket.send_json({
+                    "type": "snap", "symbol": symbol, "candles": candles,
+                    "mode": "LIVE" if live else "WAIT",
+                    "live": live, "ltp": ltp if live else None,
+                    "source_timestamp": source_timestamp,
+                    "tick_age_ms": int(age * 1000) if age is not None else None,
+                    "message": "Broker timestamped snapshots; delta is bid/ask depth, not classified trade prints.",
+                    "signal_only": True, "order_placement_enabled": False,
+                })
+            except HTTPException as exc:
+                await websocket.send_json({"type": "status", "mode": "WAIT", "message": str(exc.detail)[:180], "candles": candles})
+            except Exception:
+                await websocket.send_json({"type": "status", "mode": "WAIT", "message": "Broker snapshot unavailable; waiting for a fresh timestamped quote.", "candles": candles})
+            await asyncio.sleep(5)
+    except WebSocketDisconnect:
+        return
+    except Exception:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
 @app.get("/health")
@@ -1096,6 +1252,18 @@ def diagnostics(_: str = Depends(_device)) -> dict[str, Any]:
         "market_data": {
             "snapshot_count": len((_signal_cache or {}).get("market", {})),
             "fresh_snapshot_count": fresh_count, "live_snapshot_count": fresh_count,
+            "index_status": {
+                key: {
+                    "ltp_available": row.get("ltp") is not None,
+                    "live": row.get("live") is True,
+                    "age_seconds": row.get("age_seconds"),
+                    "signal_error": row.get("signal_error") or row.get("error"),
+                    "option_chain_count": len(row.get("option_chain") or []),
+                    "candle_5m_count": len(((row.get("timeframes") or {}).get("5m") or [])),
+                }
+                for key, row in ((_signal_cache or {}).get("market") or {}).items()
+                if isinstance(row, dict)
+            },
         },
         "ai": {"configured": False, "model": "deterministic-five-layer", "error_indexes": []},
         "credentials_encryption_configured": bool(os.getenv("CREDENTIALS_ENCRYPTION_KEY")),
@@ -1255,8 +1423,88 @@ def _get_signals(force: bool = False) -> dict[str, Any]:
                 signals[index] = result
                 market[index] = quote
             except Exception as exc:
-                signals[index] = _wait_signal(index, str(exc)[:220])
-                market[index] = {"ltp": None, "age_seconds": None, "feed_mode": "DATA_ERROR", "source": "angelone_smartapi", "error": str(exc)[:160]}
+                # Keep independently verified spot data visible even if the
+                # heavier signal pipeline fails (e.g. insufficient candles,
+                # option Greeks or option ATR). A signal failure must not blank
+                # the Market/Dashboard pages or silently become an actionable trade.
+                reason = str(exc)[:220]
+                signals[index] = _wait_signal(index, reason)
+                market_row: dict[str, Any] = {
+                    "ltp": None, "age_seconds": None, "feed_mode": "DATA_ERROR",
+                    "source": "angelone_smartapi", "live": False,
+                    "error": reason, "signal_error": reason, "option_chain": [],
+                }
+                try:
+                    index_config = INDEXES[index]
+                    spot_fallback = _quotes(adapter, index_config["exchange"], [index_config["token"]]).get(index_config["token"])
+                    if spot_fallback:
+                        spot_ltp = _number(spot_fallback.get("ltp"))
+                        spot_timestamp = _quote_timestamp(spot_fallback)
+                        parsed_spot_timestamp = datetime.fromisoformat(_iso(spot_timestamp)) if spot_timestamp and _iso(spot_timestamp) else None
+                        spot_age = (_utc_now() - parsed_spot_timestamp).total_seconds() if parsed_spot_timestamp else None
+                        spot_live = spot_ltp is not None and spot_ltp > 0 and spot_age is not None and 0 <= spot_age <= 60
+                        bid_fallback, ask_fallback, buy_depth_fallback, sell_depth_fallback = _book(spot_fallback)
+                        market_row.update({
+                            "ltp": spot_ltp, "age_seconds": round(spot_age, 2) if spot_age is not None else None,
+                            "feed_mode": spot_fallback.get("_source_mode", "REST_FULL_DEPTH"),
+                            "source": "angelone_smartapi", "source_timestamp": spot_timestamp,
+                            "timestamp": spot_timestamp, "live": spot_live,
+                            "signal_error": reason,
+                            "error": None if spot_live else reason,
+                            "order_flow": {
+                                "bid": bid_fallback, "ask": ask_fallback,
+                                "buy_volume": buy_depth_fallback, "sell_volume": sell_depth_fallback,
+                                "semantics": "bid_ask_depth_not_classified_trade_volume",
+                            },
+                        })
+                        # Keep real 5-minute candles available for charting even
+                        # when the stricter signal engine rejects this index.
+                        try:
+                            start_text, end_text = _session_range()
+                            candle_payload = adapter.candles(index_config["exchange"], index_config["token"], "FIVE_MINUTE", start_text, end_text)
+                            chart_rows: list[dict[str, Any]] = []
+                            chart_closes: list[float] = []
+                            chart_highs: list[float] = []
+                            chart_lows: list[float] = []
+                            for candle in candle_payload.get("candles") or []:
+                                if not isinstance(candle, (list, tuple)) or len(candle) < 6:
+                                    continue
+                                candle_stamp = _iso(candle[0])
+                                candle_dt = datetime.fromisoformat(candle_stamp) if candle_stamp else None
+                                candle_values = [_number(candle[pos]) for pos in (1, 2, 3, 4)]
+                                if candle_dt is None or any(value is None for value in candle_values):
+                                    continue
+                                opened, high, low, closed = candle_values
+                                chart_rows.append({
+                                    "t": int(candle_dt.timestamp()), "timestamp": candle_stamp,
+                                    "open": opened, "high": high, "low": low, "close": closed,
+                                    "volume": _number(candle[5]),
+                                })
+                                chart_closes.append(closed)
+                                chart_highs.append(high)
+                                chart_lows.append(low)
+                            chart_rows = chart_rows[-250:]
+                            chart_15m_rows: list[dict[str, Any]] = []
+                            for offset in range(0, len(chart_rows) - 2, 3):
+                                group = chart_rows[offset:offset + 3]
+                                if len(group) == 3:
+                                    volumes = [_number(row.get("volume")) for row in group]
+                                    chart_15m_rows.append({
+                                        "t": group[-1]["t"], "timestamp": group[-1]["timestamp"],
+                                        "open": group[0]["open"], "high": max(row["high"] for row in group),
+                                        "low": min(row["low"] for row in group), "close": group[-1]["close"],
+                                        "volume": sum(value for value in volumes if value is not None) if any(value is not None for value in volumes) else None,
+                                    })
+                            market_row["timeframes"] = {"1m": [], "5m": chart_rows, "15m": chart_15m_rows}
+                            if len(chart_closes) >= 30:
+                                market_row["indicators"] = _indicator_snapshot(chart_closes, candle_payload.get("candles") or [], [])
+                        except Exception:
+                            # Missing history remains missing; the valid spot quote is retained.
+                            pass
+                except Exception:
+                    # Preserve the primary failure; never substitute server time or sample prices.
+                    pass
+                market[index] = market_row
         commodities = _commodity_snapshot(adapter, rows)
         confirmed = []
         for index, signal in signals.items():
@@ -1476,6 +1724,295 @@ def research_indicators(body: ResearchIndicatorsRequest, _: str = Depends(_devic
         },
         "series": {"ema_fast": fast, "ema_slow": slow, "rsi": rsi_values, "atr": atr_values},
         "disclaimer": "Research indicators only. Input candles are not authenticated as live; this endpoint never submits orders.",
+    }
+
+
+def _provider_key_present(*names: str) -> bool:
+    return any(os.getenv(name, "").strip() for name in names)
+
+
+@app.get("/v1/ai/status")
+def ai_status(_: str = Depends(_device)) -> dict[str, Any]:
+    providers = [
+        ("gemini", ("GEMINI_API_KEY", "GOOGLE_API_KEY"), os.getenv("GEMINI_MODEL", "gemini")),
+        ("openrouter", ("OPENROUTER_API_KEY",), os.getenv("OPENROUTER_MODEL", "configured-model")),
+        ("openai", ("OPENAI_API_KEY",), os.getenv("OPENAI_MODEL", "configured-model")),
+    ]
+    selected = next((item for item in providers if _provider_key_present(*item[1])), None)
+    return {
+        "provider": selected[0] if selected else "deterministic_fallback",
+        "model": selected[2] if selected else "five-layer-quant-context",
+        "status": "configured" if selected else "fallback_ready",
+        "llm_configured": selected is not None,
+        "message": "Cloud model key detected; connectivity is tested separately." if selected else "No supported LLM key is configured. Chat can still report actual market fields and deterministic risk gates; it will not pretend an LLM answered.",
+        "signal_only": True,
+    }
+
+
+@app.post("/v1/providers/ai/test")
+def test_ai_providers(_: str = Depends(_device)) -> dict[str, Any]:
+    checks = [
+        {"provider": "gemini", "configured": _provider_key_present("GEMINI_API_KEY", "GOOGLE_API_KEY"), "ok": False},
+        {"provider": "openrouter", "configured": _provider_key_present("OPENROUTER_API_KEY"), "ok": False},
+        {"provider": "openai", "configured": _provider_key_present("OPENAI_API_KEY"), "ok": False},
+    ]
+    return {
+        "status": "configured_not_connectivity_tested" if any(item["configured"] for item in checks) else "not_configured",
+        "checks": checks,
+        "message": "Credentials are present, but no provider response is marked OK until an actual authenticated model request is implemented and verified." if any(item["configured"] for item in checks) else "No cloud AI provider key is configured.",
+    }
+
+
+@app.post("/v1/providers/search/status")
+def search_provider_status(_: str = Depends(_device)) -> dict[str, Any]:
+    exa = _provider_key_present("EXA_API_KEY")
+    tavily = _provider_key_present("TAVILY_API_KEY")
+    return {
+        "status": "configured" if exa or tavily else "not_configured",
+        "providers": {
+            "exa": {"configured": exa, "ok": False, "status": "configured_not_tested" if exa else "not_configured"},
+            "tavily": {"configured": tavily, "ok": False, "status": "configured_not_tested" if tavily else "not_configured"},
+        },
+        "message": "Keys are present; use Search Test to verify an actual request." if exa or tavily else "Configure EXA_API_KEY and/or TAVILY_API_KEY on Railway.",
+    }
+
+
+@app.post("/v1/providers/search/test")
+def test_search_providers(_: str = Depends(_device)) -> dict[str, Any]:
+    exa = _provider_key_present("EXA_API_KEY")
+    tavily = _provider_key_present("TAVILY_API_KEY")
+    evidence = fetch_market_news_sentiment("NIFTY", exa_api_key=os.getenv("EXA_API_KEY"), tavily_api_key=os.getenv("TAVILY_API_KEY"))
+    sources = list(evidence.get("sources") or [])
+    articles = list(evidence.get("articles") or [])
+    checks = [
+        {"provider": "exa", "configured": exa, "ok": "exa" in sources},
+        {"provider": "tavily", "configured": tavily, "ok": "tavily" in sources},
+    ]
+    return {
+        "status": "ok" if any(item["ok"] for item in checks) else "failed_or_no_evidence",
+        "checks": checks, "providers": {item["provider"]: item for item in checks},
+        "evidence_count": len(articles), "search_evidence": articles[:8],
+        "errors": evidence.get("errors", []),
+        "message": "Search returned source-backed headlines." if articles else "No source-backed headlines returned; check provider status, key permissions and Railway outbound access.",
+    }
+
+
+@app.post("/v1/ai/chat")
+def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
+    """Honest deterministic fallback until an authenticated LLM adapter is available."""
+    index = str(body.get("index") or "NIFTY").strip().upper()
+    if index not in INDEXES:
+        raise HTTPException(status_code=400, detail="Unsupported index.")
+    question = str(body.get("question") or "").strip()
+    if not question:
+        raise HTTPException(status_code=422, detail="A question is required.")
+    try:
+        payload = _get_signals()
+        market = dict((payload.get("market") or {}).get(index) or {})
+        signal = dict((payload.get("signals") or {}).get(index) or {})
+        news = dict(signal.get("news_sentiment") or cached_market_news_sentiment(index))
+        validation = dict(signal.get("live_validation") or {})
+        reasons = signal.get("reasons") or signal.get("reason") or []
+        if not isinstance(reasons, list):
+            reasons = [str(reasons)]
+        answer = (
+            f"{index} market context (deterministic backend fallback, not an LLM response): "
+            f"LTP={market.get('ltp') if market.get('ltp') is not None else 'unavailable'}; "
+            f"quote age={market.get('age_seconds') if market.get('age_seconds') is not None else 'unknown'} seconds; "
+            f"signal={signal.get('decision', 'WAIT')}; validation={validation.get('verdict', 'NOT_AVAILABLE')}. "
+            f"Reason: {'; '.join(str(item) for item in reasons[:5]) or 'No verified signal explanation returned'}. "
+            "Missing/stale evidence blocks action. This API is signal-only and never places broker orders."
+        )
+        return {
+            "answer": answer, "provider": "deterministic_fallback",
+            "model": "five-layer-quant-context", "llm_used": False,
+            "index": index, "question": question,
+            "market": market, "signal": signal, "validation": validation,
+            "search_evidence": news.get("articles", [])[:8],
+            "status": "fallback_response", "signal_only": True,
+        }
+    except HTTPException as exc:
+        raise HTTPException(status_code=503, detail={"message": "Current market context is unavailable.", "reason": str(exc.detail)[:180]}) from exc
+
+
+@app.get("/v1/live/orders")
+def live_orders(_: str = Depends(_device)) -> dict[str, Any]:
+    adapter = _current_adapter()
+    if not adapter or adapter.status().get("authenticated") is not True:
+        return {
+            "status": "not_connected", "orders": [], "order_placement_enabled": False,
+            "message": "Connect Angel One to read the broker order book. No order-placement API is exposed.",
+        }
+    try:
+        snapshot = adapter.account_snapshot()
+        return {
+            "status": snapshot.get("status", "unavailable"),
+            "orders": snapshot.get("orders", []), "errors": snapshot.get("errors", []),
+            "read_only": True, "order_placement_enabled": False,
+            "message": "Read-only Angel One order-book snapshot; this endpoint cannot submit or modify orders.",
+        }
+    except Exception:
+        return {
+            "status": "unavailable", "orders": [], "order_placement_enabled": False,
+            "message": "Angel One order-book read failed. Check session and broker API access.",
+        }
+
+
+@app.get("/v1/portfolio")
+def portfolio(_: str = Depends(_device)) -> dict[str, Any]:
+    adapter = _current_adapter()
+    if not adapter or adapter.status().get("authenticated") is not True:
+        return {
+            "status": "not_connected", "positions": [], "holdings": [], "orders": [],
+            "source": "angelone_smartapi", "read_only": True,
+            "message": "Connect Angel One to load live holdings and positions. No sample balance or P&L is fabricated.",
+        }
+    try:
+        snapshot = adapter.account_snapshot()
+        return {
+            **snapshot,
+            "message": "Authenticated read-only account snapshot. Missing broker endpoints remain empty and are listed in errors.",
+            "order_placement_enabled": False,
+        }
+    except Exception:
+        return {
+            "status": "unavailable", "positions": [], "holdings": [], "orders": [],
+            "source": "angelone_smartapi", "read_only": True,
+            "message": "Angel One account snapshot failed. Check session and broker API access.",
+        }
+
+
+_paper_trades_memory: dict[str, dict[str, Any]] = {}
+
+
+def _paper_trade_path() -> Path:
+    return Path(os.getenv("PAPER_TRADES_FILE", "/data/paper_trades.json"))
+
+
+def _load_paper_trades() -> list[dict[str, Any]]:
+    with _lock:
+        path = _paper_trade_path()
+        try:
+            if path.is_file():
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(raw, list):
+                    _paper_trades_memory.clear()
+                    for item in raw:
+                        if isinstance(item, dict) and item.get("trade_id"):
+                            _paper_trades_memory[str(item["trade_id"])] = dict(item)
+        except (OSError, ValueError, TypeError):
+            # Keep the last in-memory state if a mounted volume is temporarily unavailable.
+            pass
+        return [dict(item) for item in _paper_trades_memory.values()]
+
+
+def _save_paper_trades(rows: list[dict[str, Any]]) -> bool:
+    with _lock:
+        _paper_trades_memory.clear()
+        _paper_trades_memory.update({str(item["trade_id"]): dict(item) for item in rows if item.get("trade_id")})
+        path = _paper_trade_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_suffix(path.suffix + ".tmp")
+            temporary.write_text(json.dumps(rows, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+            temporary.replace(path)
+            return True
+        except OSError:
+            # API remains honest about volatility; it never claims disk persistence.
+            return False
+
+
+@app.get("/v1/paper/trades")
+def paper_trades(_: str = Depends(_device)) -> dict[str, Any]:
+    rows = _load_paper_trades()
+    rows.sort(key=lambda item: str(item.get("opened_at") or ""), reverse=True)
+    return {
+        "status": "ok", "trades": rows, "trade_count": len(rows),
+        "persistence": "persistent" if _paper_trade_path().is_file() else "memory_or_empty",
+        "signal_only": True, "order_placement_enabled": False,
+    }
+
+
+@app.post("/v1/paper/trades/open")
+def open_paper_trade(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
+    trade_id = str(body.get("trade_id") or "").strip()
+    index = str(body.get("index") or "").strip().upper()
+    side = str(body.get("side") or "").strip().upper()
+    if not trade_id or len(trade_id) > 128:
+        raise HTTPException(status_code=422, detail="trade_id is required and must be at most 128 characters.")
+    if index not in INDEXES:
+        raise HTTPException(status_code=422, detail="Unsupported index.")
+    if side not in {"CALL", "PUT", "CALL BUY", "PUT BUY", "LONG", "SHORT"}:
+        raise HTTPException(status_code=422, detail="Unsupported paper-trade side.")
+    slippage_r = _number(body.get("slippage_r"))
+    transaction_cost_r = _number(body.get("transaction_cost_r"))
+    slippage_r = 0.02 if slippage_r is None else slippage_r
+    transaction_cost_r = 0.02 if transaction_cost_r is None else transaction_cost_r
+    if not 0 <= slippage_r <= 1 or not 0 <= transaction_cost_r <= 1:
+        raise HTTPException(status_code=422, detail="Paper slippage and transaction costs must be between 0 and 1 R.")
+    rows = _load_paper_trades()
+    if any(str(item.get("trade_id")) == trade_id for item in rows):
+        raise HTTPException(status_code=409, detail="A paper trade with this trade_id already exists.")
+    trade = {
+        "trade_id": trade_id, "strategy_id": str(body.get("strategy_id") or "manual-paper")[:128],
+        "index": index, "side": side, "regime": str(body.get("regime") or "UNVERIFIED")[:64],
+        "status": "OPEN", "slippage_r": slippage_r, "transaction_cost_r": transaction_cost_r,
+        "gross_r": None, "net_r": None, "notes": str(body.get("notes") or "")[:1000],
+        "opened_at": _utc_now().isoformat(), "closed_at": None, "paper_only": True,
+    }
+    rows.append(trade)
+    persisted = _save_paper_trades(rows)
+    return {
+        "status": "ok", "trade": trade, "persistence": "persistent" if persisted else "memory_only",
+        "message": "Paper trade recorded; no broker order was submitted.",
+    }
+
+
+@app.post("/v1/paper/trades/{trade_id}/close")
+def close_paper_trade(trade_id: str, body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
+    gross_r = _number(body.get("gross_r"))
+    if gross_r is None:
+        raise HTTPException(status_code=422, detail="gross_r must be a finite number.")
+    rows = _load_paper_trades()
+    trade = next((item for item in rows if str(item.get("trade_id")) == trade_id), None)
+    if trade is None:
+        raise HTTPException(status_code=404, detail="Paper trade not found.")
+    if trade.get("status") == "CLOSED":
+        raise HTTPException(status_code=409, detail="Paper trade is already closed.")
+    net_r = gross_r - float(trade.get("slippage_r") or 0) - float(trade.get("transaction_cost_r") or 0)
+    trade.update({
+        "status": "CLOSED", "gross_r": round(gross_r, 6), "net_r": round(net_r, 6),
+        "closed_at": _utc_now().isoformat(),
+        "notes": (str(trade.get("notes") or "") + (" | " if trade.get("notes") and body.get("notes") else "") + str(body.get("notes") or ""))[:1500],
+    })
+    persisted = _save_paper_trades(rows)
+    return {
+        "status": "ok", "trade": trade, "persistence": "persistent" if persisted else "memory_only",
+        "message": "Paper result recorded after deducting the configured R-costs; no broker order was submitted.",
+    }
+
+
+@app.get("/v1/paper/report")
+def paper_report(_: str = Depends(_device)) -> dict[str, Any]:
+    rows = _load_paper_trades()
+    closed = [item for item in rows if item.get("status") == "CLOSED" and _number(item.get("net_r")) is not None]
+    values = [float(item["net_r"]) for item in closed]
+    wins = [value for value in values if value > 0]
+    losses = [value for value in values if value < 0]
+    metrics = {
+        "trade_count": len(closed),
+        "win_rate": len(wins) / len(closed) if closed else None,
+        "expectancy_r": round(sum(values) / len(values), 6) if values else None,
+        "net_total_r": round(sum(values), 6),
+        "profit_factor": round(sum(wins) / abs(sum(losses)), 6) if losses else (None if not wins else None),
+        "open_trade_count": sum(1 for item in rows if item.get("status") == "OPEN"),
+        "total_slippage_r": round(sum(float(item.get("slippage_r") or 0) for item in closed), 6),
+        "total_transaction_cost_r": round(sum(float(item.get("transaction_cost_r") or 0) for item in closed), 6),
+    }
+    return {
+        "status": "ok", "trade_count": len(closed), "metrics": metrics,
+        "trades": closed, "mode": "PAPER_ONLY",
+        "message": "Metrics are computed only from recorded closed paper trades; they are not a forecast or live P&L.",
     }
 
 

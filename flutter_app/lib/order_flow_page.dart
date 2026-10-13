@@ -4,8 +4,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 class OrderFlowPage extends StatefulWidget {
-  const OrderFlowPage({required this.backendUrl, super.key});
-  final String backendUrl;
+  const OrderFlowPage({required this.signalBackendUrl, super.key});
+  final String signalBackendUrl;
   @override
   State<OrderFlowPage> createState() => _OrderFlowPageState();
 }
@@ -21,7 +21,7 @@ class _OrderFlowPageState extends State<OrderFlowPage> {
   double numv(dynamic v) => v is num ? v.toDouble() : double.tryParse('$v') ?? 0;
 
   Uri get uri {
-    final base = Uri.parse(widget.backendUrl);
+    final base = Uri.parse(widget.signalBackendUrl);
     return base.replace(scheme: base.scheme == 'https' ? 'wss' : 'ws', path: '/ws', queryParameters: {'symbol': symbol});
   }
 
@@ -90,14 +90,14 @@ class _OrderFlowPageState extends State<OrderFlowPage> {
         Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child: Row(children: [
           metric('LTP', last == null ? '—' : numv(last['c']).toStringAsFixed(2)),
           metric('DELTA', last == null ? '—' : numv(last['d']).toStringAsFixed(0), numv(last?['d'] ?? 0) >= 0 ? green : red),
-          metric('VOLUME', last == null ? '—' : numv(last['v']).toStringAsFixed(0)),
+          metric('DEPTH', last == null ? '—' : numv(last['v']).toStringAsFixed(0)),
         ])),
         const SizedBox(height: 8),
         Expanded(child: Container(margin: const EdgeInsets.all(10), decoration: BoxDecoration(color: const Color(0xFF101722), border: Border.all(color: const Color(0xFF123B59)), borderRadius: BorderRadius.circular(12)),
           child: candles.isEmpty
             ? const Center(child: Padding(padding: EdgeInsets.all(24), child: Text('Waiting for backend order-flow data.\n\nNo sample prices are shown. Backend must expose /ws?symbol=…', textAlign: TextAlign.center, style: TextStyle(color: Colors.white70))))
             : CustomPaint(painter: FootprintPainter(candles), child: const SizedBox.expand()))),
-        const Padding(padding: EdgeInsets.fromLTRB(12, 0, 12, 12), child: Text('Live status requires a verified live backend feed. Footprint interpretation depends on server-side data semantics.', style: TextStyle(color: Colors.white54, fontSize: 10))),
+        const Padding(padding: EdgeInsets.fromLTRB(12, 0, 12, 12), child: Text('Live status requires a fresh broker timestamp. Depth and delta are bid/ask book quantities, not classified exchange trade volume.', style: TextStyle(color: Colors.white54, fontSize: 10))),
       ])),
     );
   }
@@ -132,7 +132,7 @@ class FootprintPainter extends CustomPainter {
       final yo=y(o), yc=y(close);
       canvas.drawRect(Rect.fromLTRB(i*cw+cw*.2, yo<yc?yo:yc, i*cw+cw*.8, (yo-yc).abs()<2?(yo<yc?yo:yc)+2:(yo>yc?yo:yc)),p);
     }
-    final tp=TextPainter(textDirection: TextDirection.ltr)..text=TextSpan(text:'Footprint candles: '+vis.length.toString()+'   •   High '+hi.toStringAsFixed(2)+'   Low '+lo.toStringAsFixed(2),style:const TextStyle(color:Color(0xFF12D6FF),fontSize:11));
+    final tp=TextPainter(textDirection: TextDirection.ltr)..text=TextSpan(text:'Broker snapshots: '+vis.length.toString()+'   •   High '+hi.toStringAsFixed(2)+'   Low '+lo.toStringAsFixed(2),style:const TextStyle(color:Color(0xFF12D6FF),fontSize:11));
     tp.layout(maxWidth:size.width); tp.paint(canvas,const Offset(8,6));
   }
   @override

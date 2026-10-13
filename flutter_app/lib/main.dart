@@ -77,6 +77,12 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
   List<dynamic> commodities = const [];
   bool _refreshing = false;
   Map<String,dynamic> market = const {};
+  // Shared, per-index option-chain cache lets Option Chain and OI Lab consume
+  // the same timestamped broker quotes even when signal qualification fails.
+  final Map<String, List<dynamic>> optionChainsByIndex = <String, List<dynamic>>{};
+  DateTime? _lastOptionChainFetchAt;
+  String? _lastOptionChainIndex;
+  String? optionChainError;
   List<dynamic> tradePlans = const [];
   int qualifiedCount = 0;
   String? lastFetch;
@@ -216,6 +222,25 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       }
     }
     result['signals'] = rawSignals;
+    // Cached snapshots can be shown for continuity, but their old server-side
+    // "live" flags must never survive an offline refresh.
+    final cachedMarket = Map<String, dynamic>.from(result['market'] as Map? ?? const {});
+    for (final entry in cachedMarket.entries) {
+      final row = Map<String, dynamic>.from(entry.value as Map? ?? const {});
+      row['live'] = false;
+      row['feed_mode'] = 'CACHED_OFFLINE';
+      row['cached'] = true;
+      final chain = (row['option_chain'] as List?) ?? const <dynamic>[];
+      row['option_chain'] = chain.whereType<Map>().map((raw) {
+        final option = Map<String, dynamic>.from(raw);
+        option['live'] = false;
+        return option;
+      }).toList();
+      cachedMarket[entry.key] = row;
+    }
+    result['market'] = cachedMarket;
+    result['live'] = false;
+    result['feed'] = <String, dynamic>{...(result['feed'] as Map? ?? const {}), 'connected': false, 'mode': 'CACHED_OFFLINE'};
     result['trade_plans'] = <dynamic>[];
     result['qualified_trade_count'] = 0;
     return result;
@@ -227,8 +252,8 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     Map<String, dynamic> latestSystemDiagnostics = const {};
     String? latestSystemDiagnosticsError;
     try {
-      // Keep the existing AI/chat backend intact while live market data and
-      // Angel One authentication use the dedicated AI-TRADING signal service.
+      // Keep the existing AI/chat backend separate. Market, Angel One, account
+      // and paper-ledger routes are dispatched by FreshApi to AI-TRADING.
       final api = FreshApi(backendUrl);
       final signalApi = FreshApi(signalBackendUrl);
       await api.health();
@@ -260,6 +285,37 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         if (mounted) setState(() { signalsEndpointOnline = false; signalsFetchError = e.toString().replaceFirst('Exception: ', ''); });
         s = _makeCachedSignalsNonActionable(await _loadCachedSignals());
       }
+      // The signal endpoint deliberately fails closed when candles/Greeks are
+      // incomplete. Fetch the option chain independently so its valid quotes
+      // can still populate Option Chain/OI Lab. Throttle this heavier endpoint.
+      final responseMarket = Map<String, dynamic>.from(s['market'] as Map? ?? const {});
+      final selectedMarket = Map<String, dynamic>.from(responseMarket[selectedIndex] as Map? ?? const {});
+      final embeddedChain = (selectedMarket['option_chain'] as List?) ?? const <dynamic>[];
+      if (embeddedChain.isNotEmpty) {
+        optionChainsByIndex[selectedIndex] = List<dynamic>.from(embeddedChain);
+        optionChainError = null;
+      } else {
+        final now = DateTime.now();
+        final shouldFetchChain = _lastOptionChainIndex != selectedIndex ||
+            _lastOptionChainFetchAt == null ||
+            now.difference(_lastOptionChainFetchAt!) >= const Duration(seconds: 30);
+        if (shouldFetchChain) {
+          _lastOptionChainIndex = selectedIndex;
+          _lastOptionChainFetchAt = now;
+          try {
+            final chainResponse = await signalApi.getJson('/v1/option-chain?index=${Uri.encodeQueryComponent(selectedIndex)}', timeout: const Duration(seconds: 35));
+            final chainRows = (chainResponse['option_chain'] as List?) ?? const <dynamic>[];
+            if (chainRows.isNotEmpty) {
+              optionChainsByIndex[selectedIndex] = List<dynamic>.from(chainRows);
+              optionChainError = null;
+            } else {
+              optionChainError = (chainResponse['reason'] ?? 'Broker returned no option-chain quotes yet.').toString();
+            }
+          } catch (e) {
+            optionChainError = e.toString().replaceFirst('Exception: ', '');
+          }
+        }
+      }
       try {
         latestSystemDiagnostics = await signalApi.systemDiagnostics();
         latestSystemDiagnosticsError = null;
@@ -278,7 +334,18 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         feed = (s['feed'] as Map?)?.cast<String,dynamic>() ?? {};
         storeDiagnostics = (s['store'] as Map?)?.cast<String,dynamic>() ?? {};
         signals = (s['signals'] as Map?)?.cast<String,dynamic>() ?? {};
-        market = (s['market'] as Map?)?.cast<String,dynamic>() ?? {};
+        market = responseMarket.map((key, value) {
+          final row = Map<String, dynamic>.from(value as Map? ?? const {});
+          final cachedChain = optionChainsByIndex[key];
+          final currentChain = (row['option_chain'] as List?) ?? const <dynamic>[];
+          if (currentChain.isEmpty && cachedChain != null) {
+            row['option_chain'] = _markOptionRowsFresh(cachedChain, forceStale: row['cached'] == true);
+            row['option_chain_source'] = 'independent_timestamped_broker_quote';
+          } else if (currentChain.isNotEmpty) {
+            row['option_chain'] = _markOptionRowsFresh(currentChain, forceStale: row['cached'] == true);
+          }
+          return MapEntry(key, row);
+        });
         commodities = (s['commodities'] as List?) ?? [];
         tradePlans = ((s['trade_plans'] as List?) ?? const []).whereType<Map>().map((plan) => Map<String, dynamic>.from(plan)).toList();
         qualifiedCount = (s['qualified_trade_count'] as num?)?.toInt() ?? tradePlans.length;
@@ -378,8 +445,43 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  Map<String,dynamic> _signal(String i) => Map<String,dynamic>.from(signals[i] as Map? ?? const {});
-  Map<String,dynamic> _market(String i) => Map<String,dynamic>.from(market[i] as Map? ?? const {});
+  List<dynamic> _markOptionRowsFresh(List<dynamic> rows, {bool forceStale = false}) {
+    final now = DateTime.now().toUtc();
+    return rows.whereType<Map>().map((raw) {
+      final option = Map<String, dynamic>.from(raw);
+      final stamp = DateTime.tryParse((option['source_timestamp'] ?? option['timestamp'] ?? '').toString())?.toUtc();
+      final age = stamp == null ? null : now.difference(stamp).inMilliseconds / 1000.0;
+      option['age_seconds'] = age;
+      option['live'] = !forceStale && age != null && age >= 0 && age <= 60;
+      return option;
+    }).toList();
+  }
+
+  Map<String, dynamic> _signal(String i) {
+    final row = Map<String, dynamic>.from(signals[i] as Map? ?? const {});
+    final marketRow = _market(i);
+    // A blocked strategy must still allow the pages to display independently
+    // verified spot indicators/depth; missing signal fields remain WAIT.
+    if (row['indicators'] is! Map && marketRow['indicators'] is Map) {
+      row['indicators'] = marketRow['indicators'];
+    }
+    if (row['order_flow'] is! Map && marketRow['order_flow'] is Map) {
+      row['order_flow'] = marketRow['order_flow'];
+    }
+    return row;
+  }
+  Map<String, dynamic> _market(String i) {
+    final row = Map<String, dynamic>.from(market[i] as Map? ?? const {});
+    final cachedChain = optionChainsByIndex[i];
+    final chain = (row['option_chain'] as List?) ?? const <dynamic>[];
+    if (chain.isEmpty && cachedChain != null) {
+      row['option_chain'] = _markOptionRowsFresh(cachedChain, forceStale: row['cached'] == true);
+      row['option_chain_source'] = 'independent_timestamped_broker_quote';
+    } else if (chain.isNotEmpty) {
+      row['option_chain'] = _markOptionRowsFresh(chain, forceStale: row['cached'] == true);
+    }
+    return row;
+  }
 
   @override
   Widget build(BuildContext context) => DefaultTabController(
@@ -445,8 +547,8 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       body: TabBarView(children: [
         DashboardPage(index:selectedIndex, connected:status == 'LIVE market feed connected.', status:status, signals:signals, market:market, tradePlans:tradePlans, qualifiedCount:qualifiedCount, lastFetch:lastFetch, onSelected:(v)=>setState(()=>selectedIndex=v)),
         MarketPage(selected:selectedIndex,onChanged:(v)=>setState(()=>selectedIndex=v), signal:_signal(selectedIndex), market:_market(selectedIndex)),
-        ChainPage(selected:selectedIndex,onChanged:(v)=>setState(()=>selectedIndex=v), market:_market(selectedIndex)),
-        OIPage(signals:signals),
+        ChainPage(selected:selectedIndex,onChanged:(v)=>setState(()=>selectedIndex=v), market:_market(selectedIndex), error:optionChainError),
+        OIPage(signals:signals, market:market),
         IndicatorsPage(selected:selectedIndex,signal:_signal(selectedIndex),fast:emaFast,slow:emaSlow,onChanged:(f,s){setState((){emaFast=f;emaSlow=s;});refresh();},onIndex:(v)=>setState(()=>selectedIndex=v)),
         SignalPage(backendUrl:backendUrl,liveStatus:liveTrading,index:selectedIndex,signals:signals,ai:ai,tradePlans:tradePlans,market:market,onChanged:(v)=>setState(()=>selectedIndex=v)),
         RiskPage(index:selectedIndex,signal:_signal(selectedIndex),plans:tradePlans),
@@ -495,7 +597,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         const QuantResearchHubPage(),
         const QuantRepositoriesPage(),
         AiChatPage(backendUrl: backendUrl, selectedIndex: selectedIndex),
-        OrderFlowPage(backendUrl: backendUrl),
+        OrderFlowPage(signalBackendUrl: signalBackendUrl),
         Builder(
           builder: (tabContext) => QuantEngineLabPage(
             backendUrl: backendUrl,
@@ -505,7 +607,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
             onOpenBacktest: () => DefaultTabController.of(tabContext).animateTo(tabs.indexOf('Backtesting')),
           ),
         ),
-        const StrategyLibraryPage(),
+        StrategyLibraryPage(market: market, signals: signals, selectedIndex: selectedIndex),
       ]),
     ),
   );
@@ -624,7 +726,10 @@ class DataHealthPage extends StatelessWidget {
           return Card(child: ListTile(
             leading: Icon(fresh ? Icons.check_circle : Icons.error_outline, color: fresh ? Colors.greenAccent : Colors.orangeAccent),
             title: Text(index),
-            subtitle: Text('Price: ${_val(row['ltp'])} • Age: ${row['age_seconds'] == null ? 'unknown' : '${_val(row['age_seconds'])} sec'} • ${row['feed_mode'] ?? 'NO DATA'}'),
+            subtitle: Text(
+              'Price: ${_val(row['ltp'])} • Age: ${row['age_seconds'] == null ? 'unknown' : '${_val(row['age_seconds'])} sec'} • ${row['feed_mode'] ?? 'NO DATA'}'
+              '${(row['signal_error'] ?? row['error']) == null ? '' : '\nSignal pipeline: ${row['signal_error'] ?? row['error']}'}',
+            ),
             trailing: Text(fresh ? 'LIVE' : hasPrice ? 'STALE' : 'NO DATA', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 11, color: fresh ? Colors.greenAccent : Colors.orangeAccent)),
           ));
         }),
@@ -1305,7 +1410,7 @@ class DashboardPage extends StatelessWidget {
       ['Order flow','Buy/sell volume evidence',f.isNotEmpty],
       ['Options analytics','Strike and side',_has(s['strike'])&&_has(s['option_side'])],
       ['Strategy consensus','Backend decision',_has(s['decision'])],
-      ['Quant scoring','Quant evidence',_has(s['quant_score'])||_has(s['quant'])],
+      ['Quant scoring','Quant evidence',_n(s['quant_score']) > 0 || _has(s['quant'])],
       ['Risk management','Entry, stop, target',_has(s['entry'])&&_has(s['stop_loss'])&&_has(s['target'])&&g.isEmpty],
     ];
     final stable=Map<String,dynamic>.from(s['signal_stability'] as Map? ?? const{})['state']=='CONFIRMED';
@@ -1323,7 +1428,7 @@ class DashboardPage extends StatelessWidget {
       Container(padding:const EdgeInsets.all(16),decoration:BoxDecoration(gradient:const LinearGradient(colors:[Color(0xFF142536),Color(0xFF101722)]),borderRadius:BorderRadius.circular(20),border:Border.all(color:const Color(0xFF294052))),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
         Row(children:[Expanded(child:DropdownButtonFormField<String>(value:index,decoration:const InputDecoration(labelText:'Market',border:InputBorder.none),items:indexes.map((x)=>DropdownMenuItem(value:x,child:Text(x))).toList(),onChanged:(x){if(x!=null)onSelected(x);})),Container(padding:const EdgeInsets.all(8),decoration:BoxDecoration(color:c.withOpacity(.12),borderRadius:BorderRadius.circular(8)),child:Text(d,style:TextStyle(color:c,fontWeight:FontWeight.w900,fontSize:11)))]),
         Text('₹ '+(_has(m['ltp'])?_n(m['ltp']).toStringAsFixed(2):'—'),style:const TextStyle(fontSize:34,fontWeight:FontWeight.w900)),
-        const SizedBox(height:12),Row(children:[Expanded(child:_metric('CONFIDENCE',(s['confidence']??0).toString()+'%')),Expanded(child:_metric('REGIME',(s['regime']??'—').toString())),Expanded(child:_metric('QUALIFIED',qualifiedCount.toString()+' / 5'))]),
+        const SizedBox(height:12),Row(children:[Expanded(child:_metric('CONFIDENCE',s['confidence']==null?'—':s['confidence'].toString()+'%')),Expanded(child:_metric('REGIME',(s['regime']??'—').toString())),Expanded(child:_metric('QUALIFIED',qualifiedCount.toString()+' / 5'))]),
       ])),
       const SizedBox(height:10),_status('Market feed',fresh?'LIVE VERIFIED':'NOT VERIFIED',fresh),
       const SizedBox(height:18),const Text('ORDER FLOW',style:TextStyle(fontSize:15,fontWeight:FontWeight.w900,letterSpacing:1)),
@@ -1366,16 +1471,18 @@ class MarketPage extends StatelessWidget {
     InfoRow('ATR(14)',_val((signal['indicators'] as Map?)?['atr14'])),
     InfoRow('Decision',signal['decision']?.toString()??'NO DATA'),
     InfoRow('Last fetch',market['timestamp']?.toString()??'—'),
+    if (market['signal_error'] != null) InfoRow('Signal pipeline status', market['signal_error'].toString()),
     const Section('Timeframe Data • broker candles only'),
     ...['15m','5m','1m'].map((tf){final arr=((market['timeframes'] as Map?)?[tf] as List?)??const[];final last=arr.isEmpty?null:Map<String,dynamic>.from(arr.last as Map);return Card(child:ListTile(title:Text(tf+' • '+arr.length.toString()+' bars'),subtitle:Text('O '+_val(last?['open'])+' H '+_val(last?['high'])+' L '+_val(last?['low'])+' C '+_val(last?['close'])+' • '+_val(last?['count'])+' ticks')));}),
   ]);
 }
 
 class ChainPage extends StatefulWidget {
-  const ChainPage({required this.selected, required this.onChanged, required this.market, super.key});
+  const ChainPage({required this.selected, required this.onChanged, required this.market, required this.error, super.key});
   final String selected;
   final ValueChanged<String> onChanged;
   final Map<String, dynamic> market;
+  final String? error;
   @override
   State<ChainPage> createState() => _ChainPageState();
 }
@@ -1462,6 +1569,8 @@ class _ChainPageState extends State<ChainPage> {
           onChanged: (v) { if (v != null) setState(() => _sort = v); },
         )),
       ]),
+      if (rows.isEmpty && widget.error != null)
+        Card(child: Padding(padding: const EdgeInsets.all(12), child: Text('Option-chain request: ${widget.error}', style: const TextStyle(color: Colors.orangeAccent, fontSize: 12)))),
       if (rows.isEmpty)
         const StatusCard(text: 'No option-chain quotes are available yet. Connect Angel One, sync the instrument master, and wait for live or historical quotes.', good: false)
       else
@@ -1540,12 +1649,43 @@ class _ChainPageState extends State<ChainPage> {
 
 
 class OIPage extends StatelessWidget {
-  const OIPage({required this.signals,super.key}); final Map<String,dynamic> signals;
-  @override Widget build(BuildContext context)=>ListView(padding:const EdgeInsets.all(10),children:[
-    const Section('OI Lab — all indices'),
-    ...indexes.map((i){final s=Map<String,dynamic>.from(signals[i] as Map? ?? const {});final o=Map<String,dynamic>.from(s['oi_summary'] as Map? ?? const{});return Card(child:Padding(padding:const EdgeInsets.all(14),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-      Text(i,style:const TextStyle(fontSize:19,fontWeight:FontWeight.w900)),InfoRow('CALL OI',_val(o['call_oi'])),InfoRow('PUT OI',_val(o['put_oi'])),InfoRow('PCR',_val(o['pcr'])),InfoRow('Classification',o['classification']?.toString()??'—'),InfoRow('Selected OI regime',o['selected_oi_regime']?.toString()??'—'),
-    ])));}),
+  const OIPage({required this.signals, required this.market, super.key});
+  final Map<String, dynamic> signals;
+  final Map<String, dynamic> market;
+  double _n(dynamic value) => value is num ? value.toDouble() : double.tryParse(value?.toString() ?? '') ?? 0;
+  @override
+  Widget build(BuildContext context) => ListView(padding: const EdgeInsets.all(10), children: [
+    const Section('OI Lab — broker option-chain data'),
+    const Text('OI/PCR are calculated only from returned Angel One option quotes. Missing chains remain unavailable; no sample OI is generated.', style: TextStyle(fontSize: 11, color: Colors.white70)),
+    ...indexes.map((index) {
+      final signal = Map<String, dynamic>.from(signals[index] as Map? ?? const {});
+      final marketRow = Map<String, dynamic>.from(market[index] as Map? ?? const {});
+      final rows = ((marketRow['option_chain'] as List?) ?? const <dynamic>[])
+          .whereType<Map>().map((row) => Map<String, dynamic>.from(row)).toList();
+      final calls = rows.where((row) => (row['side'] ?? row['option_type'] ?? '').toString().toUpperCase().contains('C')).toList();
+      final puts = rows.where((row) => (row['side'] ?? row['option_type'] ?? '').toString().toUpperCase().contains('P')).toList();
+      final callOi = calls.fold<double>(0, (sum, row) => sum + _n(row['oi']));
+      final putOi = puts.fold<double>(0, (sum, row) => sum + _n(row['oi']));
+      final callWall = calls.isEmpty ? null : calls.reduce((a, b) => _n(a['oi']) >= _n(b['oi']) ? a : b);
+      final putWall = puts.isEmpty ? null : puts.reduce((a, b) => _n(a['oi']) >= _n(b['oi']) ? a : b);
+      final old = Map<String, dynamic>.from(signal['oi_summary'] as Map? ?? const {});
+      final hasChainOi = rows.any((row) => row['oi'] != null);
+      final effectiveCallOi = hasChainOi ? callOi : old['call_oi'];
+      final effectivePutOi = hasChainOi ? putOi : old['put_oi'];
+      final pcr = hasChainOi ? (callOi > 0 ? putOi / callOi : null) : old['pcr'];
+      final classification = pcr is num ? (pcr >= 1.1 ? 'PUT OI HEAVY' : pcr <= 0.8 ? 'CALL OI HEAVY' : 'BALANCED') : 'DATA REQUIRED';
+      return Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [Expanded(child: Text(index, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w900))), Text(rows.isEmpty ? 'NO CHAIN' : '${rows.length} QUOTES', style: const TextStyle(color: Colors.white60, fontSize: 11))]),
+        InfoRow('CALL OI', _val(effectiveCallOi)),
+        InfoRow('PUT OI', _val(effectivePutOi)),
+        InfoRow('PCR', _val(pcr)),
+        InfoRow('CALL OI wall', callWall == null ? '—' : '${callWall['strike'] ?? '—'}'),
+        InfoRow('PUT OI wall', putWall == null ? '—' : '${putWall['strike'] ?? '—'}'),
+        InfoRow('Classification', hasChainOi ? classification : (old['classification']?.toString() ?? 'WAIT — no broker OI')),
+        InfoRow('Selected OI regime', old['selected_oi_regime']?.toString() ?? 'Derived from available chain only'),
+        if (marketRow['signal_error'] != null) Text('Signal engine: ${marketRow['signal_error']}', style: const TextStyle(color: Colors.orangeAccent, fontSize: 11)),
+      ])));
+    }),
   ]);
 }
 

@@ -8,6 +8,26 @@ from integrations.angelone_readonly import AngelOneConfigError, AngelOneReadOnly
 
 
 class AngelOneReadOnlyTests(unittest.TestCase):
+    def test_account_snapshot_reads_only_holdings_positions_and_order_book(self):
+        client, modules = self._mock_sdk()
+        client.position.return_value = {"status": True, "data": [{"tradingsymbol": "NIFTY", "netqty": "1"}]}
+        client.holding.return_value = {"status": True, "data": [{"tradingsymbol": "ABC", "quantity": "2"}]}
+        client.orderBook.return_value = {"status": True, "data": [{"orderid": "paperless-read-only-test"}]}
+        env = {
+            "ANGEL_API_KEY": "test-api-key",
+            "ANGEL_CLIENT_CODE": "demo-client",
+            "ANGEL_PIN": "test-pin",
+            "ANGEL_TOTP_SECRET": "test-totp-secret",
+        }
+        with patch.dict(os.environ, env), patch.dict(sys.modules, modules):
+            result = AngelOneReadOnly().account_snapshot()
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(len(result["positions"]), 1)
+        self.assertEqual(len(result["holdings"]), 1)
+        self.assertEqual(len(result["orders"]), 1)
+        self.assertTrue(result["read_only"])
+        self.assertNotIn("test-api-key", repr(result))
+
     def test_missing_credentials_fail_closed(self):
         with patch.dict(os.environ, {}, clear=True):
             with self.assertRaises(AngelOneConfigError):
