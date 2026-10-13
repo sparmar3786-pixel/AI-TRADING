@@ -85,12 +85,51 @@ _master_rows: list[dict[str, Any]] = []
 _master_loaded_at = 0.0
 _signal_cache: dict[str, Any] | None = None
 _signal_cache_at = 0.0
-# Prevent concurrent cache misses from launching duplicate broker fan-out.
+# Signal computation is refreshed in the background so a cold/slow broker
+# cycle cannot make every HTTP client wait for the full multi-index fan-out.
 _signal_build_lock = threading.Lock()
-_signal_build_metrics: dict[str, Any] = {"last_duration_ms": None, "build_count": 0, "in_flight": False}
+_signal_build_metrics: dict[str, Any] = {"last_duration_ms": None, "build_count": 0, "in_flight": False, "last_error": None}
+_request_metrics: dict[str, dict[str, Any]] = {}
 _confirmation_states: dict[str, dict[str, Any]] = {}
 _last_market: dict[str, Any] = {}
 _option_history: dict[str, dict[str, float]] = {}
+
+def _record_request_metric(path: str, status_code: int, elapsed_ms: float, response_bytes: int | None) -> None:
+    with _lock:
+        item = dict(_request_metrics.get(path) or {"count": 0, "errors": 0, "total_ms": 0.0})
+        item["count"] = int(item.get("count", 0)) + 1
+        item["errors"] = int(item.get("errors", 0)) + (1 if status_code >= 400 else 0)
+        item["total_ms"] = float(item.get("total_ms", 0.0)) + elapsed_ms
+        item["last_ms"] = round(elapsed_ms, 1)
+        item["average_ms"] = round(float(item["total_ms"]) / int(item["count"]), 1)
+        item["last_status"] = int(status_code)
+        item["last_response_bytes"] = response_bytes
+        item["last_server_throughput_bytes_per_second"] = round(response_bytes / (elapsed_ms / 1000.0), 1) if response_bytes is not None and elapsed_ms > 0 else None
+        _request_metrics[path] = item
+        # Keep a bounded per-route table instead of growing forever.
+        if len(_request_metrics) > 60:
+            oldest = next(iter(_request_metrics))
+            if oldest != path:
+                _request_metrics.pop(oldest, None)
+
+@app.middleware("http")
+async def request_timing_middleware(request, call_next):
+    started = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        _record_request_metric(request.url.path, 500, elapsed_ms, None)
+        raise
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    try:
+        response_bytes = int(response.headers.get("content-length")) if response.headers.get("content-length") else None
+    except (TypeError, ValueError):
+        response_bytes = None
+    response.headers["X-Response-Time-Ms"] = f"{elapsed_ms:.1f}"
+    response.headers["Server-Timing"] = f"app;dur={elapsed_ms:.1f}"
+    _record_request_metric(request.url.path, response.status_code, elapsed_ms, response_bytes)
+    return response
 
 
 class ConnectRequest(BaseModel):
@@ -1339,6 +1378,10 @@ def diagnostics(_: str = Depends(_device)) -> dict[str, Any]:
     return {
         "service": "ai-trading-readonly-api",
         "signal_build": dict(_signal_build_metrics),
+        "api_performance": {
+            path: {key: value for key, value in metric.items() if key != "total_ms"}
+            for path, metric in _request_metrics.items()
+        },
         "angel": angel,
         "angel_one": {
             "authenticated": angel.get("authenticated", False),
@@ -1508,34 +1551,84 @@ def market_sentiment(index: str = Query(default="NIFTY"), _: str = Depends(_devi
     }
 
 
-def _get_signals(force: bool = False) -> dict[str, Any]:
-    """Single-flight cache refresh shared by HTTP and WebSocket callers."""
-    with _lock:
-        if _signal_cache is not None and not force and time.monotonic() - _signal_cache_at < SIGNAL_CACHE_SECONDS:
-            return _signal_cache
-    global _signal_build_metrics
-    with _signal_build_lock:
+def _refresh_signals_worker() -> None:
+    global _signal_build_metrics, _signal_cache
+    started = time.monotonic()
+    error_text = None
+    try:
+        _get_signals_uncached(force=True)
+    except Exception as exc:
+        error_text = f"{type(exc).__name__}: signal refresh failed"
+        logger.warning("SIGNAL_REFRESH_FAILED: %s", type(exc).__name__)
+    finally:
+        elapsed_ms = round((time.monotonic() - started) * 1000, 1)
         with _lock:
-            if _signal_cache is not None and not force and time.monotonic() - _signal_cache_at < SIGNAL_CACHE_SECONDS:
-                return _signal_cache
-            _signal_build_metrics["in_flight"] = True
-        started = time.monotonic()
-        try:
-            payload = _get_signals_uncached(force=True)
-            elapsed_ms = round((time.monotonic() - started) * 1000, 1)
-            with _lock:
-                _signal_build_metrics["last_duration_ms"] = elapsed_ms
-                _signal_build_metrics["build_count"] = int(_signal_build_metrics.get("build_count", 0)) + 1
-                payload["performance"] = {
+            _signal_build_metrics["last_duration_ms"] = elapsed_ms
+            _signal_build_metrics["build_count"] = int(_signal_build_metrics.get("build_count", 0)) + 1
+            _signal_build_metrics["last_error"] = error_text
+            _signal_build_metrics["in_flight"] = False
+            if _signal_cache is not None:
+                _signal_cache["performance"] = {
                     "signal_build_ms": elapsed_ms,
                     "signal_build_count": _signal_build_metrics["build_count"],
                     "single_flight": True,
+                    "background_refresh": True,
                 }
-            return payload
-        finally:
-            with _lock:
-                _signal_build_metrics["in_flight"] = False
 
+
+def _stale_signal_snapshot(cached: dict[str, Any], age_seconds: float | None) -> dict[str, Any]:
+    # JSON round-trip makes a detached copy so stale flags never mutate the cache.
+    snapshot = json.loads(json.dumps(cached, default=str))
+    snapshot["live"] = False
+    snapshot["refreshing"] = True
+    snapshot["cache_age_seconds"] = round(age_seconds, 1) if age_seconds is not None else None
+    snapshot["feed"] = {**(snapshot.get("feed") or {}), "connected": False, "mode": "CACHED_REFRESHING"}
+    for row in (snapshot.get("market") or {}).values():
+        if isinstance(row, dict):
+            row["live"] = False
+            row["cached"] = True
+            row["feed_mode"] = "CACHED_REFRESHING"
+    for row in (snapshot.get("signals") or {}).values():
+        if isinstance(row, dict):
+            decision = str(row.get("decision") or "WAIT").upper()
+            if decision in ("CALL BUY", "PUT BUY"):
+                row["candidate_decision"] = decision
+            row["decision"] = "WAIT"
+            row["data_fresh"] = False
+            validation = dict(row.get("live_validation") or {})
+            validation["decision"] = "WAIT"
+            validation["verdict"] = "WARN"
+            blocks = list(validation.get("blocks") or [])
+            blocks.append("Signal refresh is in progress; cached data is not actionable.")
+            validation["blocks"] = blocks
+            row["live_validation"] = validation
+    snapshot["trade_plans"] = []
+    snapshot["qualified_trade_count"] = 0
+    snapshot["message"] = "Showing cached quotes as stale while the broker snapshot refreshes in the background."
+    return snapshot
+
+
+def _get_signals(force: bool = False) -> dict[str, Any]:
+    """Serve immediately and refresh expired market snapshots in a single background worker."""
+    global _signal_build_metrics
+    with _lock:
+        age = time.monotonic() - _signal_cache_at if _signal_cache is not None else None
+        fresh = _signal_cache is not None and age is not None and age < SIGNAL_CACHE_SECONDS
+        if fresh and not force:
+            return _signal_cache
+        cached = _signal_cache
+        start_refresh = not bool(_signal_build_metrics.get("in_flight"))
+        if start_refresh:
+            _signal_build_metrics["in_flight"] = True
+    if start_refresh:
+        worker = threading.Thread(target=_refresh_signals_worker, name="signal-refresh", daemon=True)
+        worker.start()
+    if cached is not None:
+        return _stale_signal_snapshot(cached, age)
+    payload = _empty_payload("Initial Angel One snapshot is loading in the background; retry shortly.")
+    payload["refreshing"] = True
+    payload["performance"] = {"signal_build_ms": _signal_build_metrics.get("last_duration_ms"), "in_flight": True}
+    return payload
 
 def _get_signals_uncached(force: bool = False) -> dict[str, Any]:
     global _signal_cache, _signal_cache_at, _last_market
