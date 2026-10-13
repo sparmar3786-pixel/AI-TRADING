@@ -555,7 +555,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         RiskPage(index:selectedIndex,signal:_signal(selectedIndex),plans:tradePlans),
         CommodityPage(items:commodities),
         BacktestingPage(backendUrl: backendUrl),
-        ApiPage(backendUrl:backendUrl,signalBackendUrl:signalBackendUrl,feed:feed,storeDiagnostics:storeDiagnostics,market:market,onSaved:(url){setState(()=>backendUrl=url);refresh();}),
+        ApiPage(backendUrl:backendUrl,signalBackendUrl:signalBackendUrl,feed:feed,storeDiagnostics:storeDiagnostics,market:market,onSaved:(url){setState((){backendUrl=url;signalBackendUrl=url;});refresh();}),
         AiAccessPage(backendUrl:backendUrl),
         DataHealthPage(
           backendUrl: backendUrl,
