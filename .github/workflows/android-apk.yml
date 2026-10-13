@@ -67,6 +67,12 @@ jobs:
           if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
             sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n    <application#' "$MANIFEST"
           fi
+          if ! grep -q 'android.permission.FOREGROUND_SERVICE' "$MANIFEST"; then
+            sed -i 's#<application#<uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n    <application#' "$MANIFEST"
+          fi
+          if ! grep -q 'id.flutter.flutter_background_service.BackgroundService' "$MANIFEST"; then
+            sed -i 's#</application>#<service android:name="id.flutter.flutter_background_service.BackgroundService" android:foregroundServiceType="dataSync" android:exported="false" />\n    </application>#' "$MANIFEST"
+          fi
           sed -i 's/android:label="ai_trading_signal"/android:label="AI Trading Signals"/' "$MANIFEST"
           GRADLE=android/app/build.gradle.kts
           sed -i 's/applicationId = "com.example.ai_trading_signal"/applicationId = "com.sparmar3786.aitradingsignals"/' "$GRADLE"
