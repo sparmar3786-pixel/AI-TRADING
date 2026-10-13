@@ -54,6 +54,7 @@ class FreshApi {
     '/v1/system/diagnostics',
     '/v1/ai/status',
     '/v1/ai/gemini-chat',
+    '/v1/ai/review-signal',
     '/v1/providers/ai/test',
     '/v1/metadata',
     '/v1/ai/validate',
@@ -361,6 +362,14 @@ class FreshApi {
           'question': question,
           'history': history,
         },
+        timeout: const Duration(seconds: 40),
+      );
+
+  Future<Map<String, dynamic>> reviewSignalWithGemini({
+    required String index,
+  }) => postJson(
+        '/v1/ai/review-signal',
+        {'index': index},
         timeout: const Duration(seconds: 40),
       );
 
