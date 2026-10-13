@@ -1979,27 +1979,110 @@ class _AiAccessState extends State<AiAccessPage>{
   String message='Cloud AI status has not been checked.';
   Map<String,Map<String,dynamic>> providers=const{};
   @override void initState(){super.initState();refresh();}
-  Future<void> refresh() async{
-    if(checking)return;setState(()=>checking=true);
-    try{final r=await FreshApi(widget.backendUrl.trim()).postJson('/v1/providers/search/status',{});final next=<String,Map<String,dynamic>>{};final raw=r['providers'];if(raw is Map){for(final n in ['exa','tavily']){final v=raw[n];if(v is Map)next[n]=Map<String,dynamic>.from(v);}}if(mounted)setState(()=>providers=next);}
-    catch(e){if(mounted)setState(()=>message='Provider check failed: '+e.toString().replaceFirst('Exception: ',''));}
-    finally{if(mounted)setState(()=>checking=false);}
+  Future<void> refresh() async {
+    if (checking) return;
+    setState(() => checking = true);
+    final api = FreshApi(widget.backendUrl.trim());
+    final next = <String, Map<String, dynamic>>{};
+    try {
+      final result = await api.postJson('/v1/providers/search/status', {});
+      final raw = result['providers'];
+      if (raw is Map) {
+        for (final name in ['exa', 'tavily']) {
+          final value = raw[name];
+          if (value is Map) next[name] = Map<String, dynamic>.from(value);
+        }
+      }
+    } catch (error) {
+      if (mounted) setState(() => message = 'Search provider check failed: ' + error.toString().replaceFirst('Exception: ', ''));
+    }
+    try {
+      final result = await api.aiStatus();
+      final raw = result['providers'];
+      if (raw is Map) {
+        for (final name in ['openai', 'openrouter']) {
+          final value = raw[name];
+          if (value is Map) next[name] = Map<String, dynamic>.from(value);
+        }
+      }
+    } catch (error) {
+      if (mounted) setState(() => message = 'AI provider status failed: ' + error.toString().replaceFirst('Exception: ', ''));
+    }
+    if (mounted) setState(() { providers = next; checking = false; });
   }
-  Future<void> test() async{
-    setState(()=>working=true);
-    try{final r=await FreshApi(widget.backendUrl.trim()).testAIProviders();final checks=(r['checks'] as List? ?? const[]);final details=checks.whereType<Map>().map((x)=>(x['provider']??'provider').toString()+': '+(x['ok']==true?'OK':'NOT VERIFIED')).join(' • ');final notice=(r['message']??details).toString();if(mounted){setState(()=>message=notice+' • '+details);ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(notice+' • '+details),duration:const Duration(seconds:6)));}}
-    catch(e){if(mounted)setState(()=>message='Cloud AI test failed: '+e.toString().replaceFirst('Exception: ',''));}
-    finally{if(mounted)setState(()=>working=false);}
+
+  Future<void> test() async {
+    setState(() => working = true);
+    try {
+      final result = await FreshApi(widget.backendUrl.trim()).testAIProviders();
+      final checks = (result['checks'] as List? ?? const []);
+      final updated = <String, Map<String, dynamic>>{...providers};
+      for (final item in checks.whereType<Map>()) {
+        final name = (item['provider'] ?? '').toString();
+        if (name == 'openai' || name == 'openrouter') updated[name] = Map<String, dynamic>.from(item);
+      }
+      final details = checks.whereType<Map>().map((item) {
+        final name = (item['provider'] ?? 'provider').toString().toUpperCase();
+        final status = (item['status'] ?? (item['ok'] == true ? 'working' : 'not_working')).toString();
+        final error = (item['error'] ?? '').toString();
+        return '$name: $status${error.isEmpty ? '' : ' ($error)'}';
+      }).join(' • ');
+      final notice = (result['message'] ?? details).toString();
+      if (mounted) {
+        setState(() { providers = updated; message = '$notice • $details'; });
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$notice • $details'), duration: const Duration(seconds: 6)));
+      }
+    } catch (error) {
+      if (mounted) setState(() => message = 'Cloud AI test failed: ' + error.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => working = false);
+    }
   }
-  Widget provider(String n){final d=providers[n];final ok=d?['working']==true,configured=d?['configured']==true;final c=d==null?Colors.blueGrey:(ok?const Color(0xFF35D39A):const Color(0xFFFF6577));final label=d==null?'CHECK REQUIRED':ok?'WORKING':configured?'NOT WORKING':'NOT CONFIGURED';return Card(child:ListTile(leading:Icon(Icons.circle,size:13,color:c),title:Text(n=='exa'?'Exa Search':'Tavily Search',style:const TextStyle(fontWeight:FontWeight.w800)),subtitle:Text(d==null?'Not checked':label+' • '+(d['evidence_count']??0).toString()+' evidence items'),trailing:Text(label,style:TextStyle(color:c,fontSize:10,fontWeight:FontWeight.w900))));}
-  @override Widget build(BuildContext context)=>ListView(padding:const EdgeInsets.all(14),children:[
-    const Section('CLOUD AI • NO OFFLINE MODEL'),
-    const Card(child:ListTile(leading:Icon(Icons.cloud_done,color:Color(0xFF35D39A),size:30),title:Text('Gemini Cloud Validation'),subtitle:Text('AI runs through Railway. No on-device GGUF model is used. AI remains advisory; deterministic freshness and risk gates control trade eligibility.'))),
-    FilledButton.icon(onPressed:working?null:test,icon:const Icon(Icons.psychology),label:Text(working?'TESTING CLOUD AI…':'TEST CLOUD AI CONNECTION')),
-    const SizedBox(height:10),Card(child:Padding(padding:const EdgeInsets.all(12),child:Text(message))),
-    const Section('SEARCH EVIDENCE • BACKEND CONFIGURED'),provider('exa'),provider('tavily'),
-    OutlinedButton.icon(onPressed:checking?null:refresh,icon:const Icon(Icons.refresh),label:Text(checking?'CHECKING…':'REFRESH EXA / TAVILY STATUS')),
-    const SizedBox(height:8),const Text('Provider keys remain on Railway. Green means the backend reports a successful provider check.',style:TextStyle(fontSize:12,color:Colors.white60)),
+
+  Widget provider(String name) {
+    final data = providers[name];
+    final configured = data?['configured'] == true;
+    final ok = data?['working'] == true || data?['ok'] == true;
+    final status = (data?['status'] ?? '').toString();
+    final label = data == null ? 'CHECK REQUIRED'
+        : ok ? 'WORKING'
+        : !configured ? 'NOT CONFIGURED'
+        : status == 'configured_not_tested' ? 'NOT TESTED' : 'NOT WORKING';
+    final color = data == null ? Colors.blueGrey
+        : ok ? const Color(0xFF35D39A) : const Color(0xFFFF6577);
+    final title = switch (name) {
+      'exa' => 'Exa Search',
+      'tavily' => 'Tavily Search',
+      'openai' => 'OpenAI',
+      'openrouter' => 'OpenRouter',
+      _ => name,
+    };
+    final detail = name == 'exa' || name == 'tavily'
+        ? (data == null ? 'Not checked' : '$label • ${data['evidence_count'] ?? 0} evidence items')
+        : (data == null ? 'Not checked' : '$label • ${data['model'] ?? 'model not reported'}');
+    return Card(child: ListTile(
+      leading: Icon(Icons.circle, size: 13, color: color),
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+      subtitle: Text(detail),
+      trailing: Text(label, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w900)),
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) => ListView(padding: const EdgeInsets.all(14), children: [
+    const Section('CLOUD AI • GEMINI + OPENAI + OPENROUTER'),
+    const Card(child: ListTile(leading: Icon(Icons.cloud_done, color: Color(0xFF35D39A), size: 30), title: Text('Gemini Cloud Validation'), subtitle: Text('AI runs through Railway. No on-device GGUF model is used. AI remains advisory; deterministic freshness and risk gates control trade eligibility.'))),
+    FilledButton.icon(onPressed: working ? null : test, icon: const Icon(Icons.psychology), label: Text(working ? 'TESTING OPENAI + OPENROUTER…' : 'TEST OPENAI + OPENROUTER')),
+    const SizedBox(height: 10),
+    Card(child: Padding(padding: const EdgeInsets.all(12), child: Text(message))),
+    const Section('LLM PROVIDERS • OPENAI + OPENROUTER'),
+    provider('openai'), provider('openrouter'),
+    OutlinedButton.icon(onPressed: checking ? null : refresh, icon: const Icon(Icons.refresh), label: Text(checking ? 'CHECKING…' : 'REFRESH LLM STATUS')),
+    const Section('SEARCH EVIDENCE • BACKEND CONFIGURED'),
+    provider('exa'), provider('tavily'),
+    OutlinedButton.icon(onPressed: checking ? null : refresh, icon: const Icon(Icons.refresh), label: Text(checking ? 'CHECKING…' : 'REFRESH EXA / TAVILY STATUS')),
+    const SizedBox(height: 8),
+    const Text('Provider keys remain on Railway. Green means a real provider test succeeded; configured-only or untested providers remain red until tested.', style: TextStyle(fontSize: 12, color: Colors.white60)),
   ]);
 }
 
