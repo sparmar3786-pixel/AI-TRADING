@@ -205,7 +205,7 @@ void main() {
     await tester.pumpWidget(const FreshApp());
     final tabBarContext = tester.element(find.byType(TabBar).first);
     DefaultTabController.of(tabBarContext).animateTo(tabs.indexOf('Flow Monitor'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 500));
     expect(find.text('FLOW MONITOR • API SPEED • ENGINE VALIDATION'), findsOneWidget);
     final monitorScrollable = find.descendant(of: find.byType(RefreshIndicator), matching: find.byType(Scrollable)).first;
     await tester.scrollUntilVisible(find.text('SERVER API ROUTE METRICS'), 250, scrollable: monitorScrollable);
