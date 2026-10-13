@@ -537,21 +537,55 @@ def _indicator_snapshot(closes: list[float], candle_rows: list[Any], today_rows:
     atr_values = technical_atr(indicator_highs, indicator_lows, indicator_closes, 14) if len(indicator_closes) >= 14 else []
     sma20_values = technical_sma(closes, 20)
     sma50_values = technical_sma(closes, 50)
+    ema50_values = technical_ema(closes, 50)
+    ema200_values = technical_ema(closes, 200)
     reversion_values = rsi_reversion(closes, 14)
+    sma20 = sma20_values[-1] if sma20_values else None
+    bb_window = closes[-20:]
+    bb_mid = sum(bb_window) / len(bb_window) if len(bb_window) == 20 else None
+    bb_std = (sum((value - bb_mid) ** 2 for value in bb_window) / len(bb_window)) ** 0.5 if bb_mid is not None else None
+    bb_high = max(indicator_highs[-20:]) if len(indicator_highs) >= 20 else None
+    bb_low = min(indicator_lows[-20:]) if len(indicator_lows) >= 20 else None
+    stochastic_values: list[float] = []
+    for end_index in range(max(13, len(indicator_closes) - 22), len(indicator_closes)):
+        hi_window = indicator_highs[end_index - 13:end_index + 1]
+        lo_window = indicator_lows[end_index - 13:end_index + 1]
+        hi_value, lo_value = max(hi_window), min(lo_window)
+        stochastic_values.append((indicator_closes[end_index] - lo_value) / (hi_value - lo_value) * 100.0 if hi_value > lo_value else 50.0)
     return {
-        "ema_fast_8": fast_line[-1],
-        "ema_slow_21": slow_line[-1],
+        # Canonical names are kept for the quant engine; aliases below match
+        # the Flutter pages' documented schema so all tabs render the same data.
+        "ema_fast_8": fast_line[-1], "ema_slow_21": slow_line[-1],
+        "ema_fast": fast_line[-1], "ema_slow": slow_line[-1],
         "ema_alignment": "BULLISH" if fast_line[-1] > slow_line[-1] else "BEARISH" if fast_line[-1] < slow_line[-1] else "NEUTRAL",
-        "rsi_14": round(rsi, 2),
-        "sma_20": sma20_values[-1] if sma20_values else None,
+        "rsi_14": round(rsi, 2), "rsi14": round(rsi, 2), "rsi": round(rsi, 2),
+        "sma_20": sma20, "sma20": sma20,
         "sma_50": sma50_values[-1] if sma50_values else None,
+        "ema50": ema50_values[-1] if ema50_values else None,
+        "ema200": ema200_values[-1] if ema200_values else None,
         "rsi_reversion_signal": reversion_values[-1] if reversion_values else "WAIT",
         "macd_line": round(macd_line[-1], 4) if macd_line else None,
+        "macd": round(macd_line[-1], 4) if macd_line else None,
         "macd_signal": round(macd_signal[-1], 4) if macd_signal else None,
         "macd_histogram": round(macd_histogram, 4) if macd_histogram is not None else None,
+        "macd_hist": round(macd_histogram, 4) if macd_histogram is not None else None,
         "underlying_atr_14": atr_values[-1] if atr_values and atr_values[-1] is not None else None,
+        "atr14": atr_values[-1] if atr_values and atr_values[-1] is not None else None,
         "vwap": vwap_numerator / vwap_denominator if vwap_denominator > 0 else None,
         "vwap_source": "session OHLCV" if vwap_denominator > 0 else "UNAVAILABLE_NO_VOLUME",
+        "bb_mid": bb_mid, "bb_upper": bb_mid + 2 * bb_std if bb_mid is not None and bb_std is not None else None,
+        "bb_lower": bb_mid - 2 * bb_std if bb_mid is not None and bb_std is not None else None,
+        "stochastic_k14": stochastic_values[-1] if stochastic_values else None,
+        "stochastic_d3": sum(stochastic_values[-3:]) / 3 if len(stochastic_values) >= 3 else None,
+        "williams_r14": -100 * (max(indicator_highs[-14:]) - indicator_closes[-1]) / (max(indicator_highs[-14:]) - min(indicator_lows[-14:])) if len(indicator_closes) >= 14 and max(indicator_highs[-14:]) > min(indicator_lows[-14:]) else None,
+        "roc10_pct": ((closes[-1] / closes[-11]) - 1) * 100 if len(closes) >= 11 and closes[-11] else None,
+        "support20": min(indicator_lows[-20:]) if len(indicator_lows) >= 20 else None,
+        "resistance20": max(indicator_highs[-20:]) if len(indicator_highs) >= 20 else None,
+        "zscore20": (closes[-1] - bb_mid) / bb_std if bb_mid is not None and bb_std not in (None, 0) else None,
+        "realized_vol20": ((sum((((closes[i] / closes[i - 1]) - 1) ** 2) for i in range(len(closes) - 20, len(closes))) / 20) ** 0.5) * 100 if len(closes) >= 21 else None,
+        # ADX and Supertrend are intentionally null until a separately tested
+        # implementation is available; the UI must not invent these values.
+        "adx14": None, "supertrend_direction": None,
     }
 
 
