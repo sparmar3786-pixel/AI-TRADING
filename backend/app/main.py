@@ -1131,7 +1131,7 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
     last_source_timestamp: str | None = None
     future: dict[str, str] | None = None
     rows: list[dict[str, Any]] = []
-    history_loaded = bool(candles)
+    history_loaded = False
     try:
         while True:
             try:
@@ -1171,16 +1171,21 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
                             values = [_number(candle[pos]) for pos in (1, 2, 3, 4)]
                             if parsed_candle is None or any(value is None for value in values):
                                 continue
+                            candle_epoch = int(parsed_candle.timestamp())
+                            if any(int(item.get("t") or 0) == candle_epoch for item in candles):
+                                # Keep the already captured live/depth candle for this minute.
+                                continue
                             opened, high, low, close = values
                             candles.append({
-                                "t": int(parsed_candle.timestamp()), "o": opened, "h": high, "l": low, "c": close,
+                                "t": candle_epoch, "o": opened, "h": high, "l": low, "c": close,
                                 "v": _number(candle[5]) or 0.0, "lv": {}, "source_timestamp": stamp,
                                 "historical": True, "level_semantics": "price-level depth unavailable for historical candles",
                             })
+                        candles.sort(key=lambda item: int(item.get("t") or 0))
                         candles = candles[-250:]
                     except Exception:
                         # Historical candles are optional; never replace them with generated/sample prices.
-                        candles = []
+                        candles = sorted(candles, key=lambda item: int(item.get("t") or 0))[-250:]
                 quote = _quotes(adapter, future["exchange"], [future["token"]]).get(future["token"])
                 ltp = _number(quote.get("ltp")) if quote else None
                 source_timestamp = _quote_timestamp(quote or {})
