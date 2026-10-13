@@ -10,7 +10,7 @@ body{display:flex;flex-direction:column;padding:env(safe-area-inset-top) env(saf
 header{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 8px;background:var(--pn);border-bottom:1px solid var(--ln)}
 select,button{background:var(--bg);color:var(--tx);border:1px solid var(--ln);border-radius:6px;padding:5px 8px;font:inherit}
 #st{margin-left:auto;padding:3px 8px;border-radius:99px;font-size:11px;font-weight:600;background:#333}
-.live{background:#12432e;color:var(--g)}.closed{background:#4a3a10;color:#f0b429}
+.live{background:#12432e;color:var(--g)}.closed{background:#4a171d;color:var(--r)}
 #info{display:flex;gap:12px;padding:4px 8px;font-size:12px;color:var(--mu);white-space:nowrap;overflow-x:auto;border-bottom:1px solid var(--ln)}
 #info b{color:var(--tx)}
 @media(orientation:landscape) and (max-height:520px){header{padding:3px 6px;gap:4px}select,button{padding:2px 6px}#info{padding:2px 8px;font-size:11px}#st{font-size:10px}}
@@ -25,8 +25,8 @@ main{flex:1;min-height:0;position:relative}canvas{width:100%;height:100%;display
 .rr{color:var(--r)}.gg{color:var(--g)}
 </style></head><body>
 <header>
- <select id="sym"><option>NIFTY</option><option>BANKNIFTY</option><option>FINNIFTY</option><option>MIDCPNIFTY</option><option>SENSEX</option><option>BANKEX</option></select>
- <select id="tf"><option value="1">1m</option><option value="3">3m</option><option value="5">5m</option><option value="15">15m</option><option value="30">30m</option><option value="60">1h</option></select>
+ <select id="sym"><optgroup label="Indian Indices"><option>NIFTY</option><option>BANKNIFTY</option><option>FINNIFTY</option><option>MIDCPNIFTY</option><option>SENSEX</option><option>BANKEX</option></optgroup><optgroup label="MCX Commodity Futures"><option>CRUDEOIL</option><option>CRUDEOILM</option><option>NATURALGAS</option><option>NATGASMINI</option><option>GOLD</option><option>GOLDM</option><option>SILVER</option><option>SILVERM</option><option>COPPER</option><option>ZINC</option><option>ALUMINIUM</option><option>LEAD</option><option>NICKEL</option><option>MENTHAOIL</option><option>CASTORSEED</option><option>COTTON</option><option>RUBBER</option></optgroup></select>
+ <select id="tf"><option value="1">1m</option><option value="3">3m</option><option value="5">5m</option><option value="15">15m</option><option value="30">30m</option><option value="60">1h</option><option value="1440">1D · 5Y</option></select>
  <button id="zo">−</button><button id="zi">+</button><button id="lt">Live ⇥</button><button id="hp">? Manual</button>
  <span id="st">...</span>
 </header>
@@ -46,46 +46,47 @@ main{flex:1;min-height:0;position:relative}canvas{width:100%;height:100%;display
 <main><canvas id="c"></canvas></main>
 <script>
 const $=i=>document.getElementById(i),cv=$('c'),ctx=cv.getContext('2d');
-let sym='NIFTY',tf=1,step=5,raw=[],mode='',colW=100,off=0,ws,dirty=1,retry=0;
+const FOOTPRINT_WS_URL = '__FOOTPRINT_WS_URL__';
+let sym='NIFTY',tf=1,step=5,raw=[],mode='',colW=100,off=0,ws,dirty=1,retry=0,historyBars=0;
+const COMMODITY_STEPS={CRUDEOIL:1,CRUDEOILM:1,NATURALGAS:0.5,NATGASMINI:0.5,GOLD:100,GOLDM:10,SILVER:100,SILVERM:10,COPPER:1,ZINC:0.5,ALUMINIUM:0.5,LEAD:0.5,NICKEL:1,MENTHAOIL:1,CASTORSEED:10,COTTON:10,RUBBER:1};
+const isCommodity=s=>Object.prototype.hasOwnProperty.call(COMMODITY_STEPS,s);
+const priceStep=s=>COMMODITY_STEPS[s]||(({SENSEX:20,BANKEX:20,BANKNIFTY:10})[s]||5);
 const tz={timeZone:'Asia/Kolkata',hour12:false};
 const hm=t=>new Date(t*1000).toLocaleTimeString('en-GB',{...tz,hour:'2-digit',minute:'2-digit'});
 const dm=t=>new Date(t*1000).toLocaleDateString('en-GB',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short'});
 const f=n=>{const a=Math.abs(n);return a>=1e7?(n/1e7).toFixed(2)+'Cr':a>=1e5?(n/1e5).toFixed(1)+'L':a>=1e3?(n/1e3).toFixed(1)+'k':String(Math.round(n))};
-let wsBytesWindow=0,wsWindowAt=Date.now(),wsMessagesWindow=0,wsLastAt=0,wsRate=0,wsMps=0;
-function reportWsTelemetry(payload,m){
- const now=Date.now(),size=new Blob([payload]).size;
- wsBytesWindow+=size;wsMessagesWindow++;
- const elapsed=now-wsWindowAt;
- if(elapsed>=1000){wsRate=Math.round(wsBytesWindow*1000/elapsed);wsMps=Math.round(wsMessagesWindow*1000/elapsed*10)/10;wsBytesWindow=0;wsMessagesWindow=0;wsWindowAt=now}
- const item={kind:'order_flow_ws',payload_bytes:size,bytes_per_second:wsRate,messages_per_second:wsMps,inter_message_ms:wsLastAt?now-wsLastAt:null,quote_age_ms:m.tick_age_ms??null,mode:String(m.mode||'wait').toLowerCase(),source_timestamp:m.source_timestamp||null,level_semantics:m.level_semantics||null};
- wsLastAt=now;
- try{if(window.Telemetry&&window.Telemetry.postMessage)window.Telemetry.postMessage(JSON.stringify(item))}catch(_){}
-}
 
 function connect(){
  if(ws){ws.onclose=null;ws.close()}
  raw=[];off=0;
- const wsBase=window.ORDER_FLOW_WS_BASE||((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws');ws=new WebSocket(wsBase+'?symbol='+encodeURIComponent(sym));
- ws.onopen=()=>{retry=0;try{if(window.Telemetry&&window.Telemetry.postMessage)window.Telemetry.postMessage(JSON.stringify({kind:'order_flow_ws',mode:'connected',source_timestamp:null,payload_bytes:0,bytes_per_second:0,messages_per_second:0,quote_age_ms:null,level_semantics:'waiting for first broker snapshot'}))}catch(_){}};
- ws.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch(_){mode='wait';status();return}reportWsTelemetry(e.data,m);mode=String(m.mode||'wait').toLowerCase();
-  if(mode==='demo'||mode.includes('sample')){raw=[];mode='wait';status();$('info').textContent='Demo/sample feed blocked. Waiting for broker-sourced data.';dirty=1;return}
-  if(m.type==='snap'){raw=Array.isArray(m.candles)?m.candles:[];step=Number(m.step)||step}
-  else if(m.type==='status'){if(Array.isArray(m.candles))raw=m.candles;$('info').textContent=String(m.message||'Waiting for broker data.');status();dirty=1;return}
-  else if(m.candle){const c=m.candle,l=raw[raw.length-1];if(l&&l.t===c.t)raw[raw.length-1]=c;else if(!l||c.t>l.t)raw.push(c);else{const i=raw.findIndex(x=>x.t===c.t);if(i>=0)raw[i]=c}}
+ const endpoint=FOOTPRINT_WS_URL==='__FOOTPRINT_WS_URL__' ? ((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws') : FOOTPRINT_WS_URL;
+ ws=new WebSocket(endpoint+'?symbol='+encodeURIComponent(sym)+'&tf='+encodeURIComponent(String(tf)));
+ ws.onopen=()=>{retry=0};
+ ws.onmessage=e=>{const m=JSON.parse(e.data);mode=String(m.mode||'').toLowerCase();
+  if(m.type==='snap'){raw=Array.isArray(m.candles)?m.candles:[];step=Number(m.step)||priceStep(sym);historyBars=Number(m.history_bars_returned)||raw.length}
+  else if(m.candle&&typeof m.candle==='object'){const c=m.candle,l=raw[raw.length-1];if(l&&l.t===c.t)raw[raw.length-1]=c;else if(!l||c.t>l.t)raw.push(c);else{const i=raw.findIndex(x=>x.t===c.t);if(i>=0)raw[i]=c}}
+  else if(Array.isArray(m.candles)){raw=m.candles}
+  const latestCandle=(m.candle&&typeof m.candle==='object')?m.candle:raw[raw.length-1];
+  if(window.Telemetry&&typeof window.Telemetry.postMessage==='function'){
+   window.Telemetry.postMessage(JSON.stringify({
+    symbol:m.symbol||sym,mode:m.mode||mode,live:m.live===true,
+    source_timestamp:m.source_timestamp||latestCandle?.source_timestamp||null,
+    history_interval:m.history_interval||null,history_bars_returned:m.history_bars_returned||historyBars,
+    candle:latestCandle||null,level_semantics:m.level_semantics||'unknown'
+   }));
+  }
   status();dirty=1};
- ws.onclose=()=>{try{if(window.Telemetry&&window.Telemetry.postMessage)window.Telemetry.postMessage(JSON.stringify({kind:'order_flow_ws',mode:'disconnected',source_timestamp:null,payload_bytes:0,bytes_per_second:0,messages_per_second:0,quote_age_ms:null,level_semantics:'WebSocket closed; reconnecting'}))}catch(_){}$('st').className='';$('st').textContent='Reconnecting...';setTimeout(connect,Math.min(1000*++retry,8000))};
+ ws.onclose=()=>{$('st').className='';$('st').textContent='Reconnecting...';setTimeout(connect,Math.min(1000*++retry,8000))};
 }
-function status(){const s=$('st'),l=raw[raw.length-1];
- s.className=mode==='live'?'live':mode==='closed'?'closed':'';
- s.textContent=mode==='live'?'● LIVE':mode==='wait'&&!l?'WAITING FOR BROKER DATA':(mode==='wait'?'RECONNECTING':'AFTER MARKET')+' · Last data '+(l?dm(l.t)+' '+hm(l.t):'—')}
+function status(){const s=$('st'),l=raw[raw.length-1],hasLevels=raw.some(c=>c.lv&&Object.keys(c.lv).length>0);
+ s.className=mode==='live'?'live':(mode==='wait'||mode==='closed'||mode==='after_market')?'closed':'';
+ s.textContent=tf===1440?(mode==='live'?'● LIVE · ':'● DAILY · ')+historyBars+' bars'+(hasLevels?' · DEPTH':' · DEPTH UNAVAILABLE'):mode==='live'?(hasLevels?'● LIVE':'● LIVE · DEPTH UNAVAILABLE'):mode==='wait'?'● CLOSED / WAITING FOR BROKER DATA':'● CLOSED · LAST DATA '+(l?dm(l.t)+' '+hm(l.t):'—')}
 
 function agg(){const m=new Map();
  for(const c of raw){const k=Math.floor(c.t/(tf*60))*tf*60;let a=m.get(k);
-  if(!a){a={t:k,o:c.o,h:c.h,l:c.l,c:c.c,lv:{},v:0,d:null,bo:null,so:null};m.set(k,a)}
-  a.h=Math.max(a.h,c.h);a.l=Math.min(a.l,c.l);a.c=c.c;a.v+=Number(c.v)||0;
-  if(c.d!=null)a.d=(a.d??0)+Number(c.d||0);
-  if(c.bo!=null)a.bo=c.bo;if(c.so!=null)a.so=c.so;
-  for(const p in (c.lv||{})){const x=a.lv[p]||(a.lv[p]=[0,0]);x[0]+=Number(c.lv[p][0])||0;x[1]+=Number(c.lv[p][1])||0}}
+  if(!a){a={t:k,o:c.o,h:c.h,l:c.l,c:c.c,lv:{},v:0,d:0,bo:null,so:null};m.set(k,a)}
+  a.h=Math.max(a.h,c.h);a.l=Math.min(a.l,c.l);a.c=c.c;a.v+=Number(c.v)||0;a.d+=Number(c.d)||0;a.bo=c.bo??a.bo;a.so=c.so??a.so;
+  for(const p in c.lv){const x=a.lv[p]||(a.lv[p]=[0,0]);x[0]+=c.lv[p][0];x[1]+=c.lv[p][1]}}
  return [...m.values()]}
 
 function draw(){
@@ -127,16 +128,15 @@ function draw(){
   // bottom stats
   ctx.fillStyle='#121821';ctx.fillRect(x0,ch,cw+4,bot);
   const L=[['Δ',(c.d>0?'+':'')+f(c.d),c.d>=0?'#26c281':'#ef4b5b'],['Vol',f(c.v),'#d7dde6'],
-   ['Buy ord',c.bo,'#26c281'],['Sell ord',c.so,'#ef4b5b']];
+   ['Buy ord',c.bo??'—','#26c281'],['Sell ord',c.so??'—','#ef4b5b']];
   L.forEach((r,k)=>{ctx.fillStyle='#7d8896';ctx.textAlign='left';ctx.fillText(r[0],x0+3,ch+8+k*lh);
    ctx.fillStyle=r[2];ctx.textAlign='right';ctx.fillText(r[1],x0+cw,ch+8+k*lh)});
   ctx.fillStyle='#1f2733';ctx.fillRect(x0+colW-2,top,1,H-top)});
  // current price
- const hasDepth=vis.some(c=>Object.keys(c.lv||{}).length>0);
  const l=all[all.length-1],yp=y(l.c)+rh/2;
  if(l.c<=hB&&l.c>=lB){ctx.setLineDash([3,3]);ctx.strokeStyle='#f0b429';ctx.beginPath();ctx.moveTo(0,yp);ctx.lineTo(W-pw,yp);ctx.stroke();ctx.setLineDash([]);
   ctx.fillStyle='#f0b429';ctx.fillRect(W-pw,yp-8,pw,16);ctx.fillStyle='#000';ctx.textAlign='left';ctx.font='11px system-ui';ctx.fillText(l.c.toFixed(2),W-pw+3,yp)}
- $('info').innerHTML=`<span>LTP <b>${l.c.toFixed(2)}</b></span><span>Δ <b style="color:${l.d==null?'#7d8896':l.d>=0?'#26c281':'#ef4b5b'}">${l.d==null?'—':f(l.d)}</b></span><span>Vol <b>${f(l.v)}</b></span><span>Buy orders <b style="color:#26c281">${l.bo==null?'—':l.bo}</b></span><span>Sell orders <b style="color:#ef4b5b">${l.so==null?'—':l.so}</b></span><span>Cell = Sell × Buy</span><span style="color:${hasDepth?'#26c281':'#f0b429'}">${hasDepth?'Depth: broker best-five':'Depth unavailable: no broker depth in selected bars'}</span><span style="color:#f0b429">▭ POC</span>`;
+ $('info').innerHTML=`<span>LTP <b>${l.c.toFixed(2)}</b></span><span>Δ <b style="color:${l.d>=0?'#26c281':'#ef4b5b'}">${f(l.d)}</b></span><span>Vol <b>${f(l.v)}</b></span><span>Buy orders <b style="color:#26c281">${l.bo}</b></span><span>Sell orders <b style="color:#ef4b5b">${l.so}</b></span><span>Cell = Sell × Buy</span><span style="color:#f0b429">▭ POC</span>`;
 }
 (function loop(){if(dirty){dirty=0;draw()}requestAnimationFrame(loop)})();
 new ResizeObserver(()=>dirty=1).observe(document.querySelector('main'));addEventListener('orientationchange',()=>setTimeout(()=>dirty=1,200));
@@ -148,8 +148,8 @@ cv.onwheel=e=>{e.preventDefault();colW=Math.max(64,Math.min(180,colW-Math.sign(e
 $('zi').onclick=()=>{colW=Math.min(180,colW+12);dirty=1};
 $('zo').onclick=()=>{colW=Math.max(64,colW-12);dirty=1};
 $('lt').onclick=()=>{off=0;dirty=1};
-$('sym').onchange=e=>{sym=e.target.value;connect()};
-$('tf').onchange=e=>{tf=+e.target.value;off=0;dirty=1};
+$('sym').onchange=e=>{sym=e.target.value;step=priceStep(sym);connect()};
+$('tf').onchange=e=>{tf=+e.target.value;off=0;dirty=1;connect()};
 $('hp').onclick=()=>$('man').hidden=false;$('mx').onclick=()=>$('man').hidden=true;
 addEventListener('keydown',e=>{if(e.key==='Escape')$('man').hidden=true});
 connect();

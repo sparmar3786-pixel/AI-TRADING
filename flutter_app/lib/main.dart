@@ -14,9 +14,13 @@ import 'quant_engine_lab_page.dart';
 import 'order_flow_page.dart';
 import 'strategy_library_page.dart';
 import 'flow_monitor_page.dart';
+import 'daily_ai_memory.dart';
+import 'daily_ai_memory_page.dart';
 
-const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Engine Data','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','PDF Report & Fixes','AI Chat','Order Flow','Quant Engine Lab','Strategy Library','Flow Monitor'];
+const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Market Diagnostics','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','PDF Report & Fixes','AI Chat','Order Flow','Quant Engine Lab','Strategy Library','Flow Monitor','AI Memory'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
+const commodityOptionUnderlyings = ['CRUDEOIL','CRUDEOILM','NATURALGAS','NATGASMINI','GOLD','GOLDM','SILVER','SILVERM','COPPER','ZINC','ALUMINIUM','LEAD','NICKEL'];
+const optionUnderlyings = [...indexes, ...commodityOptionUnderlyings];
 
 void main() {
   // Capture Dart/Flutter errors in logcat so a phone-side crash can be
@@ -68,6 +72,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
   bool angelOnline = false;
   Map<String,dynamic> liveTrading = const {};
   Map<String,dynamic> ai = const {};
+  Map<String,dynamic> aiProviderStatus = const {};
   Map<String,dynamic> feed = const {};
   Map<String,dynamic> storeDiagnostics = const {};
   Map<String,dynamic> systemDiagnostics = const {};
@@ -245,6 +250,18 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     return result;
   }
 
+  void _saveAiMemory() {
+    unawaited(DailyAiMemory.saveSnapshot(
+      market: Map<String, dynamic>.from(market),
+      signals: Map<String, dynamic>.from(signals),
+      commodities: List<dynamic>.from(commodities),
+      optionChains: optionChainsByIndex.map((key, value) => MapEntry(key, List<dynamic>.from(value))),
+      footprint: Map<String, dynamic>.from(OrderFlowTelemetry.latest),
+      aiProviders: Map<String, dynamic>.from(aiProviderStatus),
+      aiResults: Map<String, dynamic>.from(ai),
+    ));
+  }
+
   Future<void> refresh() async {
     if (_refreshing) return;
     _refreshing = true;
@@ -271,6 +288,33 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       }
       Map<String,dynamic> liveStatus = const {};
       try { liveStatus = await signalApi.liveExecutionStatus(); } catch (_) {}
+      Map<String,dynamic> providerStatus = const {};
+      try {
+        // Cloud AI credentials/status belong to the AI/chat backend; market
+        // feed health remains owned by signalApi.
+        providerStatus = await api.aiStatus();
+        if (providerStatus['providers'] is! Map && providerStatus['provider_health'] is List) {
+          final normalized = <String, dynamic>{};
+          for (final item in (providerStatus['provider_health'] as List).whereType<Map>()) {
+            final name = (item['name'] ?? '').toString().toLowerCase();
+            if (!['gemini', 'openai', 'openrouter'].contains(name)) continue;
+            normalized[name] = <String, dynamic>{
+              'configured': true,
+              'ok': false,
+              'status': item['status'] == 'COOLDOWN' ? 'cooldown' : 'configured_not_tested',
+              'model': item['model'] ?? item['model_name'] ?? 'not reported',
+            };
+          }
+          for (final name in ['gemini', 'openai', 'openrouter']) {
+            normalized.putIfAbsent(name, () => <String, dynamic>{
+              'configured': false, 'ok': false, 'status': 'not_configured', 'model': '—',
+            });
+          }
+          providerStatus['providers'] = normalized;
+        }
+      } catch (providerError) {
+        debugPrint('AI_PROVIDER_STATUS_FAILED: $providerError');
+      }
       Map<String,dynamic> s;
       try {
         await signalApi.health();
@@ -335,6 +379,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         systemDiagnosticsError = latestSystemDiagnosticsError;
         angelOnline = a['authenticated'] == true;
         liveTrading = liveStatus;
+        aiProviderStatus = providerStatus;
         ai = (s['ai'] as Map?)?.cast<String,dynamic>() ?? {};
         feed = (s['feed'] as Map?)?.cast<String,dynamic>() ?? {};
         storeDiagnostics = (s['store'] as Map?)?.cast<String,dynamic>() ?? {};
@@ -363,6 +408,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
                     ? 'Signal API responded, but Angel One status check failed: $angelStatusError'
                     : (lastFetch != null ? 'LIVE unavailable — showing last fetched market data.' : 'Backend online — waiting for Angel One market data. Check broker credentials and connection status.')));
       });
+      _saveAiMemory();
     } catch (e) {
       if (mounted) setState(() { apiOnline = false; signalsEndpointOnline = false; signalsFetchError = e.toString().replaceFirst('Exception: ', ''); systemDiagnostics = const {}; systemDiagnosticsError = e.toString().replaceFirst('Exception: ', ''); });
       final s = _makeCachedSignalsNonActionable(await _loadCachedSignals());
@@ -383,6 +429,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         lastFetch = s['last_fetch']?.toString();
         status = lastFetch != null ? 'Backend unavailable — showing last fetched market data. Error: ${signalsFetchError ?? 'request failed'}' : 'Backend offline or unreachable: ${signalsFetchError ?? 'health check failed'}';
       });
+      _saveAiMemory();
     } finally {
       _refreshing = false;
     }
@@ -392,11 +439,43 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     final ist = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
     if (ist.weekday == DateTime.saturday || ist.weekday == DateTime.sunday) return false;
     final minutes = ist.hour * 60 + ist.minute;
+    if (commodityOptionUnderlyings.contains(selectedIndex)) {
+      // MCX closes at 23:30 IST in standard US time and 23:55 IST during US DST.
+      final marchFirst = DateTime(ist.year, 3, 1);
+      final marchFirstSunday = marchFirst.add(Duration(days: (7 - marchFirst.weekday) % 7));
+      final dstStart = marchFirstSunday.add(const Duration(days: 7));
+      final novemberFirst = DateTime(ist.year, 11, 1);
+      final dstEnd = novemberFirst.add(Duration(days: (7 - novemberFirst.weekday) % 7));
+      final usDst = !ist.isBefore(dstStart) && ist.isBefore(dstEnd);
+      final closeMinute = usDst ? 23 * 60 + 55 : 23 * 60 + 30;
+      return minutes >= 9 * 60 && minutes <= closeMinute;
+    }
     return minutes >= (9 * 60 + 15) && minutes <= (15 * 60 + 30);
+  }
+
+  bool get _selectedCommodityLive {
+    if (!commodityOptionUnderlyings.contains(selectedIndex)) return false;
+    final rows = optionChainsByIndex[selectedIndex] ?? const <dynamic>[];
+    final now = DateTime.now();
+    for (final value in rows) {
+      if (value is! Map) continue;
+      final stamp = value['source_timestamp'] ?? value['timestamp'];
+      final parsed = DateTime.tryParse(stamp?.toString() ?? '');
+      if (parsed == null) continue;
+      final age = now.difference(parsed.toLocal()).inSeconds;
+      if (age >= -5 && age <= 60) return true;
+    }
+    return false;
   }
 
   String get _appBarStatus {
     if (!apiOnline) return "API OFFLINE";
+    if (commodityOptionUnderlyings.contains(selectedIndex)) {
+      if (!_marketOpenNow) return "API UP • MCX CLOSED";
+      if (_selectedCommodityLive) return "API LIVE • MCX";
+      if (optionChainError != null) return "API UP • MCX DATA ERROR";
+      return "API UP • WAITING MCX DATA";
+    }
     if (!signalsEndpointOnline) return "API UP • DATA ERROR";
     if (!_marketOpenNow) return "API UP • MARKET CLOSED";
     if (status == "LIVE market feed connected.") return "API LIVE";
@@ -406,9 +485,9 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
   }
 
   Color get _appBarStatusColor {
-    if (_appBarStatus == "API LIVE") return Colors.greenAccent;
+    if (_appBarStatus.startsWith("API LIVE")) return Colors.greenAccent;
     if (_appBarStatus == "API OFFLINE") return Colors.redAccent;
-    if (_appBarStatus == "API UP • MARKET CLOSED") return const Color(0xFF94A3B8);
+    if (_appBarStatus.contains("CLOSED")) return const Color(0xFF94A3B8);
     return Colors.orangeAccent;
   }
 
@@ -551,12 +630,12 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         bottom: TabBar(isScrollable: true, tabAlignment: TabAlignment.start, tabs: tabs.map((t)=>Tab(text:t)).toList()),
       ),
       body: TabBarView(children: [
-        DashboardPage(index:selectedIndex, connected:status == 'LIVE market feed connected.', status:status, signals:signals, market:market, tradePlans:tradePlans, qualifiedCount:qualifiedCount, lastFetch:lastFetch, onSelected:(v)=>setState(()=>selectedIndex=v)),
+        DashboardPage(index:selectedIndex, connected:status == 'LIVE market feed connected.', status:status, signals:signals, market:market, aiProviders:aiProviderStatus, tradePlans:tradePlans, qualifiedCount:qualifiedCount, lastFetch:lastFetch, onSelected:(v)=>setState(()=>selectedIndex=v)),
         MarketPage(selected:selectedIndex,onChanged:(v)=>setState(()=>selectedIndex=v), signal:_signal(selectedIndex), market:_market(selectedIndex)),
-        ChainPage(selected:selectedIndex,onChanged:(v)=>setState(()=>selectedIndex=v), market:_market(selectedIndex), error:optionChainError),
-        OIPage(signals:signals, market:market),
+        ChainPage(selected:selectedIndex,onChanged:(v){setState(()=>selectedIndex=v);refresh();}, market:_market(selectedIndex), error:optionChainError),
+        OIPage(signals:signals, market:market, commodities:commodities, optionChains:optionChainsByIndex),
         IndicatorsPage(selected:selectedIndex,signal:_signal(selectedIndex),fast:emaFast,slow:emaSlow,onChanged:(f,s){setState((){emaFast=f;emaSlow=s;});refresh();},onIndex:(v)=>setState(()=>selectedIndex=v)),
-        SignalPage(backendUrl:backendUrl,liveStatus:liveTrading,index:selectedIndex,signals:signals,ai:ai,tradePlans:tradePlans,market:market,onChanged:(v)=>setState(()=>selectedIndex=v)),
+        SignalPage(backendUrl:backendUrl,liveStatus:liveTrading,index:selectedIndex,signals:signals,ai:ai,aiProviders:aiProviderStatus,tradePlans:tradePlans,market:market,onChanged:(v)=>setState(()=>selectedIndex=v)),
         RiskPage(index:selectedIndex,signal:_signal(selectedIndex),plans:tradePlans),
         CommodityPage(items:commodities),
         BacktestingPage(backendUrl: backendUrl),
@@ -576,9 +655,9 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           onRefresh: refresh,
         ),
         const ApiRailwayPage(),
-        RepositoryLibraryPage(market: market, signals: signals, feed: feed, diagnostics: storeDiagnostics, lastFetch: lastFetch),
+        MarketDiagnosticsPage(market: market, signals: signals, feed: feed, diagnostics: storeDiagnostics, lastFetch: lastFetch),
         TradingSetupPage(backendUrl: backendUrl, apiOnline: apiOnline, signalsOnline: signalsEndpointOnline, angelOnline: angelOnline, market: market, signals: signals, ai: ai, liveStatus: liveTrading, lastFetch: lastFetch),
-        ResearchEnginesPage(market: market, signals: signals, ai: ai, lastFetch: lastFetch, selectedIndex: selectedIndex, onIndexChanged: (value) => setState(() => selectedIndex = value)),
+        ResearchEnginesPage(market: market, signals: signals, ai: ai, commodities: commodities, optionChains: optionChainsByIndex, lastFetch: lastFetch, selectedIndex: selectedIndex, onIndexChanged: (value) => setState(() => selectedIndex = value)),
         TradeEnginePage(
           backendUrl: backendUrl,
           selectedIndex: selectedIndex,
@@ -613,6 +692,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         ),
         StrategyLibraryPage(market: market, signals: signals, selectedIndex: selectedIndex),
         FlowMonitorPage(signalBackendUrl: signalBackendUrl),
+        const DailyAiMemoryPage(),
       ]),
     ),
   );
@@ -1025,8 +1105,8 @@ class _BacktestingPageState extends State<BacktestingPage> {
   }
 }
 
-class RepositoryLibraryPage extends StatelessWidget {
-  const RepositoryLibraryPage({
+class MarketDiagnosticsPage extends StatelessWidget {
+  const MarketDiagnosticsPage({
     required this.market,
     required this.signals,
     required this.feed,
@@ -1044,7 +1124,7 @@ class RepositoryLibraryPage extends StatelessWidget {
   Widget build(BuildContext context) => ListView(
     padding: const EdgeInsets.all(12),
     children: [
-      const Text('ENGINE DATA • CURRENT BACKEND SNAPSHOT', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
+      const Text('MARKET DATA DIAGNOSTICS • CURRENT BACKEND SNAPSHOT', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
       const SizedBox(height: 8),
       Card(child: Column(children: [
         InfoRow('Latest fetch', lastFetch ?? 'No successful fetch recorded'),
@@ -1077,11 +1157,11 @@ class RepositoryLibraryPage extends StatelessWidget {
             ],
           ));
         }),
-      const Text('ENGINE MODULES PRESENT IN THIS REPOSITORY', style: TextStyle(fontWeight: FontWeight.w900)),
+      const Text('ENGINE MODULES STATUS', style: TextStyle(fontWeight: FontWeight.w900)),
       const SizedBox(height: 6),
-      const Text('These are Fresh-Apk modules, not proof that every external repository has been imported: Angel One SmartAPI/WebSocket, normalized market store, trend/technical indicators, OI classification, strategy ensemble/conflict checks, signal-quality gates, historical backtesting, risk gates and AI/search evidence integration.', style: TextStyle(color: Colors.white70)),
+      const Text('Operational modules: Angel One SmartAPI/WebSocket, normalized market store, trend/technical indicators, OI classification, strategy ensemble/conflict checks, signal-quality gates, historical backtesting, risk gates and AI/search evidence integration. Status is based on runtime diagnostics, not file presence.', style: TextStyle(color: Colors.white70)),
       const SizedBox(height: 14),
-      const Text('Runtime modules and status are shown above. External repository URLs are intentionally hidden from operational tabs.', style: TextStyle(color: Colors.white70, fontSize: 12)),
+      const Text('Runtime module status is shown above. This page focuses on live diagnostics and working app functions.', style: TextStyle(color: Colors.white70, fontSize: 12)),
     ],
   );
 }
@@ -1091,34 +1171,60 @@ class ResearchEnginesPage extends StatelessWidget {
     required this.market,
     required this.signals,
     required this.ai,
+    required this.commodities,
+    required this.optionChains,
     required this.lastFetch,
     required this.selectedIndex,
     required this.onIndexChanged,
     super.key,
   });
   final Map<String, dynamic> market, signals, ai;
+  final List<dynamic> commodities;
+  final Map<String, List<dynamic>> optionChains;
   final String? lastFetch;
   final String selectedIndex;
   final ValueChanged<String> onIndexChanged;
 
   @override
   Widget build(BuildContext context) {
-    final m = Map<String, dynamic>.from(market[selectedIndex] as Map? ?? const {});
-    final s = Map<String, dynamic>.from(signals[selectedIndex] as Map? ?? const {});
+    Map<String, dynamic>? commodity;
+    for (final raw in commodities) {
+      if (raw is! Map) continue;
+      final row = Map<String, dynamic>.from(raw);
+      final name = (row['name'] ?? row['symbol'] ?? '').toString().toUpperCase();
+      if (name == selectedIndex.toUpperCase() ||
+          (row['symbol'] ?? '').toString().toUpperCase() == selectedIndex.toUpperCase()) {
+        commodity = row;
+        break;
+      }
+    }
+    final m = commodity ?? Map<String, dynamic>.from(market[selectedIndex] as Map? ?? const {});
+    final s = commodity ?? Map<String, dynamic>.from(signals[selectedIndex] as Map? ?? const {});
     final indicators = Map<String, dynamic>.from(s['indicators'] as Map? ?? const {});
+    final chain = (m['option_chain'] as List?) ?? optionChains[selectedIndex] ?? const <dynamic>[];
+    final chainRows = chain.whereType<Map>().map((row) => Map<String, dynamic>.from(row)).toList();
+    final callOi = chainRows.where((row) => (row['side'] ?? '').toString().toUpperCase() == 'CE')
+        .fold<double>(0, (sum, row) => sum + (row['oi'] is num ? (row['oi'] as num).toDouble() : 0));
+    final putOi = chainRows.where((row) => (row['side'] ?? '').toString().toUpperCase() == 'PE')
+        .fold<double>(0, (sum, row) => sum + (row['oi'] is num ? (row['oi'] as num).toDouble() : 0));
     final oi = Map<String, dynamic>.from(s['oi_summary'] as Map? ?? const {});
+    if (oi.isEmpty && chainRows.isNotEmpty) {
+      oi['call_oi'] = callOi;
+      oi['put_oi'] = putOi;
+      oi['pcr'] = callOi > 0 ? putOi / callOi : null;
+      oi['classification'] = callOi <= 0 ? 'DATA REQUIRED' : putOi / callOi >= 1.1 ? 'PUT OI HEAVY' : putOi / callOi <= 0.8 ? 'CALL OI HEAVY' : 'BALANCED';
+    }
     final validation = Map<String, dynamic>.from(s['live_validation'] as Map? ?? const {});
     final tf = Map<String, dynamic>.from(s['timeframe_analysis'] as Map? ?? const {});
     final research = Map<String, dynamic>.from(tf['research_pack'] as Map? ?? const {});
     final checks = Map<String, dynamic>.from(research['checks'] as Map? ?? const {});
     final aiRow = Map<String, dynamic>.from(ai[selectedIndex] as Map? ?? const {});
-    final chain = (m['option_chain'] as List?) ?? const <dynamic>[];
     final fresh = m['live'] == true;
 
     return ListView(padding: const EdgeInsets.all(12), children: [
       const Text('RESEARCH ENGINES • LIVE BACKEND OUTPUT', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
       const SizedBox(height: 6),
-      const Text('This tab surfaces actual indicator, OI, confluence and validation outputs. Repository links are not displayed in operational pages.', style: TextStyle(color: Colors.white70, fontSize: 12)),
+      const Text('This tab surfaces actual indicator, OI, confluence and validation outputs from available market data.', style: TextStyle(color: Colors.white70, fontSize: 12)),
       const SizedBox(height: 10),
       IndexPicker(selected: selectedIndex, onChanged: onIndexChanged),
       Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1145,6 +1251,18 @@ class ResearchEnginesPage extends StatelessWidget {
         InfoRow('PCR', _val(oi['pcr'])),
         InfoRow('OI regime', (oi['selected_oi_regime'] ?? oi['classification'] ?? 'UNKNOWN').toString()),
         InfoRow('Live option rows', chain.length.toString()),
+        if (commodity != null) ...[
+          InfoRow('MCX CE quotes', chainRows.where((row) => (row['side'] ?? '').toString().toUpperCase() == 'CE').length.toString()),
+          InfoRow('MCX PE quotes', chainRows.where((row) => (row['side'] ?? '').toString().toUpperCase() == 'PE').length.toString()),
+          InfoRow('Commodity options gate', 'WAIT'),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+            child: Text(
+              'Commodity CE/PE entries remain blocked until option Greeks, option ATR and risk inputs are verified. No signal is fabricated.',
+              style: TextStyle(color: Colors.orangeAccent, fontSize: 11),
+            ),
+          ),
+        ],
         const Divider(height: 22),
         const Text('RESEARCH PACK & CONFLUENCE', style: TextStyle(fontWeight: FontWeight.w900)),
         InfoRow('Candidate alignment', (research['candidate_alignment'] ?? 'UNKNOWN').toString()),
@@ -1295,14 +1413,17 @@ Future<void> _openExternal(BuildContext context, String url) async {
 }
 
 class DashboardPage extends StatelessWidget {
-  const DashboardPage({required this.index,required this.connected,required this.status,required this.signals,required this.market,required this.tradePlans,required this.qualifiedCount,required this.lastFetch,required this.onSelected,super.key});
+  const DashboardPage({required this.index,required this.connected,required this.status,required this.signals,required this.market,required this.aiProviders,required this.tradePlans,required this.qualifiedCount,required this.lastFetch,required this.onSelected,super.key});
   final String index; final bool connected; final String status;
-  final Map<String,dynamic> signals,market; final List<dynamic> tradePlans; final int qualifiedCount; final String? lastFetch; final ValueChanged<String> onSelected;
+  final Map<String,dynamic> signals,market,aiProviders; final List<dynamic> tradePlans; final int qualifiedCount; final String? lastFetch; final ValueChanged<String> onSelected;
   bool _has(dynamic v)=>v!=null&&v.toString().trim().isNotEmpty;
   double _n(dynamic v)=>v is num?v.toDouble():double.tryParse(v?.toString()??'')??0;
   @override Widget build(BuildContext context){
     final s=Map<String,dynamic>.from(signals[index] as Map? ?? const{}),m=Map<String,dynamic>.from(market[index] as Map? ?? const{});
     final f=Map<String,dynamic>.from(s['order_flow'] as Map? ?? m['order_flow'] as Map? ?? const{}),i=Map<String,dynamic>.from(s['indicators'] as Map? ?? const{}),v=Map<String,dynamic>.from(s['live_validation'] as Map? ?? const{}),g=(s['guards'] as List? ?? const[]);
+    final providers=Map<String,dynamic>.from(aiProviders['providers'] as Map? ?? const{});
+    final openai=Map<String,dynamic>.from(providers['openai'] as Map? ?? const{});
+    final openrouter=Map<String,dynamic>.from(providers['openrouter'] as Map? ?? const{});
     final d=(s['decision']??'WAIT').toString().toUpperCase(),fresh=s['data_fresh']==true&&connected,buy=_n(f['buy_volume']),sell=_n(f['sell_volume']),total=buy+sell;
     final layers=<List<dynamic>>[
       ['Market data integrity','Angel One quote + freshness',_has(m['ltp'])&&fresh],
@@ -1334,6 +1455,11 @@ class DashboardPage extends StatelessWidget {
         const SizedBox(height:12),Row(children:[Expanded(child:_metric('CONFIDENCE',s['confidence']==null?'—':s['confidence'].toString()+'%')),Expanded(child:_metric('REGIME',(s['regime']??'—').toString())),Expanded(child:_metric('QUALIFIED',qualifiedCount.toString()+' / 5'))]),
       ])),
       const SizedBox(height:10),_status('Market feed',fresh?'LIVE VERIFIED':'NOT VERIFIED',fresh),
+      const Section('AI PROVIDERS • OPENAI + OPENROUTER'),
+      Card(child: Column(children: [
+        ListTile(leading: Icon(Icons.circle, color: openai['ok'] == true ? Colors.greenAccent : Colors.redAccent, size: 12), title: const Text('OpenAI'), subtitle: Text((openai['status'] ?? 'STATUS NOT CHECKED').toString()), trailing: Text((openai['model'] ?? '—').toString(), style: const TextStyle(fontSize: 10))),
+        ListTile(leading: Icon(Icons.circle, color: openrouter['ok'] == true ? Colors.greenAccent : Colors.redAccent, size: 12), title: const Text('OpenRouter'), subtitle: Text((openrouter['status'] ?? 'STATUS NOT CHECKED').toString()), trailing: Text((openrouter['model'] ?? '—').toString(), style: const TextStyle(fontSize: 10))),
+      ])),
       const SizedBox(height:18),const Text('ORDER FLOW',style:TextStyle(fontSize:15,fontWeight:FontWeight.w900,letterSpacing:1)),
       const SizedBox(height:8),Container(padding:const EdgeInsets.all(14),decoration:BoxDecoration(color:const Color(0xFF101722),borderRadius:BorderRadius.circular(16),border:Border.all(color:const Color(0xFF202D3A))),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
         Row(children:[Expanded(child:_metric('BUY VOLUME',f.isEmpty?'—':_fmt(buy),const Color(0xFF35D39A))),Expanded(child:_metric('SELL VOLUME',f.isEmpty?'—':_fmt(sell),const Color(0xFFFF6577))),Expanded(child:_metric('DELTA',f.isEmpty?'—':_fmt(buy-sell),(buy-sell)>=0?const Color(0xFF35D39A):const Color(0xFFFF6577)))]),
@@ -1552,18 +1678,21 @@ class _ChainPageState extends State<ChainPage> {
 
 
 class OIPage extends StatelessWidget {
-  const OIPage({required this.signals, required this.market, super.key});
+  const OIPage({required this.signals, required this.market, required this.commodities, required this.optionChains, super.key});
   final Map<String, dynamic> signals;
   final Map<String, dynamic> market;
+  final List<dynamic> commodities;
+  final Map<String, List<dynamic>> optionChains;
   double _n(dynamic value) => value is num ? value.toDouble() : double.tryParse(value?.toString() ?? '') ?? 0;
   @override
   Widget build(BuildContext context) => ListView(padding: const EdgeInsets.all(10), children: [
     const Section('OI Lab — broker option-chain data'),
     const Text('OI/PCR are calculated only from returned Angel One option quotes. Missing chains remain unavailable; no sample OI is generated.', style: TextStyle(fontSize: 11, color: Colors.white70)),
-    ...indexes.map((index) {
+    ...optionUnderlyings.map((index) {
       final signal = Map<String, dynamic>.from(signals[index] as Map? ?? const {});
       final marketRow = Map<String, dynamic>.from(market[index] as Map? ?? const {});
-      final rows = ((marketRow['option_chain'] as List?) ?? const <dynamic>[])
+      final cached = optionChains[index];
+      final rows = ((marketRow['option_chain'] as List?) ?? cached ?? const <dynamic>[])
           .whereType<Map>().map((row) => Map<String, dynamic>.from(row)).toList();
       final calls = rows.where((row) => (row['side'] ?? row['option_type'] ?? '').toString().toUpperCase().contains('C')).toList();
       final puts = rows.where((row) => (row['side'] ?? row['option_type'] ?? '').toString().toUpperCase().contains('P')).toList();
@@ -1622,12 +1751,13 @@ class _IndicatorsState extends State<IndicatorsPage>{
 }
 
 class SignalPage extends StatelessWidget {
-  const SignalPage({required this.backendUrl, required this.liveStatus, required this.index, required this.signals, required this.ai, required this.tradePlans, required this.market, required this.onChanged, super.key});
+  const SignalPage({required this.backendUrl, required this.liveStatus, required this.index, required this.signals, required this.ai, required this.aiProviders, required this.tradePlans, required this.market, required this.onChanged, super.key});
   final String backendUrl;
   final Map<String, dynamic> liveStatus;
   final String index;
   final Map<String, dynamic> signals;
   final Map<String, dynamic> ai;
+  final Map<String, dynamic> aiProviders;
   final List<dynamic> tradePlans;
   final Map<String, dynamic> market;
   final ValueChanged<String> onChanged;
@@ -1647,6 +1777,9 @@ class SignalPage extends StatelessWidget {
     final researchPack = Map<String, dynamic>.from(timeframeAnalysis['research_pack'] as Map? ?? const {});
     final researchChecks = Map<String, dynamic>.from(researchPack['checks'] as Map? ?? const {});
     final aiDecision = Map<String, dynamic>.from(ai[index] as Map? ?? const {});
+    final providerMap = Map<String, dynamic>.from(aiProviders['providers'] as Map? ?? const {});
+    final openaiProvider = Map<String, dynamic>.from(providerMap['openai'] as Map? ?? const {});
+    final openrouterProvider = Map<String, dynamic>.from(providerMap['openrouter'] as Map? ?? const {});
     final agentAnalysis = Map<String, dynamic>.from(aiDecision['agent_analysis'] as Map? ?? const {});
     final specialists = Map<String, dynamic>.from(agentAnalysis['specialists'] as Map? ?? const {});
     final decision = s['decision']?.toString() ?? '';
@@ -1727,7 +1860,11 @@ class SignalPage extends StatelessWidget {
       Card(child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          InfoRow('AI mode', (agentAnalysis['mode'] ?? 'WAITING FOR OPENAI').toString()),
+          InfoRow('AI mode', (agentAnalysis['mode'] ?? 'WAITING FOR OPENAI / OPENROUTER').toString()),
+          InfoRow('OpenAI provider', (openaiProvider['status'] ?? 'STATUS NOT CHECKED').toString()),
+          InfoRow('OpenAI model', (openaiProvider['model'] ?? '—').toString()),
+          InfoRow('OpenRouter provider', (openrouterProvider['status'] ?? 'STATUS NOT CHECKED').toString()),
+          InfoRow('OpenRouter model', (openrouterProvider['model'] ?? '—').toString()),
           InfoRow('Evidence supplied', (agentAnalysis['source_evidence_count'] ?? aiDecision['evidence_count'] ?? 0).toString()),
           ...specialists.entries.map((entry) {
             final report = Map<String, dynamic>.from(entry.value as Map? ?? const {});
@@ -1975,43 +2112,187 @@ class AiAccessPage extends StatefulWidget {
   @override State<AiAccessPage> createState()=>_AiAccessState();
 }
 class _AiAccessState extends State<AiAccessPage>{
-  bool working=false,checking=false;
+  bool working=false,checking=false,searchWorking=false;
   String message='Cloud AI status has not been checked.';
   Map<String,Map<String,dynamic>> providers=const{};
   @override void initState(){super.initState();refresh();}
-  Future<void> refresh() async{
-    if(checking)return;setState(()=>checking=true);
-    try{final r=await FreshApi(widget.backendUrl.trim()).postJson('/v1/providers/search/status',{});final next=<String,Map<String,dynamic>>{};final raw=r['providers'];if(raw is Map){for(final n in ['exa','tavily']){final v=raw[n];if(v is Map)next[n]=Map<String,dynamic>.from(v);}}if(mounted)setState(()=>providers=next);}
-    catch(e){if(mounted)setState(()=>message='Provider check failed: '+e.toString().replaceFirst('Exception: ',''));}
-    finally{if(mounted)setState(()=>checking=false);}
+  Future<void> refresh() async {
+    if (checking) return;
+    setState(() => checking = true);
+    final api = FreshApi(widget.backendUrl.trim());
+    final next = <String, Map<String, dynamic>>{};
+    try {
+      final result = await api.postJson('/v1/providers/search/status', {});
+      final raw = result['providers'];
+      if (raw is Map) {
+        for (final name in ['exa', 'tavily']) {
+          final value = raw[name];
+          if (value is Map) next[name] = Map<String, dynamic>.from(value);
+        }
+      }
+    } catch (error) {
+      if (mounted) setState(() => message = 'Search provider check failed: ' + error.toString().replaceFirst('Exception: ', ''));
+    }
+    try {
+      final result = await api.aiStatus();
+      final raw = result['providers'];
+      if (raw is Map) {
+        for (final name in ['gemini', 'openai', 'openrouter']) {
+          final value = raw[name];
+          if (value is Map) next[name] = Map<String, dynamic>.from(value);
+        }
+      } else {
+        // Fresh-Apk's AI backend returns provider_health as a list. Configuration
+        // alone is not a successful test, so keep every configured model red until
+        // the explicit Test AI button returns a real completion.
+        final health = result['provider_health'];
+        if (health is List) {
+          for (final item in health.whereType<Map>()) {
+            final name = (item['name'] ?? '').toString().toLowerCase();
+            if (!['gemini', 'openai', 'openrouter'].contains(name)) continue;
+            next[name] = <String, dynamic>{
+              'configured': true,
+              'ok': false,
+              'working': false,
+              'status': item['status'] == 'COOLDOWN' ? 'cooldown' : 'configured_not_tested',
+              'model': item['model'] ?? item['model_name'] ?? 'model not reported',
+              'last_error': item['last_error'],
+            };
+          }
+        }
+        for (final name in ['gemini', 'openai', 'openrouter']) {
+          next.putIfAbsent(name, () => <String, dynamic>{
+            'configured': false, 'ok': false, 'working': false, 'status': 'not_configured',
+          });
+        }
+      }
+    } catch (error) {
+      if (mounted) setState(() => message = 'AI provider status failed: ' + error.toString().replaceFirst('Exception: ', ''));
+    }
+    if (mounted) setState(() { providers = next; checking = false; });
   }
-  Future<void> test() async{
-    setState(()=>working=true);
-    try{final r=await FreshApi(widget.backendUrl.trim()).testAIProviders();final checks=(r['checks'] as List? ?? const[]);final details=checks.whereType<Map>().map((x)=>(x['provider']??'provider').toString()+': '+(x['ok']==true?'OK':'NOT VERIFIED')).join(' • ');final notice=(r['message']??details).toString();if(mounted){setState(()=>message=notice+' • '+details);ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(notice+' • '+details),duration:const Duration(seconds:6)));}}
-    catch(e){if(mounted)setState(()=>message='Cloud AI test failed: '+e.toString().replaceFirst('Exception: ',''));}
-    finally{if(mounted)setState(()=>working=false);}
-  }
-  Widget provider(String n){final d=providers[n];final ok=d?['working']==true,configured=d?['configured']==true;final c=d==null?Colors.blueGrey:(ok?const Color(0xFF35D39A):const Color(0xFFFF6577));final label=d==null?'CHECK REQUIRED':ok?'WORKING':configured?'NOT WORKING':'NOT CONFIGURED';return Card(child:ListTile(leading:Icon(Icons.circle,size:13,color:c),title:Text(n=='exa'?'Exa Search':'Tavily Search',style:const TextStyle(fontWeight:FontWeight.w800)),subtitle:Text(d==null?'Not checked':label+' • '+(d['evidence_count']??0).toString()+' evidence items'),trailing:Text(label,style:TextStyle(color:c,fontSize:10,fontWeight:FontWeight.w900))));}
-  @override Widget build(BuildContext context)=>ListView(padding:const EdgeInsets.all(14),children:[
-    const Section('CLOUD AI • NO OFFLINE MODEL'),
-    const Card(child:ListTile(leading:Icon(Icons.cloud_done,color:Color(0xFF35D39A),size:30),title:Text('Gemini Cloud Validation'),subtitle:Text('AI runs through Railway. No on-device GGUF model is used. AI remains advisory; deterministic freshness and risk gates control trade eligibility.'))),
-    FilledButton.icon(onPressed:working?null:test,icon:const Icon(Icons.psychology),label:Text(working?'TESTING CLOUD AI…':'TEST CLOUD AI CONNECTION')),
-    const SizedBox(height:10),Card(child:Padding(padding:const EdgeInsets.all(12),child:Text(message))),
-    const Section('SEARCH EVIDENCE • BACKEND CONFIGURED'),provider('exa'),provider('tavily'),
-    OutlinedButton.icon(onPressed:checking?null:refresh,icon:const Icon(Icons.refresh),label:Text(checking?'CHECKING…':'REFRESH EXA / TAVILY STATUS')),
-    const SizedBox(height:8),const Text('Provider keys remain on Railway. Green means the backend reports a successful provider check.',style:TextStyle(fontSize:12,color:Colors.white60)),
-  ]);
-}
 
-class StrategyLink extends StatelessWidget {
-  const StrategyLink({required this.title,required this.detail,required this.url,super.key});
-  final String title,detail,url;
-  Future<void> _open(BuildContext context) async {
-    final uri=Uri.parse(url);
-    try { if(!await launchUrl(uri,mode:LaunchMode.externalApplication) && context.mounted){ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Could not open $url')));} }
-    catch(_){if(context.mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Could not open $url')));}
+  Future<void> test() async {
+    setState(() => working = true);
+    try {
+      final result = await FreshApi(widget.backendUrl.trim()).testAIProviders();
+      final checks = (result['checks'] as List? ?? const []);
+      final updated = <String, Map<String, dynamic>>{...providers};
+      for (final item in checks.whereType<Map>()) {
+        final name = (item['provider'] ?? '').toString();
+        if (name == 'gemini' || name == 'openai' || name == 'openrouter') {
+          final check = Map<String, dynamic>.from(item);
+          check['configured'] = true;
+          check['status'] = check['ok'] == true ? 'ok' : (check['error'] ?? 'test_failed').toString();
+          updated[name] = check;
+        }
+      }
+      final details = checks.whereType<Map>().map((item) {
+        final name = (item['provider'] ?? 'provider').toString().toUpperCase();
+        final status = (item['status'] ?? (item['ok'] == true ? 'working' : 'not_working')).toString();
+        final error = (item['error'] ?? '').toString();
+        return '$name: $status${error.isEmpty ? '' : ' ($error)'}';
+      }).join(' • ');
+      final notice = (result['message'] ?? details).toString();
+      if (mounted) {
+        setState(() { providers = updated; message = '$notice • $details'; });
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$notice • $details'), duration: const Duration(seconds: 6)));
+      }
+    } catch (error) {
+      if (mounted) setState(() => message = 'Cloud AI test failed: ' + error.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => working = false);
+    }
   }
-  @override Widget build(BuildContext context)=>Card(child:ListTile(leading:const Icon(Icons.open_in_new,color:Colors.cyan),title:Text(title,style:const TextStyle(fontWeight:FontWeight.w800)),subtitle:Text(detail),trailing:const Icon(Icons.chevron_right),onTap:()=>_open(context)));
+
+  Future<void> testSearch() async {
+    if (searchWorking) return;
+    setState(() => searchWorking = true);
+    try {
+      final result = await FreshApi(widget.backendUrl.trim()).postJson('/v1/providers/search/test', {});
+      final checks = (result['checks'] as List? ?? const []);
+      final updated = <String, Map<String, dynamic>>{...providers};
+      for (final item in checks.whereType<Map>()) {
+        final name = (item['provider'] ?? '').toString();
+        if (name == 'exa' || name == 'tavily') updated[name] = Map<String, dynamic>.from(item);
+      }
+      final details = checks.whereType<Map>().map((item) {
+        final name = (item['provider'] ?? 'provider').toString().toUpperCase();
+        final status = (item['status'] ?? (item['ok'] == true ? 'ok' : 'not_working')).toString();
+        final error = (item['error'] ?? '').toString();
+        final count = item['result_count'];
+        return '$name: $status${count == null ? '' : ' • $count results'}${error.isEmpty ? '' : ' ($error)'}';
+      }).join(' • ');
+      final notice = (result['message'] ?? details).toString();
+      if (mounted) {
+        setState(() { providers = updated; message = '$notice • $details'; });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$notice • $details'), duration: const Duration(seconds: 6)),
+        );
+      }
+    } catch (error) {
+      if (mounted) setState(() => message = 'Search provider test failed: ${error.toString().replaceFirst('Exception: ', '')}');
+    } finally {
+      if (mounted) setState(() => searchWorking = false);
+    }
+  }
+
+  Widget provider(String name) {
+    final data = providers[name];
+    final configured = data?['configured'] == true;
+    final ok = data?['working'] == true || data?['ok'] == true;
+    final status = (data?['status'] ?? '').toString();
+    final label = data == null ? 'CHECK REQUIRED'
+        : ok ? 'WORKING'
+        : !configured ? 'NOT CONFIGURED'
+        : status == 'configured_not_tested' ? 'NOT TESTED' : 'NOT WORKING';
+    final color = data == null ? Colors.blueGrey
+        : ok ? const Color(0xFF35D39A) : const Color(0xFFFF6577);
+    final title = switch (name) {
+      'exa' => 'Exa Search',
+      'tavily' => 'Tavily Search',
+      'openai' => 'OpenAI',
+      'openrouter' => 'OpenRouter',
+      _ => name,
+    };
+    final detail = name == 'exa' || name == 'tavily'
+        ? (data == null ? 'Not checked' : '$label • ${data['result_count'] ?? data['evidence_count'] ?? 0} result(s)')
+        : (data == null ? 'Not checked' : '$label • ${data['model'] ?? 'model not reported'}');
+    return Card(child: ListTile(
+      leading: Icon(Icons.circle, size: 13, color: color),
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+      subtitle: Text(detail),
+      trailing: Text(label, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w900)),
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) => ListView(padding: const EdgeInsets.all(14), children: [
+    const Section('CLOUD AI • GEMINI + OPENAI + OPENROUTER'),
+    Card(child: ListTile(
+      leading: Icon(
+        providers['gemini']?['ok'] == true ? Icons.cloud_done : Icons.cloud_off,
+        color: providers['gemini']?['ok'] == true ? const Color(0xFF35D39A) : const Color(0xFFFF6577),
+        size: 30,
+      ),
+      title: const Text('Gemini Cloud Validation'),
+      subtitle: Text(
+        '${providers['gemini']?['status'] ?? 'not tested'} • AI remains advisory; deterministic freshness and risk gates control trade eligibility.',
+      ),
+    )),
+    FilledButton.icon(onPressed: working ? null : test, icon: const Icon(Icons.psychology), label: Text(working ? 'TESTING GEMINI + OPENAI + OPENROUTER…' : 'TEST GEMINI + OPENAI + OPENROUTER')),
+    const SizedBox(height: 10),
+    Card(child: Padding(padding: const EdgeInsets.all(12), child: Text(message))),
+    const Section('LLM PROVIDERS • OPENAI + OPENROUTER'),
+    provider('openai'), provider('openrouter'),
+    OutlinedButton.icon(onPressed: checking ? null : refresh, icon: const Icon(Icons.refresh), label: Text(checking ? 'CHECKING…' : 'REFRESH LLM STATUS')),
+    const Section('SEARCH EVIDENCE • BACKEND CONFIGURED'),
+    provider('exa'), provider('tavily'),
+    FilledButton.icon(onPressed: searchWorking ? null : testSearch, icon: const Icon(Icons.travel_explore), label: Text(searchWorking ? 'TESTING EXA + TAVILY…' : 'TEST EXA + TAVILY')),
+    OutlinedButton.icon(onPressed: checking ? null : refresh, icon: const Icon(Icons.refresh), label: Text(checking ? 'CHECKING…' : 'REFRESH EXA / TAVILY STATUS')),
+    const SizedBox(height: 8),
+    const Text('Provider keys remain on Railway. Green means a real provider test succeeded; configured-only or untested providers remain red until tested.', style: TextStyle(fontSize: 12, color: Colors.white60)),
+  ]);
 }
 
 class ProCandlestickChart extends StatefulWidget {
@@ -2082,7 +2363,7 @@ class ChainRow extends StatelessWidget { const ChainRow(this.strike,this.ce,this
 class OIBox extends StatelessWidget { const OIBox(this.title,this.hint,{super.key}); final String title,hint; @override Widget build(BuildContext context)=>Card(child:ListTile(leading:const Icon(Icons.swap_vert),title:Text(title,style:const TextStyle(fontWeight:FontWeight.w800)),subtitle:Text(hint),trailing:const Text('—'))); }
 class IndexPicker extends StatelessWidget{
   const IndexPicker({required this.selected,required this.onChanged,super.key});final String selected;final ValueChanged<String> onChanged;
-  @override Widget build(BuildContext context)=>DropdownButtonFormField<String>(initialValue:selected,decoration:const InputDecoration(labelText:'Select Index'),items:indexes.map((i)=>DropdownMenuItem(value:i,child:Text(i))).toList(),onChanged:(v){if(v!=null)onChanged(v);});
+  @override Widget build(BuildContext context)=>DropdownButtonFormField<String>(initialValue:selected,decoration:const InputDecoration(labelText:'Select Index / MCX Commodity'),items:optionUnderlyings.map((i)=>DropdownMenuItem(value:i,child:Text(commodityOptionUnderlyings.contains(i) ? 'MCX • $i' : i))).toList(),onChanged:(v){if(v!=null)onChanged(v);});
 }
 class TradePlanCard extends StatelessWidget {
   const TradePlanCard({required this.rank, required this.plan, super.key});

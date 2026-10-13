@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.error
 import threading
 import time
 import urllib.request
@@ -103,13 +104,14 @@ def fetch_market_news_sentiment(
     index: str,
     exa_api_key: str | None = None,
     tavily_api_key: str | None = None,
+    force: bool = False,
 ) -> dict[str, Any]:
     """Fetch at most a small batch of last-24h headlines, cached for ten minutes."""
     key = index.strip().upper()
     now_mono = time.monotonic()
     with _lock:
         cached = _cache.get(key)
-        if cached and now_mono - cached[0] < _CACHE_TTL_SECONDS:
+        if not force and cached and now_mono - cached[0] < _CACHE_TTL_SECONDS:
             return cached[1]
 
     exa_key = (exa_api_key or os.getenv("EXA_API_KEY", "")).strip()
@@ -127,6 +129,7 @@ def fetch_market_news_sentiment(
     articles: list[dict[str, Any]] = []
     sources: list[str] = []
     errors: list[str] = []
+    provider_checks: dict[str, dict[str, Any]] = {}
 
     if exa_key:
         try:
@@ -141,7 +144,8 @@ def fetch_market_news_sentiment(
                 },
                 {"x-api-key": exa_key},
             )
-            for item in payload.get("results", [])[:8]:
+            results = payload.get("results") if isinstance(payload.get("results"), list) else []
+            for item in results[:8]:
                 if isinstance(item, dict):
                     articles.append({
                         "title": item.get("title"),
@@ -150,17 +154,22 @@ def fetch_market_news_sentiment(
                         "content": item.get("text", ""),
                         "source": "exa",
                     })
-            if payload.get("results"):
+            provider_checks["exa"] = {"configured": True, "ok": True, "status": "ok", "result_count": len(results)}
+            if results:
                 sources.append("exa")
-        except Exception:
-            errors.append("exa_unavailable")
+        except urllib.error.HTTPError as exc:
+            status = "rate_limited" if exc.code == 429 else "authentication_failed" if exc.code in (401, 403) else f"http_{exc.code}"
+            provider_checks["exa"] = {"configured": True, "ok": False, "status": status, "result_count": 0}
+            errors.append(f"exa_{status}")
+        except Exception as exc:
+            provider_checks["exa"] = {"configured": True, "ok": False, "status": "connection_or_response_error", "result_count": 0}
+            errors.append("exa_connection_or_response_error")
 
     if tavily_key:
         try:
             payload = _post_json(
                 "https://api.tavily.com/search",
                 {
-                    "api_key": tavily_key,
                     "query": query,
                     "topic": "news",
                     "days": 1,
@@ -168,9 +177,10 @@ def fetch_market_news_sentiment(
                     "include_answer": False,
                     "include_raw_content": False,
                 },
-                {},
+                {"Authorization": f"Bearer {tavily_key}"},
             )
-            for item in payload.get("results", [])[:8]:
+            results = payload.get("results") if isinstance(payload.get("results"), list) else []
+            for item in results[:8]:
                 if isinstance(item, dict):
                     articles.append({
                         "title": item.get("title"),
@@ -179,10 +189,16 @@ def fetch_market_news_sentiment(
                         "content": item.get("content", ""),
                         "source": "tavily",
                     })
-            if payload.get("results"):
+            provider_checks["tavily"] = {"configured": True, "ok": True, "status": "ok", "result_count": len(results)}
+            if results:
                 sources.append("tavily")
+        except urllib.error.HTTPError as exc:
+            status = "rate_limited" if exc.code == 429 else "authentication_failed" if exc.code in (401, 403) else f"http_{exc.code}"
+            provider_checks["tavily"] = {"configured": True, "ok": False, "status": status, "result_count": 0}
+            errors.append(f"tavily_{status}")
         except Exception:
-            errors.append("tavily_unavailable")
+            provider_checks["tavily"] = {"configured": True, "ok": False, "status": "connection_or_response_error", "result_count": 0}
+            errors.append("tavily_connection_or_response_error")
 
     unique: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -195,6 +211,7 @@ def fetch_market_news_sentiment(
     result = score_news_articles(unique)
     result.update({
         "sources": sorted(set(sources)),
+        "provider_checks": provider_checks,
         "window_hours": 24,
         "observed_at": datetime.now(timezone.utc).isoformat(),
         "errors": errors,

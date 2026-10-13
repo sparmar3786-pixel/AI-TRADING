@@ -13,6 +13,7 @@ import os
 import re
 import sys
 import threading
+from concurrent.futures import ThreadPoolExecutor
 import time
 import urllib.error
 import urllib.request
@@ -73,7 +74,7 @@ INDEXES: dict[str, dict[str, str]] = {
     "SENSEX": {"exchange": "BSE", "token": "99919000", "name": "SENSEX"},
     "BANKEX": {"exchange": "BSE", "token": "99919012", "name": "BANKEX"},
 }
-COMMODITY_NAMES = ("GOLD", "SILVER", "CRUDEOIL", "NATURALGAS", "COPPER")
+COMMODITY_NAMES = ("CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM", "SILVER", "SILVERM", "COPPER", "ZINC", "ALUMINIUM", "LEAD", "NICKEL", "MENTHAOIL", "CASTORSEED", "COTTON", "RUBBER")
 _lock = threading.RLock()
 _adapter: AngelOneReadOnly | None = None
 _stream: AngelOneStream | None = None
@@ -84,6 +85,8 @@ _news_lock = threading.Lock()
 _saved_meta: dict[str, Any] = {}
 _master_rows: list[dict[str, Any]] = []
 _master_loaded_at = 0.0
+_market_data_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="market-data")
+
 _signal_cache: dict[str, Any] | None = None
 _signal_cache_at = 0.0
 # Signal computation is refreshed in the background so a cold/slow broker
@@ -91,12 +94,14 @@ _signal_cache_at = 0.0
 _signal_build_lock = threading.Lock()
 _signal_build_metrics: dict[str, Any] = {"last_duration_ms": None, "build_count": 0, "in_flight": False, "last_error": None}
 _request_metrics: dict[str, dict[str, Any]] = {}
+_ai_provider_test_cache: dict[str, dict[str, Any]] = {}
 _confirmation_states: dict[str, dict[str, Any]] = {}
 _last_market: dict[str, Any] = {}
 _option_history: dict[str, dict[str, float]] = {}
 # Retain only real broker candles/depth observed since this process started,
 # so a WebSocket reconnect does not erase captured footprint levels.
 _footprint_history: dict[str, list[dict[str, Any]]] = {}
+_footprint_history_interval: dict[str, str] = {}
 
 def _record_request_metric(path: str, status_code: int, elapsed_ms: float, response_bytes: int | None) -> None:
     with _lock:
@@ -184,6 +189,17 @@ def _device(x_device_id: str = Header(default="")) -> str:
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+def _is_market_session_open(symbol: str, now: datetime | None = None) -> bool:
+    """Conservative weekday session clock; quote freshness remains an independent required gate."""
+    local = (now or datetime.now(IST)).astimezone(IST)
+    if local.weekday() >= 5:
+        return False
+    clock = local.time().replace(tzinfo=None)
+    key = symbol.strip().upper()
+    if key in COMMODITY_NAMES:
+        return dt_time(9, 0) <= clock <= dt_time(23, 30)
+    return dt_time(9, 15) <= clock <= dt_time(15, 30)
 
 
 def _iso(value: Any) -> str | None:
@@ -380,6 +396,26 @@ def _load_master(force: bool = False) -> list[dict[str, Any]]:
         return _master_rows
 
 
+def _commodity_contract_matches(row: dict[str, Any], requested: str) -> bool:
+    """Match a requested MCX future to its instrument-master name/symbol without mixing mini and standard contracts."""
+    key = requested.strip().upper()
+    name = str(row.get("name", "")).upper().replace(" ", "")
+    symbol = str(row.get("symbol", "")).upper()
+    if key == "CRUDEOIL":
+        return (name == key or symbol.startswith(key)) and not symbol.startswith("CRUDEOILM")
+    if key == "CRUDEOILM":
+        return symbol.startswith(key)
+    if key in {"GOLD", "SILVER"}:
+        return (name == key or symbol.startswith(key)) and not symbol.startswith(key + "M")
+    if key in {"GOLDM", "SILVERM"}:
+        return symbol.startswith(key)
+    if key == "NATURALGAS":
+        return name == key or symbol.startswith(key)
+    if key == "NATGASMINI":
+        return symbol.startswith(key)
+    return name == key or symbol.startswith(key)
+
+
 def _start_stream(adapter: AngelOneReadOnly, rows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     global _stream, _stream_adapter, _stream_start_error
     subscriptions: dict[int, list[str]] = {}
@@ -393,7 +429,7 @@ def _start_stream(adapter: AngelOneReadOnly, rows: list[dict[str, Any]] | None =
             contracts = [
                 row for row in rows
                 if str(row.get("exch_seg", "")).upper() == "MCX"
-                and str(row.get("name", "")).upper() == name
+                and _commodity_contract_matches(row, name)
                 and str(row.get("instrumenttype", "")).upper() == "FUTCOM"
                 and row.get("token")
                 and _expiry_date(row.get("expiry")) is not None
@@ -490,24 +526,49 @@ def _footprint_levels(quote: dict[str, Any], step: float = 5.0) -> tuple[dict[st
     return levels, buy_orders, sell_orders
 
 
+def _footprint_chart_step(symbol: str) -> float:
+    """Price bucket size for display; this does not imply exchange trade-print data."""
+    return {
+        "CRUDEOIL": 1.0, "CRUDEOILM": 1.0, "NATURALGAS": 0.5, "NATGASMINI": 0.5,
+        "GOLD": 100.0, "GOLDM": 10.0, "SILVER": 100.0, "SILVERM": 10.0,
+        "COPPER": 1.0, "ZINC": 0.5, "ALUMINIUM": 0.5, "LEAD": 0.5,
+        "NICKEL": 1.0, "MENTHAOIL": 1.0, "CASTORSEED": 10.0, "COTTON": 10.0, "RUBBER": 1.0,
+        "BANKNIFTY": 10.0, "SENSEX": 20.0, "BANKEX": 20.0,
+    }.get(symbol.strip().upper(), 5.0)
+
+
 def _find_nearest_future(rows: list[dict[str, Any]], index: str) -> dict[str, str] | None:
-    """Find the nearest unexpired index future for footprint snapshots."""
-    segment = "BFO" if index in {"SENSEX", "BANKEX"} else "NFO"
+    """Find nearest unexpired index or MCX commodity future from the broker master."""
+    key = index.strip().upper()
+    commodity_names = {"CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM", "SILVER", "SILVERM", "COPPER", "ZINC", "ALUMINIUM", "LEAD", "NICKEL", "MENTHAOIL", "CASTORSEED", "COTTON", "RUBBER"}
+    is_commodity = key in commodity_names
+    segment = "MCX" if is_commodity else ("BFO" if key in {"SENSEX", "BANKEX"} else "NFO")
     today = datetime.now(IST).date()
-    contracts = [
-        row for row in rows
-        if str(row.get("exch_seg", "")).upper() == segment
-        and str(row.get("name", "")).upper().replace(" ", "") == index
-        and str(row.get("instrumenttype", "")).upper() == "FUTIDX"
-        and row.get("token")
-        and _expiry_date(row.get("expiry")) is not None
-        and _expiry_date(row.get("expiry")) >= today
-    ]
+    contracts = []
+    for row in rows:
+        row_segment = str(row.get("exch_seg", "")).upper()
+        row_name = str(row.get("name", "")).upper().replace(" ", "")
+        instrument_type = str(row.get("instrumenttype", "")).upper()
+        symbol = str(row.get("symbol", "")).upper()
+        if row_segment != segment or not row.get("token"):
+            continue
+        if is_commodity:
+            # MCX commodity futures are FUTCOM. Accept exact master name or
+            # exact symbol prefix so mini contracts resolve to their own token.
+            matches = row_name == key or symbol.startswith(key)
+            if not matches or instrument_type != "FUTCOM":
+                continue
+        elif row_name != key or instrument_type != "FUTIDX":
+            continue
+        expiry = _expiry_date(row.get("expiry"))
+        if expiry is None or expiry < today:
+            continue
+        contracts.append(row)
     contracts.sort(key=lambda row: _expiry_date(row.get("expiry")) or date.max)
     if not contracts:
         return None
     row = contracts[0]
-    return {"exchange": segment, "token": str(row["token"]), "symbol": str(row.get("symbol") or index), "expiry": str(row.get("expiry") or "")}
+    return {"exchange": segment, "token": str(row["token"]), "symbol": str(row.get("symbol") or key), "expiry": str(row.get("expiry") or "")}
 
 
 def _quote_timestamp(quote: dict[str, Any]) -> str | None:
@@ -531,20 +592,25 @@ def _quotes(adapter: AngelOneReadOnly, exchange: str, tokens: list[str]) -> dict
             if not tick or _number(tick.get("ltp")) is None:
                 continue
             bid, ask, _, _ = _book(tick)
-            # Quote/option gates require a real bid and ask. If this tick mode
-            # omitted depth, request REST FULL depth instead of inventing it.
+            # Use a broker tick only when it includes a two-sided book. Otherwise
+            # fall back to rate-limited REST FULL quotes; never synthesize depth.
             if bid is not None and ask is not None:
                 output[token] = tick
     missing = [token for token in unique_tokens if token not in output]
-    if missing:
+    # SmartAPI market-data accepts at most 50 tokens per exchange in one request.
+    # Chunking prevents HTTP 400 loops on 100-contract MCX option chains.
+    for offset in range(0, len(missing), 50):
+        batch = missing[offset:offset + 50]
         try:
-            result = adapter.market_data("FULL", {exchange: missing})
+            result = adapter.market_data("FULL", {exchange: batch})
             for row in _quote_rows(result):
                 token = str(row.get("symbolToken") or row.get("symboltoken") or row.get("token") or "")
                 if token:
                     row["_source_mode"] = "REST_FULL_DEPTH"
                     output[token] = row
         except Exception:
+            # Preserve any real ticks already collected. If no quote succeeded,
+            # let the route return a typed data error instead of an empty success.
             if not output:
                 raise
     return output
@@ -794,10 +860,21 @@ def _market_chain_rows(options: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return output
 
 
-def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index: str) -> tuple[dict[str, Any], dict[str, Any]]:
+def _index_snapshot(
+    adapter: AngelOneReadOnly,
+    rows: list[dict[str, Any]],
+    index: str,
+    spot_quote: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     config = _find_index_contract(rows, index)
     start, end = _session_range()
-    spot_quote = _quotes(adapter, config["exchange"], [config["token"]]).get(config["token"])
+    # Start the slower historical request while the current quote and option
+    # contracts are being normalized. It is rate-limited centrally by the adapter.
+    candle_future = _market_data_executor.submit(
+        adapter.candles, config["exchange"], config["token"], "FIVE_MINUTE", start, end
+    )
+    if spot_quote is None:
+        spot_quote = _quotes(adapter, config["exchange"], [config["token"]]).get(config["token"])
     if not spot_quote:
         raise RuntimeError("Angel One did not return a spot quote for this index")
     spot = _number(spot_quote.get("ltp"))
@@ -806,7 +883,7 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
     spot_ts = _quote_timestamp(spot_quote)
     if not spot_ts:
         raise RuntimeError("Angel One quote omitted its exchange feed timestamp; fail-closed freshness gate")
-    candle_result = adapter.candles(config["exchange"], config["token"], "FIVE_MINUTE", start, end)
+    candle_result = candle_future.result()
     candle_rows = candle_result.get("candles") or []
     closes = _candle_closes(candle_rows)
     if len(closes) < 36:
@@ -864,9 +941,15 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
     if not candidates:
         raise RuntimeError("No near-ATM option tokens found")
     exchange = "BFO" if index in ("SENSEX", "BANKEX") else "NFO"
-    option_quotes = _quotes(adapter, exchange, [str(row["token"]) for row in candidates[:40]])
     greek_expiry = selected_expiry.strftime("%d%b%Y").upper()
-    greeks = _greeks_map(adapter, index, greek_expiry)
+    option_future = _market_data_executor.submit(
+        _quotes, adapter, exchange, [str(row["token"]) for row in candidates[:40]]
+    )
+    greeks_future = _market_data_executor.submit(_greeks_map, adapter, index, greek_expiry)
+    # Quote batches and Greeks use different broker endpoints/rate buckets, so
+    # overlap the requests without violating either endpoint's throttle.
+    option_quotes = option_future.result()
+    greeks = greeks_future.result()
     normalized_options: list[dict[str, Any]] = []
     quote_time_by_token: dict[str, str] = {}
     for row in candidates[:40]:
@@ -1104,7 +1187,7 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
 def _empty_payload(reason: str) -> dict[str, Any]:
     now = _utc_now().isoformat()
     return {
-        "live": False, "last_fetch": None,
+        "live": False, "last_fetch": None, "message": reason,
         "feed": {"authenticated": False, "connected": False, "mode": "REST_FULL_DEPTH", "message": reason, "stream_started": False, "stream_open": False, "tick_count": 0, "unique_tokens_seen": 0, "last_tick_age_seconds": None, "last_error": reason},
         "store": {"source": "angelone_smartapi", "fresh": False, "message": reason, "update_count": 0, "last_update_age_seconds": None, "unique_tokens": 0},
         "ai": {"status": "not_configured", "message": "AI validation is not used to fabricate market data."},
@@ -1121,24 +1204,33 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
     """Stream broker-only nearest-future snapshots without running the slow signal fan-out."""
     await websocket.accept()
     symbol = (websocket.query_params.get("symbol") or "NIFTY").strip().upper()
-    if symbol not in INDEXES:
-        await websocket.send_json({"type": "status", "mode": "wait", "message": "Unsupported index symbol"})
+    timeframe = (websocket.query_params.get("tf") or "1").strip().lower()
+    daily_mode = timeframe in {"1440", "1d", "d", "day"}
+    history_mode = "ONE_DAY" if daily_mode else "ONE_MINUTE"
+    max_candles = 2000 if daily_mode else 250
+    supported_symbols = set(INDEXES) | {"CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM", "SILVER", "SILVERM", "COPPER", "ZINC", "ALUMINIUM", "LEAD", "NICKEL", "MENTHAOIL", "CASTORSEED", "COTTON", "RUBBER"}
+    if symbol not in supported_symbols:
+        await websocket.send_json({"type": "status", "mode": "wait", "message": "Unsupported index or commodity symbol"})
         await websocket.close(code=1008)
         return
     with _lock:
-        candles: list[dict[str, Any]] = [dict(item) for item in _footprint_history.get(symbol, [])]
+        candles: list[dict[str, Any]] = (
+            [dict(item) for item in _footprint_history.get(symbol, [])]
+            if _footprint_history_interval.get(symbol) == history_mode else []
+        )
     last_trade_volume: float | None = None
     last_source_timestamp: str | None = None
     future: dict[str, str] | None = None
     rows: list[dict[str, Any]] = []
     history_loaded = False
+    daily_history_sent = False
     try:
         while True:
             try:
                 adapter = _current_adapter()
                 if not adapter or adapter.status().get("authenticated") is not True:
                     await websocket.send_json({
-                        "type": "snap", "symbol": symbol, "candles": candles, "step": 5,
+                        "type": "snap", "symbol": symbol, "candles": candles, "step": _footprint_chart_step(symbol),
                         "mode": "wait", "live": False, "source_timestamp": None,
                         "message": "Angel One is not authenticated. Connect the broker to receive footprint data.",
                         "level_semantics": "broker_best5_bid_ask_depth_not_trade_prints",
@@ -1148,10 +1240,15 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
                 if not rows:
                     rows = _load_master()
                 if future is None:
-                    future = _find_nearest_future(rows, symbol)
+                    # Daily multi-year index history belongs to the underlying
+                    # index token, not the current expiring index-futures token.
+                    if daily_mode and symbol in INDEXES:
+                        future = {**INDEXES[symbol], "symbol": symbol, "expiry": ""}
+                    else:
+                        future = _find_nearest_future(rows, symbol)
                 if future is None:
                     await websocket.send_json({
-                        "type": "snap", "symbol": symbol, "candles": candles, "step": 5,
+                        "type": "snap", "symbol": symbol, "candles": candles, "step": _footprint_chart_step(symbol),
                         "mode": "wait", "live": False, "source_timestamp": None,
                         "message": "No unexpired index-futures contract found in the Angel One instrument master.",
                         "level_semantics": "broker_best5_bid_ask_depth_not_trade_prints",
@@ -1161,8 +1258,18 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
                 if not history_loaded:
                     history_loaded = True
                     try:
-                        history_start, history_end = _session_range()
-                        history = adapter.candles(future["exchange"], future["token"], "ONE_MINUTE", history_start, history_end).get("candles") or []
+                        if daily_mode:
+                            history_end_dt = datetime.now(IST)
+                            history_start_dt = history_end_dt - timedelta(days=1825)
+                            history_start = history_start_dt.strftime("%Y-%m-%d %H:%M")
+                            history_end = history_end_dt.strftime("%Y-%m-%d %H:%M")
+                            history_interval = "ONE_DAY"
+                        else:
+                            history_start, history_end = _session_range()
+                            history_interval = "ONE_MINUTE"
+                        history = adapter.candles(
+                            future["exchange"], future["token"], history_interval, history_start, history_end
+                        ).get("candles") or []
                         for candle in history:
                             if not isinstance(candle, (list, tuple)) or len(candle) < 6:
                                 continue
@@ -1171,40 +1278,46 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
                             values = [_number(candle[pos]) for pos in (1, 2, 3, 4)]
                             if parsed_candle is None or any(value is None for value in values):
                                 continue
-                            candle_epoch = int(parsed_candle.timestamp())
+                            if daily_mode:
+                                local_day = parsed_candle.astimezone(IST).date()
+                                bar_time = datetime.combine(local_day, dt_time(9, 0), tzinfo=IST)
+                                candle_epoch = int(bar_time.timestamp())
+                            else:
+                                candle_epoch = int(parsed_candle.timestamp())
                             if any(int(item.get("t") or 0) == candle_epoch for item in candles):
-                                # Keep the already captured live/depth candle for this minute.
                                 continue
                             opened, high, low, close = values
                             candles.append({
                                 "t": candle_epoch, "o": opened, "h": high, "l": low, "c": close,
                                 "v": _number(candle[5]) or 0.0, "lv": {}, "source_timestamp": stamp,
-                                "historical": True, "level_semantics": "price-level depth unavailable for historical candles",
+                                "historical": True,
+                                "level_semantics": "price-level depth unavailable for historical candles",
                             })
                         candles.sort(key=lambda item: int(item.get("t") or 0))
-                        candles = candles[-250:]
+                        candles = candles[-max_candles:]
                     except Exception:
-                        # Historical candles are optional; never replace them with generated/sample prices.
-                        candles = sorted(candles, key=lambda item: int(item.get("t") or 0))[-250:]
+                        # Broker history can be shorter than requested; never synthesize missing bars.
+                        candles = sorted(candles, key=lambda item: int(item.get("t") or 0))[-max_candles:]
                 quote = _quotes(adapter, future["exchange"], [future["token"]]).get(future["token"])
                 ltp = _number(quote.get("ltp")) if quote else None
                 source_timestamp = _quote_timestamp(quote or {})
                 parsed = datetime.fromisoformat(source_timestamp) if source_timestamp else None
                 age = (_utc_now() - parsed).total_seconds() if parsed else None
-                live = ltp is not None and ltp > 0 and age is not None and 0 <= age <= 60
+                live = ltp is not None and ltp > 0 and age is not None and 0 <= age <= 60 and _is_market_session_open(symbol)
                 if live and parsed and source_timestamp:
                     epoch = int(parsed.timestamp())
                     minute = epoch - epoch % 60
-                    levels, buy_orders, sell_orders = _footprint_levels(quote or {}, step=5.0)
+                    bar_time = int(datetime.combine(parsed.astimezone(IST).date(), dt_time(9, 0), tzinfo=IST).timestamp()) if daily_mode else minute
+                    levels, buy_orders, sell_orders = _footprint_levels(quote or {}, step=_footprint_chart_step(symbol))
                     _, _, buy_depth, sell_depth = _book(quote or {})
                     total_volume = _number((quote or {}).get("tradeVolume") or (quote or {}).get("volume"))
                     delta_volume = max(0.0, total_volume - last_trade_volume) if total_volume is not None and last_trade_volume is not None else 0.0
                     if total_volume is not None:
                         last_trade_volume = total_volume
-                    existing = next((item for item in reversed(candles) if int(item.get("t") or 0) == minute), None)
+                    existing = next((item for item in reversed(candles) if int(item.get("t") or 0) == bar_time), None)
                     if existing is None:
                         existing = {
-                            "t": minute, "o": ltp, "h": ltp, "l": ltp, "c": ltp,
+                            "t": bar_time, "o": ltp, "h": ltp, "l": ltp, "c": ltp,
                             "v": delta_volume, "d": buy_depth - sell_depth,
                             "bo": buy_orders, "so": sell_orders, "lv": levels,
                             "source_timestamp": source_timestamp,
@@ -1216,28 +1329,52 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
                         existing["h"] = max(float(existing["h"]), ltp)
                         existing["l"] = min(float(existing["l"]), ltp)
                         existing["c"] = ltp
-                        existing["v"] = delta_volume if existing.get("historical") is True else float(existing.get("v") or 0) + delta_volume
+                        if not (daily_mode and existing.get("historical") is True):
+                            existing["v"] = delta_volume if existing.get("historical") is True else float(existing.get("v") or 0) + delta_volume
                         existing.pop("historical", None)
                         existing["d"] = buy_depth - sell_depth
                         existing["bo"] = buy_orders
                         existing["so"] = sell_orders
                         existing["lv"] = levels
                         existing["source_timestamp"] = source_timestamp
-                    candles = candles[-250:]
+                    candles = candles[-max_candles:]
                     last_source_timestamp = source_timestamp
                 if candles:
                     with _lock:
-                        _footprint_history[symbol] = [dict(item) for item in candles[-250:]]
+                        _footprint_history[symbol] = [dict(item) for item in candles[-max_candles:]]
+                        _footprint_history_interval[symbol] = history_mode
                 mode = "live" if live else ("closed" if candles else "wait")
-                await websocket.send_json({
-                    "type": "snap", "symbol": symbol, "candles": candles, "step": 5,
+                snapshot_message = (
+                    f"Daily chart requested 1825 days; broker returned {len(candles)} candle(s). "
+                    "Coverage depends on the selected instrument's historical retention; no synthetic bars are created. "
+                    "MCX current-contract history may not span five years."
+                    if daily_mode else
+                    "Live requires a fresh exchange timestamp. Footprint cells show broker best-five bid/ask depth, not classified trade prints."
+                )
+                snapshot_payload = {
+                    "type": "snap", "symbol": symbol, "candles": candles, "step": _footprint_chart_step(symbol),
                     "mode": mode, "live": live, "ltp": ltp if live else None,
                     "source_timestamp": source_timestamp, "tick_age_ms": int(age * 1000) if age is not None else None,
                     "future_symbol": future["symbol"], "future_expiry": future["expiry"],
                     "level_semantics": "broker_best5_bid_ask_depth_not_trade_prints",
-                    "message": "Live requires a fresh exchange timestamp. Footprint cells show broker best-five bid/ask depth, not classified trade prints.",
+                    "history_interval": history_mode,
+                    "history_requested_days": 1825 if daily_mode else 1,
+                    "history_bars_returned": len(candles),
+                    "history_first_timestamp": candles[0].get("source_timestamp") if candles else None,
+                    "history_last_timestamp": candles[-1].get("source_timestamp") if candles else None,
+                    "message": snapshot_message,
                     "signal_only": True, "order_placement_enabled": False,
-                })
+                }
+                # A five-year daily payload is sent once. Subsequent five-second
+                # WebSocket updates carry only the latest daily candle to avoid
+                # repeatedly transferring thousands of unchanged bars.
+                if daily_mode and daily_history_sent:
+                    snapshot_payload["type"] = "candle"
+                    snapshot_payload["candle"] = dict(candles[-1]) if candles else None
+                    snapshot_payload.pop("candles", None)
+                elif daily_mode:
+                    daily_history_sent = True
+                await websocket.send_json(snapshot_payload)
             except HTTPException as exc:
                 await websocket.send_json({"type": "status", "mode": "wait", "message": str(exc.detail)[:180], "candles": candles})
             except Exception:
@@ -1510,34 +1647,64 @@ def market_ticks(_: str = Depends(_device)) -> dict[str, Any]:
 @app.get("/v1/option-chain")
 def option_chain(index: str = Query(default="NIFTY"), _: str = Depends(_device)) -> dict[str, Any]:
     index = index.strip().upper()
-    if index not in INDEXES:
-        raise HTTPException(status_code=400, detail=f"Unsupported index. Choose from {', '.join(INDEXES)}.")
     adapter = _require_adapter()
     rows = _load_master()
-    config = _find_index_contract(rows, index)
-    spot_quote = _quotes(adapter, config["exchange"], [config["token"]]).get(config["token"])
-    spot = _number(spot_quote.get("ltp")) if spot_quote else None
-    if spot is None:
-        raise HTTPException(status_code=502, detail="Angel One spot quote is missing")
-    segment = "BFO" if index in ("SENSEX", "BANKEX") else "NFO"
+    commodity = index in COMMODITY_NAMES
+    if not commodity and index not in INDEXES:
+        raise HTTPException(status_code=400, detail=f"Unsupported underlying. Choose an index or supported MCX commodity: {', '.join(INDEXES)}; {', '.join(COMMODITY_NAMES)}.")
+
+    if commodity:
+        # MCX commodity options are OPTFUT contracts; use the nearest live
+        # FUTCOM contract as underlying reference, never fabricate a spot.
+        futures = [
+            row for row in rows
+            if str(row.get("exch_seg", "")).upper() == "MCX"
+            and _commodity_contract_matches(row, index)
+            and str(row.get("instrumenttype", "")).upper() == "FUTCOM"
+            and _expiry_date(row.get("expiry")) is not None
+            and _expiry_date(row.get("expiry")) >= datetime.now(IST).date()
+        ]
+        if not futures:
+            raise HTTPException(status_code=404, detail=f"No unexpired MCX futures found for {index}; sync the current Angel One instrument master.")
+        future_expiries = sorted({_expiry_date(row.get("expiry")) for row in futures if _expiry_date(row.get("expiry"))})
+        future = next((row for row in futures if _expiry_date(row.get("expiry")) == future_expiries[0]), futures[0])
+        future_token = str(future.get("token", ""))
+        spot_quote = _quotes(adapter, "MCX", [future_token]).get(future_token)
+        spot = _number(spot_quote.get("ltp")) if spot_quote else None
+        segment = "MCX"
+        option_instrument = "OPTFUT"
+        option_name = index
+    else:
+        config = _find_index_contract(rows, index)
+        spot_quote = _quotes(adapter, config["exchange"], [config["token"]]).get(config["token"])
+        spot = _number(spot_quote.get("ltp")) if spot_quote else None
+        segment = "BFO" if index in ("SENSEX", "BANKEX") else "NFO"
+        option_instrument = "OPTIDX"
+        option_name = index
+    if spot is None or spot <= 0:
+        raise HTTPException(status_code=502, detail=f"Angel One underlying quote is missing for {index}; no option signal can be qualified.")
+
     contracts = [
         row for row in rows
         if str(row.get("exch_seg", "")).upper() == segment
-        and str(row.get("name", "")).upper().replace(" ", "") == index
-        and str(row.get("instrumenttype", "")).upper() == "OPTIDX"
+        and (_commodity_contract_matches(row, option_name) if commodity else str(row.get("name", "")).upper().replace(" ", "") == option_name)
+        and str(row.get("instrumenttype", "")).upper() == option_instrument
         and _option_type(row) is not None
         and _expiry_date(row.get("expiry")) is not None
         and _expiry_date(row.get("expiry")) >= datetime.now(IST).date()
     ]
     expiries = sorted({_expiry_date(row.get("expiry")) for row in contracts if _expiry_date(row.get("expiry"))})
     if not expiries:
-        return {"index": index, "spot": spot, "contracts": [], "status": "WAIT", "reason": "No unexpired option contracts found"}
+        return {"index": index, "spot": spot, "contracts": [], "option_chain": [], "status": "WAIT", "reason": f"No unexpired {option_instrument} option contracts found for {index}", "signal_only": True}
     contracts = [row for row in contracts if _expiry_date(row.get("expiry")) == expiries[0]]
     strikes = sorted({strike for row in contracts if (strike := _strike_value(row.get("strike"), spot)) is not None})
     atm = min(range(len(strikes)), key=lambda i: abs(strikes[i] - spot)) if strikes else 0
     wanted = set(strikes[max(0, atm - 10): min(len(strikes), atm + 11)])
     contracts = [row for row in contracts if _strike_value(row.get("strike"), spot) in wanted][:100]
     quote_map = _quotes(adapter, segment, [str(row.get("token", "")) for row in contracts if row.get("token")])
+    # Request broker Greeks for MCX as well as index options. Some broker
+    # accounts/underlyings may not return MCX Greeks; _greeks_map fails closed
+    # to an empty map, so absent values remain null and cannot qualify a trade.
     greek_map = _greeks_map(adapter, index, expiries[0].strftime("%d%b%Y").upper())
     output = []
     for row in contracts:
@@ -1548,21 +1715,20 @@ def option_chain(index: str = Query(default="NIFTY"), _: str = Depends(_device))
         strike = _strike_value(row.get("strike"), spot)
         kind = _option_type(row)
         bid, ask, buy_depth, sell_depth = _book(quote)
+        greek = greek_map.get((strike or -1, kind or ""), {})
         output.append({
             "symbol": row.get("symbol"), "token": token, "option_type": kind,
+            "side": "CE" if kind == "CALL" else "PE" if kind == "PUT" else None,
             "strike": strike, "expiry": expiries[0].isoformat(),
             "ltp": _number(quote.get("ltp")), "bid": bid, "ask": ask,
             "volume": _number(quote.get("tradeVolume") or quote.get("volume")),
             "oi": _number(quote.get("opnInterest") or quote.get("openInterest") or quote.get("oi")),
-            "delta": (greek_map.get((strike or -1, kind or "")) or {}).get("delta"),
-            "gamma": (greek_map.get((strike or -1, kind or "")) or {}).get("gamma"),
-            "theta": (greek_map.get((strike or -1, kind or "")) or {}).get("theta"),
-            "vega": (greek_map.get((strike or -1, kind or "")) or {}).get("vega"),
-            "iv": (greek_map.get((strike or -1, kind or "")) or {}).get("iv"),
+            "delta": greek.get("delta"), "gamma": greek.get("gamma"),
+            "theta": greek.get("theta"), "vega": greek.get("vega"), "iv": greek.get("iv"),
             "buy_depth": buy_depth, "sell_depth": sell_depth,
             "timestamp": _quote_timestamp(quote), "source_timestamp": _quote_timestamp(quote),
         })
-    return {"index": index, "spot": spot, "expiry": expiries[0].isoformat(), "contracts": output, "option_chain": _market_chain_rows(output), "source": "angelone_smartapi", "observed_at": _utc_now().isoformat(), "signal_only": True}
+    return {"index": index, "spot": spot, "expiry": expiries[0].isoformat(), "contracts": output, "option_chain": _market_chain_rows(output), "source": "angelone_smartapi", "observed_at": _utc_now().isoformat(), "signal_only": True, "underlying_type": "MCX_FUTURE" if commodity else "INDEX"}
 
 
 @app.get("/v1/market/sentiment")
@@ -1685,10 +1851,32 @@ def _get_signals_uncached(force: bool = False) -> dict[str, Any]:
         _schedule_news_refresh(list(INDEXES))
         signals: dict[str, Any] = {}
         market: dict[str, Any] = {}
+        # Batch all index spot tokens by exchange once instead of issuing one
+        # REST quote request per index before the candle/options pipeline.
+        spot_quotes: dict[str, dict[str, Any]] = {}
+        spot_contracts: dict[str, dict[str, Any]] = {}
+        for index in INDEXES:
+            try:
+                spot_contracts[index] = _find_index_contract(rows, index)
+            except Exception:
+                continue
+        by_exchange: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+        for index, contract in spot_contracts.items():
+            by_exchange.setdefault(str(contract["exchange"]), []).append((index, contract))
+        for exchange, contracts in by_exchange.items():
+            try:
+                batch = _quotes(adapter, exchange, [str(contract["token"]) for _, contract in contracts])
+                for index, contract in contracts:
+                    quote = batch.get(str(contract["token"]))
+                    if quote is not None:
+                        spot_quotes[index] = quote
+            except Exception:
+                # Each index has a single-token fallback inside _index_snapshot.
+                continue
         for index in INDEXES:
             index_started = time.perf_counter()
             try:
-                result, quote = _index_snapshot(adapter, rows, index)
+                result, quote = _index_snapshot(adapter, rows, index, spot_quote=spot_quotes.get(index))
                 elapsed_index_ms = round((time.perf_counter() - index_started) * 1000, 2)
                 result["performance"] = {**dict(result.get("performance") or {}), "index_snapshot_ms": elapsed_index_ms}
                 quote["performance"] = {"index_snapshot_ms": elapsed_index_ms}
@@ -1720,7 +1908,7 @@ def _get_signals_uncached(force: bool = False) -> dict[str, Any]:
                         spot_timestamp = _quote_timestamp(spot_fallback)
                         parsed_spot_timestamp = datetime.fromisoformat(_iso(spot_timestamp)) if spot_timestamp and _iso(spot_timestamp) else None
                         spot_age = (_utc_now() - parsed_spot_timestamp).total_seconds() if parsed_spot_timestamp else None
-                        spot_live = spot_ltp is not None and spot_ltp > 0 and spot_age is not None and 0 <= spot_age <= 60
+                        spot_live = spot_ltp is not None and spot_ltp > 0 and spot_age is not None and 0 <= spot_age <= 60 and _is_market_session_open(index)
                         bid_fallback, ask_fallback, buy_depth_fallback, sell_depth_fallback = _book(spot_fallback)
                         market_row.update({
                             "ltp": spot_ltp, "age_seconds": round(spot_age, 2) if spot_age is not None else None,
@@ -1832,7 +2020,7 @@ def _commodity_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]]) -
         contracts = [
             row for row in rows
             if str(row.get("exch_seg", "")).upper() == "MCX"
-            and str(row.get("name", "")).upper() == name
+            and _commodity_contract_matches(row, name)
             and str(row.get("instrumenttype", "")).upper() == "FUTCOM"
             and _expiry_date(row.get("expiry")) is not None
             and _expiry_date(row.get("expiry")) >= today
@@ -1850,7 +2038,7 @@ def _commodity_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]]) -
             timestamp = _quote_timestamp(quote)
             parsed_timestamp = datetime.fromisoformat(timestamp) if timestamp else None
             age = (_utc_now() - parsed_timestamp).total_seconds() if parsed_timestamp else None
-            live = ltp is not None and ltp > 0 and age is not None and 0 <= age <= 60
+            live = ltp is not None and ltp > 0 and age is not None and 0 <= age <= 60 and _is_market_session_open(name)
             bid, ask, buy_depth, sell_depth = _book(quote)
             trend = "UNKNOWN"
             sentiment = None
@@ -2013,15 +2201,30 @@ def _provider_key_present(*names: str) -> bool:
 def ai_status(_: str = Depends(_device)) -> dict[str, Any]:
     providers = [
         ("gemini", ("GEMINI_API_KEY", "GOOGLE_API_KEY"), os.getenv("GEMINI_MODEL", "gemini")),
-        ("openrouter", ("OPENROUTER_API_KEY",), os.getenv("OPENROUTER_MODEL", "configured-model")),
-        ("openai", ("OPENAI_API_KEY",), os.getenv("OPENAI_MODEL", "configured-model")),
+        ("openrouter", ("OPENROUTER_API_KEY",), os.getenv("OPENROUTER_MODEL", "openrouter/free")),
+        ("openai", ("OPENAI_API_KEY",), os.getenv("OPENAI_MODEL", "gpt-4o-mini")),
     ]
     selected = next((item for item in providers if _provider_key_present(*item[1])), None)
+    provider_status = {
+        name: {
+            "configured": _provider_key_present(*env_names),
+            "status": "configured_not_tested" if _provider_key_present(*env_names) else "not_configured",
+            "model": model_name,
+            "ok": False,
+        }
+        for name, env_names, model_name in providers
+    }
+    with _lock:
+        for name in ("openai", "openrouter"):
+            cached = _ai_provider_test_cache.get(name)
+            if cached and cached.get("configured") == provider_status[name]["configured"]:
+                provider_status[name] = dict(cached)
     return {
         "provider": selected[0] if selected else "deterministic_fallback",
         "model": selected[2] if selected else "five-layer-quant-context",
         "status": "configured" if selected else "fallback_ready",
         "llm_configured": selected is not None,
+        "providers": provider_status,
         "message": "Cloud model key detected; connectivity is tested separately." if selected else "No supported LLM key is configured. Chat can still report actual market fields and deterministic risk gates; it will not pretend an LLM answered.",
         "signal_only": True,
     }
@@ -2081,14 +2284,57 @@ def _run_ai_validation_probe(provider: str, api_key: str, model: str, endpoint: 
             "verdict": verdict, "reason": reason, "output": output[:240],
         }
     except urllib.error.HTTPError as exc:
-        # Do not echo provider response bodies: they can include account metadata.
-        return {"provider": provider, "configured": True, "ok": False, "status": "http_error",
+        # Never echo provider response bodies; they may contain account details.
+        # Rate limits are actionable and should not be misreported as malformed JSON.
+        retry_after = (exc.headers.get("Retry-After") if exc.headers else None)
+        rate_limited = exc.code == 429
+        return {"provider": provider, "configured": True, "ok": False,
+                "status": "rate_limited" if rate_limited else "http_error",
                 "model": model, "latency_ms": round((time.perf_counter() - started) * 1000, 1),
-                "verdict": "WAIT", "error": f"Provider returned HTTP {exc.code}."}
+                "verdict": "WAIT",
+                "retry_after_seconds": retry_after if retry_after and retry_after.isdigit() else None,
+                "error": "Provider access rate exceeded; retry after the provider's cooldown." if rate_limited else f"Provider returned HTTP {exc.code}."}
     except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
         return {"provider": provider, "configured": True, "ok": False, "status": "connection_error",
                 "model": model, "latency_ms": round((time.perf_counter() - started) * 1000, 1),
                 "verdict": "WAIT", "error": f"Provider request failed ({type(exc).__name__})."}
+
+
+@app.post("/v1/ai/validate")
+def ai_validate_snapshot(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
+    """Return provider configuration and deterministic market-data eligibility without inventing an AI pass."""
+    payload = _get_signals(force=False)
+    index = str(body.get("index") or "NIFTY").strip().upper()
+    market_row = dict((payload.get("market") or {}).get(index) or {})
+    signal_row = dict((payload.get("signals") or {}).get(index) or {})
+    timestamp = _iso(market_row.get("source_timestamp") or market_row.get("timestamp"))
+    parsed = datetime.fromisoformat(timestamp) if timestamp else None
+    age = (_utc_now() - parsed).total_seconds() if parsed else None
+    fresh = (
+        market_row.get("source") == "angelone_smartapi"
+        and _number(market_row.get("ltp")) is not None
+        and (_number(market_row.get("ltp")) or 0) > 0
+        and age is not None and 0 <= age <= 60
+    )
+    providers: dict[str, Any] = {}
+    for provider, env_name in (("openai", "OPENAI_API_KEY"), ("openrouter", "OPENROUTER_API_KEY")):
+        configured = bool(os.getenv(env_name, "").strip())
+        providers[provider] = {
+            "configured": configured,
+            "ok": False,
+            "status": "not_configured" if not configured else "configured_not_tested",
+            "verdict": "WAIT",
+        }
+    return {
+        "overall_status": "BLOCKED_NO_LIVE_DATA" if not fresh else "PROVIDER_TEST_REQUIRED",
+        "deterministic_decision": str(signal_row.get("decision") or "WAIT") if fresh else "WAIT",
+        "providers": providers,
+        "market_snapshot_available": fresh,
+        "source_timestamp": timestamp,
+        "age_seconds": round(age, 2) if age is not None else None,
+        "signal_only": True,
+        "order_placement_enabled": False,
+    }
 
 
 @app.post("/v1/providers/ai/test")
@@ -2126,6 +2372,9 @@ def test_ai_providers(_: str = Depends(_device)) -> dict[str, Any]:
     else:
         checks.append({"provider": "openrouter", "configured": False, "ok": False, "status": "not_configured", "verdict": "WAIT"})
     tested = [item for item in checks if item.get("provider") in ("openai", "openrouter")]
+    with _lock:
+        for item in tested:
+            _ai_provider_test_cache[item["provider"]] = dict(item)
     succeeded = [item for item in tested if item.get("ok") is True]
     return {
         "status": "ok" if succeeded else ("not_configured" if not any(item.get("configured") for item in tested) else "failed"),
@@ -2154,42 +2403,143 @@ def search_provider_status(_: str = Depends(_device)) -> dict[str, Any]:
 def test_search_providers(_: str = Depends(_device)) -> dict[str, Any]:
     exa = _provider_key_present("EXA_API_KEY")
     tavily = _provider_key_present("TAVILY_API_KEY")
-    evidence = fetch_market_news_sentiment("NIFTY", exa_api_key=os.getenv("EXA_API_KEY"), tavily_api_key=os.getenv("TAVILY_API_KEY"))
-    sources = list(evidence.get("sources") or [])
+    # Force a fresh network probe: cached headlines must never make a broken
+    # provider appear green after its key was revoked or its quota was exhausted.
+    evidence = fetch_market_news_sentiment(
+        "NIFTY", exa_api_key=os.getenv("EXA_API_KEY"),
+        tavily_api_key=os.getenv("TAVILY_API_KEY"), force=True,
+    )
+    provider_checks = dict(evidence.get("provider_checks") or {})
+    checks = []
+    for name, configured in (("exa", exa), ("tavily", tavily)):
+        observed = dict(provider_checks.get(name) or {})
+        checks.append({
+            "provider": name, "configured": configured,
+            "ok": configured and observed.get("ok") is True,
+            "status": observed.get("status", "not_configured" if not configured else "test_failed"),
+            "result_count": observed.get("result_count", 0),
+            "error": observed.get("error"),
+        })
     articles = list(evidence.get("articles") or [])
-    checks = [
-        {"provider": "exa", "configured": exa, "ok": "exa" in sources},
-        {"provider": "tavily", "configured": tavily, "ok": "tavily" in sources},
-    ]
+    configured_checks = [item for item in checks if item["configured"]]
+    passed = [item for item in configured_checks if item["ok"]]
     return {
-        "status": "ok" if any(item["ok"] for item in checks) else "failed_or_no_evidence",
+        "status": "ok" if passed else ("not_configured" if not configured_checks else "failed"),
         "checks": checks, "providers": {item["provider"]: item for item in checks},
         "evidence_count": len(articles), "search_evidence": articles[:8],
         "errors": evidence.get("errors", []),
-        "message": "Search returned source-backed headlines." if articles else "No source-backed headlines returned; check provider status, key permissions and Railway outbound access.",
+        "message": "Provider authentication and search request succeeded." if passed else "No configured search provider passed a live request. Inspect each provider's status; secrets are never returned.",
     }
+
+
+def _run_chat_completion(provider: str, api_key: str, model: str, endpoint: str, messages: list[dict[str, str]]) -> dict[str, Any]:
+    """Make a real server-side LLM call. Never expose keys or raw provider bodies."""
+    started = time.perf_counter()
+    body = json.dumps({
+        "model": model, "temperature": 0.2, "max_tokens": 700,
+        "messages": messages,
+    }).encode("utf-8")
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    if provider == "openrouter":
+        headers["HTTP-Referer"] = "https://github.com/sparmar3786-pixel/AI-TRADING"
+        headers["X-Title"] = "AI-TRADING Market Assistant"
+    request = urllib.request.Request(endpoint, data=body, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=14) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        choices = data.get("choices") or []
+        answer = str(((choices[0].get("message") or {}).get("content") if choices else "") or "").strip()
+        if not answer:
+            raise RuntimeError("empty_response")
+        return {
+            "answer": answer, "provider": provider, "model": model, "llm_used": True,
+            "status": "connected", "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+        }
+    except urllib.error.HTTPError as exc:
+        if exc.code == 429:
+            raise RuntimeError(f"{provider}_rate_limited") from None
+        if exc.code in (401, 403):
+            raise RuntimeError(f"{provider}_authentication_failed") from None
+        raise RuntimeError(f"{provider}_http_{exc.code}") from None
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        raise RuntimeError(f"{provider}_{type(exc).__name__.lower()}") from None
 
 
 @app.post("/v1/ai/chat")
 def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
-    """Honest deterministic fallback until an authenticated LLM adapter is available."""
+    """Use a real cloud provider when configured; disclose fallback if every provider fails."""
     index = str(body.get("index") or "NIFTY").strip().upper()
-    if index not in INDEXES:
-        raise HTTPException(status_code=400, detail="Unsupported index.")
+    is_commodity = index in COMMODITY_NAMES
+    if index not in INDEXES and not is_commodity:
+        raise HTTPException(status_code=400, detail="Unsupported index or MCX commodity.")
     question = str(body.get("question") or "").strip()
     if not question:
         raise HTTPException(status_code=422, detail="A question is required.")
     try:
         payload = _get_signals()
-        market = dict((payload.get("market") or {}).get(index) or {})
-        signal = dict((payload.get("signals") or {}).get(index) or {})
+        if is_commodity:
+            commodity_rows = payload.get("commodities") if isinstance(payload.get("commodities"), list) else []
+            market = next(
+                (dict(row) for row in commodity_rows if isinstance(row, dict)
+                 and str(row.get("name") or row.get("symbol") or "").strip().upper() == index),
+                {"name": index, "symbol": index, "source": "angelone_smartapi", "live": False, "ltp": None, "status": "WAIT"},
+            )
+            signal = dict(market)
+        else:
+            market = dict((payload.get("market") or {}).get(index) or {})
+            signal = dict((payload.get("signals") or {}).get(index) or {})
         news = dict(signal.get("news_sentiment") or cached_market_news_sentiment(index))
         validation = dict(signal.get("live_validation") or {})
         reasons = signal.get("reasons") or signal.get("reason") or []
         if not isinstance(reasons, list):
             reasons = [str(reasons)]
+        context = {
+            "index": index, "market": market, "signal": signal, "validation": validation,
+            "search_evidence": list(news.get("articles") or [])[:6],
+            "live_data_status": "fresh only if market.live=true and source_timestamp is recent",
+        }
+        system_message = (
+            "You are AI-TRADING's secondary market research assistant. Use only supplied evidence; "
+            "never invent prices, OI, Greeks, volume, candle history, support/resistance or timestamps. "
+            "Clearly label unavailable/stale data. Explain signal and risk gates, but never override a "
+            "deterministic WAIT/REJECT. This backend is read-only and does not place orders."
+        )
+        history = body.get("history") if isinstance(body.get("history"), list) else []
+        messages = [{"role": "system", "content": system_message},
+                    {"role": "user", "content": "Verified context JSON:\n" + json.dumps(context, separators=(",", ":"), default=str)[:14000]}]
+        for item in history[-8:]:
+            if not isinstance(item, dict) or item.get("role") not in ("user", "assistant"):
+                continue
+            content = str(item.get("content") or "").strip()
+            if content:
+                messages.append({"role": str(item["role"]), "content": content[:3000]})
+        messages.append({"role": "user", "content": question[:3000]})
+        candidates = [
+            ("openai", os.getenv("OPENAI_API_KEY", "").strip(),
+             os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip(), "https://api.openai.com/v1/chat/completions"),
+            ("openrouter", os.getenv("OPENROUTER_API_KEY", "").strip(),
+             os.getenv("OPENROUTER_MODEL", "openrouter/free").strip(), "https://openrouter.ai/api/v1/chat/completions"),
+        ]
+        failures: list[dict[str, str]] = []
+        for provider, key, model, endpoint in candidates:
+            if not key:
+                continue
+            if not model or model == "configured-model":
+                model = "gpt-4o-mini" if provider == "openai" else "openrouter/free"
+            try:
+                result = _run_chat_completion(provider, key, model, endpoint, messages)
+                return {
+                    **result, "index": index, "question": question,
+                    "market": market, "signal": signal, "validation": validation,
+                    "search_attempted": bool(os.getenv("EXA_API_KEY", "").strip() or os.getenv("TAVILY_API_KEY", "").strip()),
+                    "search_evidence": list(news.get("articles") or [])[:8],
+                    "provider_failures": failures, "signal_only": True,
+                    "order_placement_enabled": False,
+                }
+            except RuntimeError as exc:
+                failures.append({"provider": provider, "status": str(exc)[:80]})
         answer = (
-            f"{index} market context (deterministic backend fallback, not an LLM response): "
+            f"{index} market context (deterministic fallback; no cloud LLM response succeeded): "
             f"LTP={market.get('ltp') if market.get('ltp') is not None else 'unavailable'}; "
             f"quote age={market.get('age_seconds') if market.get('age_seconds') is not None else 'unknown'} seconds; "
             f"signal={signal.get('decision', 'WAIT')}; validation={validation.get('verdict', 'NOT_AVAILABLE')}. "
@@ -2199,10 +2549,11 @@ def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
         return {
             "answer": answer, "provider": "deterministic_fallback",
             "model": "five-layer-quant-context", "llm_used": False,
-            "index": index, "question": question,
-            "market": market, "signal": signal, "validation": validation,
-            "search_evidence": news.get("articles", [])[:8],
-            "status": "fallback_response", "signal_only": True,
+            "index": index, "question": question, "market": market, "signal": signal,
+            "validation": validation, "search_attempted": bool(os.getenv("EXA_API_KEY", "").strip() or os.getenv("TAVILY_API_KEY", "").strip()),
+            "search_evidence": list(news.get("articles") or [])[:8],
+            "provider_failures": failures, "status": "provider_error_fallback" if failures else "fallback_response",
+            "signal_only": True, "order_placement_enabled": False,
         }
     except HTTPException as exc:
         raise HTTPException(status_code=503, detail={"message": "Current market context is unavailable.", "reason": str(exc.detail)[:180]}) from exc

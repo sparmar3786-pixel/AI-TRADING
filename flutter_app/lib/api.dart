@@ -53,9 +53,7 @@ class FreshApi {
   static const Set<String> _signalRoutes = <String>{
     '/v1/system/diagnostics',
     '/v1/metadata',
-    '/v1/providers/ai/test',
-    '/v1/providers/search/test',
-    '/v1/providers/search/status',
+    '/v1/ai/validate',
     '/v1/angel/status',
     '/v1/angel/connect',
     '/v1/instruments/sync',
@@ -224,6 +222,7 @@ class FreshApi {
   Future<Map<String, dynamic>> systemDiagnostics() => getJson('/v1/system/diagnostics');
   Future<Map<String, dynamic>> metadata() => getJson('/v1/metadata');
   Future<Map<String, dynamic>> angelStatus() => getJson('/v1/angel/status');
+  Future<Map<String, dynamic>> aiStatus() => getJson('/v1/ai/status');
   Future<Map<String, dynamic>> testAIProviders() =>
       postJson('/v1/providers/ai/test', {});
   Future<Map<String, dynamic>> testSearchProviders() =>

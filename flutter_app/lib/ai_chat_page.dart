@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:stream_chat_flutter_ai/stream_chat_flutter_ai.dart';
 import 'api.dart';
+import 'daily_ai_memory.dart';
 
 class AiChatPage extends StatefulWidget {
   const AiChatPage({required this.backendUrl, required this.selectedIndex, super.key});
@@ -113,11 +115,21 @@ class _AiChatPageState extends State<AiChatPage> {
       } else {
         displayAnswer += '\n\n**Live Search Evidence:** Search providers are not configured for this chat request.';
       }
+      final providerName = (response['provider'] ?? '').toString().toLowerCase();
+      final actualCloudResponse = response['llm_used'] == true ||
+          (response['ok'] == true && const {'gemini', 'openai', 'openrouter'}.contains(providerName));
+      unawaited(DailyAiMemory.saveChatTurn(
+        question: question,
+        answer: displayAnswer,
+        provider: (response['provider'] ?? 'unknown').toString(),
+        model: (response['model'] ?? 'unknown').toString(),
+        llmUsed: actualCloudResponse,
+      ));
       if (!mounted) return;
       setState(() {
         _aiProvider = (response['provider'] ?? _aiProvider).toString();
         _aiModel = (response['model'] ?? _aiModel).toString();
-        _providerStatus = 'CONNECTED';
+        _providerStatus = actualCloudResponse ? 'CONNECTED' : 'FALLBACK';
         _messages.add({'role': 'assistant', 'content': displayAnswer});
       });
       _scrollToBottom();
@@ -164,7 +176,14 @@ class _AiChatPageState extends State<AiChatPage> {
           children: [
             const Icon(Icons.auto_awesome, color: Color(0xFF12D6FF)),
             const Text('AI MARKET CHAT', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
-            const Chip(avatar: Icon(Icons.cloud_done, size: 16, color: Color(0xFF32D583)), label: Text('CLOUD AI • AUTO FAILOVER')),
+            Chip(
+              avatar: Icon(
+                _providerStatus == 'CONNECTED' ? Icons.cloud_done : Icons.cloud_off,
+                size: 16,
+                color: _providerStatus == 'CONNECTED' ? const Color(0xFF32D583) : Colors.orangeAccent,
+              ),
+              label: Text(_providerStatus == 'CONNECTED' ? 'CLOUD AI • CONNECTED' : 'CLOUD AI • NOT VERIFIED'),
+            ),
             Text('Provider: $_aiProvider • Model: $_aiModel • $_providerStatus', style: const TextStyle(fontSize: 10, color: Colors.white60)),
           ],
         ),

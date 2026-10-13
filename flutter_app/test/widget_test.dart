@@ -35,12 +35,10 @@ void main() {
       of: find.byType(ListView).last,
       matching: find.byType(Scrollable),
     );
+    expect(find.text('PAGE-BY-PAGE REPORT'), findsOneWidget);
     final pageTen = find.textContaining('PDF Page 10');
     await tester.scrollUntilVisible(pageTen, 300, scrollable: reportScrollable);
     expect(pageTen, findsOneWidget);
-    final screenshotIndex = find.text('ALL 15 SCREENSHOT INDEX');
-    await tester.scrollUntilVisible(screenshotIndex, 300, scrollable: reportScrollable);
-    expect(screenshotIndex, findsOneWidget);
     final repositoryLinks = find.text('REPOSITORY & DOCUMENTATION LINKS');
     expect(repositoryLinks, findsNothing);
     final priorityRootCause = find.text('PRIORITY ROOT CAUSE');
@@ -117,6 +115,46 @@ void main() {
     expect(find.text('VALIDATION PERFORMANCE'), findsNothing);
   });
 
+  testWidgets('Research Engines exposes MCX snapshot and keeps commodity CE PE gated', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: ResearchEnginesPage(
+          market: const {},
+          signals: const {},
+          ai: const {},
+          commodities: const [
+            {
+              'name': 'CRUDEOIL',
+              'symbol': 'CRUDEOIL26OCTFUT',
+              'live': true,
+              'ltp': 5500.0,
+              'decision': 'WAIT',
+              'candidate_decision': 'WAIT',
+              'indicators': {'ema_fast': 5501.0, 'ema_slow': 5498.0},
+            },
+          ],
+          optionChains: const {
+            'CRUDEOIL': [
+              {'side': 'CE', 'strike': 5500.0, 'oi': 10},
+              {'side': 'PE', 'strike': 5500.0, 'oi': 20},
+            ],
+          },
+          lastFetch: 'test snapshot',
+          selectedIndex: 'CRUDEOIL',
+          onIndexChanged: (_) {},
+        ),
+      ),
+    ));
+
+    expect(find.text('TECHNICAL INDICATOR ENGINE'), findsOneWidget);
+    expect(find.text('OPTIONS / OPEN INTEREST ENGINE'), findsOneWidget);
+    expect(find.text('MCX CE quotes'), findsOneWidget);
+    expect(find.text('MCX PE quotes'), findsOneWidget);
+    expect(find.text('WAIT'), findsWidgets);
+    expect(find.textContaining('Commodity CE/PE entries remain blocked'), findsOneWidget);
+    expect(find.textContaining('5500.00'), findsWidgets);
+  });
+
   testWidgets('hamburger drawer exposes API and Railway navigation', (tester) async {
     await tester.pumpWidget(const FreshApp());
     await tester.tap(find.byKey(const ValueKey('open-navigation-menu')));
@@ -132,7 +170,7 @@ void main() {
     final dataHealth = find.byKey(const ValueKey('drawer-tab-Data Health'));
     await tester.scrollUntilVisible(dataHealth, 250, scrollable: drawerScrollable);
     expect(dataHealth, findsOneWidget);
-    final repositoryLibrary = find.byKey(const ValueKey('drawer-tab-Engine Data'));
+    final repositoryLibrary = find.byKey(const ValueKey('drawer-tab-Market Diagnostics'));
     await tester.scrollUntilVisible(repositoryLibrary, 250, scrollable: drawerScrollable);
     expect(repositoryLibrary, findsOneWidget);
     await tester.scrollUntilVisible(apiRailway, 250, scrollable: drawerScrollable);
@@ -205,13 +243,45 @@ void main() {
 
   testWidgets('Flow Monitor exposes measured API and provider validation telemetry', (tester) async {
     await tester.pumpWidget(const FreshApp());
-    final tabBarContext = tester.element(find.byType(TabBar).first);
-    DefaultTabController.of(tabBarContext).animateTo(tabs.indexOf('Flow Monitor'));
-    await tester.pumpAndSettle();
-    expect(find.text('FLOW MONITOR • API SPEED • ENGINE VALIDATION'), findsOneWidget);
+
+    final tabBar = find.byType(TabBar).first;
+    final tabBarContext = tester.element(tabBar);
+    final controller = DefaultTabController.of(tabBarContext);
+    controller.animateTo(tabs.indexOf('Flow Monitor'));
+
+    // Advance the tab transition deterministically. Do not wait for the
+    // periodic diagnostics timer or live HTTP calls to settle.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pump();
+
+    expect(controller.index, tabs.indexOf('Flow Monitor'));
+    expect(find.textContaining('FLOW MONITOR'), findsOneWidget);
+
+    final monitorScrollable = find.descendant(
+      of: find.byType(RefreshIndicator),
+      matching: find.byType(Scrollable),
+    ).first;
+    await tester.scrollUntilVisible(
+      find.text('SERVER API ROUTE METRICS'),
+      250,
+      scrollable: monitorScrollable,
+    );
     expect(find.text('SERVER API ROUTE METRICS'), findsOneWidget);
-    expect(find.text('OPENAI + OPENROUTER DATA VALIDATION'), findsOneWidget);
-    expect(find.text('TEST OPENAI + OPENROUTER'), findsOneWidget);
+
+    await tester.scrollUntilVisible(
+      find.text('GEMINI + OPENAI + OPENROUTER DATA VALIDATION'),
+      250,
+      scrollable: monitorScrollable,
+    );
+    expect(find.text('GEMINI + OPENAI + OPENROUTER DATA VALIDATION'), findsOneWidget);
+    expect(find.text('TEST GEMINI + OPENAI + OPENROUTER'), findsOneWidget);
+
+    // Dispose Flow Monitor first so its periodic poll is cancelled, then let
+    // outstanding Future.timeout timers finish. This tests real cleanup rather
+    // than leaving pending fake timers behind at test teardown.
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 13));
   });
 
   testWidgets('Pro chart clearly reports missing candles instead of fabricating data', (tester) async {
