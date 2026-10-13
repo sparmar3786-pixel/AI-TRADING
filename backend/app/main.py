@@ -490,24 +490,49 @@ def _footprint_levels(quote: dict[str, Any], step: float = 5.0) -> tuple[dict[st
     return levels, buy_orders, sell_orders
 
 
+def _footprint_chart_step(symbol: str) -> float:
+    """Price bucket size for display; this does not imply exchange trade-print data."""
+    return {
+        "CRUDEOIL": 1.0, "CRUDEOILM": 1.0, "NATURALGAS": 0.5, "NATGASMINI": 0.5,
+        "GOLD": 100.0, "GOLDM": 10.0, "SILVER": 100.0, "SILVERM": 10.0,
+        "COPPER": 1.0, "ZINC": 0.5, "ALUMINIUM": 0.5, "LEAD": 0.5,
+        "NICKEL": 1.0, "MENTHAOIL": 1.0, "CASTORSEED": 10.0, "COTTON": 10.0, "RUBBER": 1.0,
+        "BANKNIFTY": 10.0, "SENSEX": 20.0, "BANKEX": 20.0,
+    }.get(symbol.strip().upper(), 5.0)
+
+
 def _find_nearest_future(rows: list[dict[str, Any]], index: str) -> dict[str, str] | None:
-    """Find the nearest unexpired index future for footprint snapshots."""
-    segment = "BFO" if index in {"SENSEX", "BANKEX"} else "NFO"
+    """Find nearest unexpired index or MCX commodity future from the broker master."""
+    key = index.strip().upper()
+    commodity_names = {"CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM", "SILVER", "SILVERM", "COPPER", "ZINC", "ALUMINIUM", "LEAD", "NICKEL", "MENTHAOIL", "CASTORSEED", "COTTON", "RUBBER"}
+    is_commodity = key in commodity_names
+    segment = "MCX" if is_commodity else ("BFO" if key in {"SENSEX", "BANKEX"} else "NFO")
     today = datetime.now(IST).date()
-    contracts = [
-        row for row in rows
-        if str(row.get("exch_seg", "")).upper() == segment
-        and str(row.get("name", "")).upper().replace(" ", "") == index
-        and str(row.get("instrumenttype", "")).upper() == "FUTIDX"
-        and row.get("token")
-        and _expiry_date(row.get("expiry")) is not None
-        and _expiry_date(row.get("expiry")) >= today
-    ]
+    contracts = []
+    for row in rows:
+        row_segment = str(row.get("exch_seg", "")).upper()
+        row_name = str(row.get("name", "")).upper().replace(" ", "")
+        instrument_type = str(row.get("instrumenttype", "")).upper()
+        symbol = str(row.get("symbol", "")).upper()
+        if row_segment != segment or not row.get("token"):
+            continue
+        if is_commodity:
+            # MCX commodity futures are FUTCOM. Accept exact master name or
+            # exact symbol prefix so mini contracts resolve to their own token.
+            matches = row_name == key or symbol.startswith(key)
+            if not matches or instrument_type != "FUTCOM":
+                continue
+        elif row_name != key or instrument_type != "FUTIDX":
+            continue
+        expiry = _expiry_date(row.get("expiry"))
+        if expiry is None or expiry < today:
+            continue
+        contracts.append(row)
     contracts.sort(key=lambda row: _expiry_date(row.get("expiry")) or date.max)
     if not contracts:
         return None
     row = contracts[0]
-    return {"exchange": segment, "token": str(row["token"]), "symbol": str(row.get("symbol") or index), "expiry": str(row.get("expiry") or "")}
+    return {"exchange": segment, "token": str(row["token"]), "symbol": str(row.get("symbol") or key), "expiry": str(row.get("expiry") or "")}
 
 
 def _quote_timestamp(quote: dict[str, Any]) -> str | None:
@@ -1121,8 +1146,9 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
     """Stream broker-only nearest-future snapshots without running the slow signal fan-out."""
     await websocket.accept()
     symbol = (websocket.query_params.get("symbol") or "NIFTY").strip().upper()
-    if symbol not in INDEXES:
-        await websocket.send_json({"type": "status", "mode": "wait", "message": "Unsupported index symbol"})
+    supported_symbols = set(INDEXES) | {"CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM", "SILVER", "SILVERM", "COPPER", "ZINC", "ALUMINIUM", "LEAD", "NICKEL", "MENTHAOIL", "CASTORSEED", "COTTON", "RUBBER"}
+    if symbol not in supported_symbols:
+        await websocket.send_json({"type": "status", "mode": "wait", "message": "Unsupported index or commodity symbol"})
         await websocket.close(code=1008)
         return
     with _lock:
@@ -1195,7 +1221,7 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
                 if live and parsed and source_timestamp:
                     epoch = int(parsed.timestamp())
                     minute = epoch - epoch % 60
-                    levels, buy_orders, sell_orders = _footprint_levels(quote or {}, step=5.0)
+                    levels, buy_orders, sell_orders = _footprint_levels(quote or {}, step=_footprint_chart_step(symbol))
                     _, _, buy_depth, sell_depth = _book(quote or {})
                     total_volume = _number((quote or {}).get("tradeVolume") or (quote or {}).get("volume"))
                     delta_volume = max(0.0, total_volume - last_trade_volume) if total_volume is not None and last_trade_volume is not None else 0.0
