@@ -285,8 +285,8 @@ class BackendApiTests(unittest.TestCase):
             def read(self):
                 return json.dumps({"candidates": [{"content": {"parts": [{"text": "Snapshot reviewed; risk gate remains WAIT."}]}}]}).encode()
 
-        with patch.object(api, "_get_signals", return_value=payload), \\
-             patch.dict(os.environ, {"GEMINI_API_KEY": "test-key", "GEMINI_MODEL": "gemini-2.5-flash", "GOOGLE_API_KEY": "", "OPENAI_API_KEY": "openai-key-must-not-be-used", "OPENAI_MODEL": "gpt-4o-mini", "OPENROUTER_API_KEY": "router-key-must-not-be-used"}, clear=False), \\
+        with patch.object(api, "_get_signals", return_value=payload), \
+             patch.dict(os.environ, {"GEMINI_API_KEY": "test-key", "GEMINI_MODEL": "gemini-2.5-flash", "GOOGLE_API_KEY": "", "OPENAI_API_KEY": "openai-key-must-not-be-used", "OPENAI_MODEL": "gpt-4o-mini", "OPENROUTER_API_KEY": "router-key-must-not-be-used"}, clear=False), \
              patch.object(api.urllib.request, "urlopen", return_value=FakeResponse()):
             response = self.client.post(
                 "/v1/ai/chat", headers=self.device_headers,
@@ -298,6 +298,7 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(data["provider"], "gemini")
         self.assertEqual(data["answer"], "Snapshot reviewed; risk gate remains WAIT.")
         self.assertFalse(data["order_placement_enabled"])
+
     def test_search_provider_test_uses_live_provider_checks(self):
         fake_evidence = {
             "provider_checks": {
