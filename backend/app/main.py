@@ -964,13 +964,18 @@ def angel_connect(body: ConnectRequest, _: str = Depends(_device)) -> dict[str, 
         except AngelOneConfigError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except Exception as exc:
-            # Log only exception type and stack trace: never log credentials,
-            # TOTP, request headers, SDK response bodies, or token values.
-            logger.warning("Angel One connect failed; exception_type=%s", type(exc).__name__, exc_info=True)
-            # Classify common transport failures without exposing raw exception text.
+            # Log the exception class only. Exception text and tracebacks can
+            # contain broker payloads, request URLs, headers, or credential data.
+            logger.warning("Angel One connect failed; exception_type=%s", type(exc).__name__)
+            # Classify transport failures without returning raw exception text.
             error_text = str(exc)
             exc_type = type(exc).__name__.lower()
-            if any(name in exc_type for name in ("timeout", "connection", "ssl", "socket", "network")):
+            exc_module = type(exc).__module__.lower()
+            transport_error = any(
+                name in exc_type or name in exc_module
+                for name in ("timeout", "connection", "ssl", "socket", "network", "httpx", "urllib3")
+            )
+            if transport_error:
                 detail = {
                     "message": "Railway could not complete the request to Angel One SmartAPI.",
                     "stage": "smartapi_transport",
