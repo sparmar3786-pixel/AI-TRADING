@@ -58,6 +58,21 @@ void main() {
     ]);
   });
 
+  test('Angel One connect health-checks and posts to the signal service', () async {
+    final requested = <http.Request>[];
+    final client = MockClient((request) async {
+      requested.add(request);
+      return http.Response(jsonEncode({'status': 'ok'}), 200);
+    });
+    addTearDown(client.close);
+    final api = FreshApi('https://legacy.example.test', client, 'https://signals.example.test');
+    await api.connectAngel({'angel_api_key': 'test'});
+    expect(requested[0].url.origin, 'https://signals.example.test');
+    expect(requested[0].url.path, '/health');
+    expect(requested[1].url.origin, 'https://signals.example.test');
+    expect(requested[1].url.path, '/v1/angel/connect');
+  });
+
   test('Cloud AI remains on the legacy backend', () async {
     Uri? requestedUri;
     final client = MockClient((request) async {
