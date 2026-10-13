@@ -370,11 +370,13 @@ class BackendApiTests(unittest.TestCase):
                         "best5Data": {"buy": [{"price": 109.5, "quantity": 18}],
                                       "sell": [{"price": 110.5, "quantity": 22}]}},
         }
-        with patch.object(api, "_require_adapter", return_value=object()), \\
-             patch.object(api, "_load_master", return_value=rows), \\
-             patch.object(api, "_quotes", side_effect=lambda _adapter, _exchange, tokens: {
-                 token: quotes[token] for token in tokens if token in quotes
-             }):
+        with (
+            patch.object(api, "_require_adapter", return_value=object()),
+            patch.object(api, "_load_master", return_value=rows),
+            patch.object(api, "_quotes", side_effect=lambda _adapter, _exchange, tokens: {
+                token: quotes[token] for token in tokens if token in quotes
+            }),
+        ):
             response = self.client.get("/v1/option-chain?index=CRUDEOIL", headers=self.device_headers)
 
         self.assertEqual(response.status_code, 200, response.text)
