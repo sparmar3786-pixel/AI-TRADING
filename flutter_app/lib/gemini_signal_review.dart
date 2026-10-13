@@ -42,14 +42,15 @@ class _GeminiSignalReviewState extends State<GeminiSignalReview> {
       _error = null;
     });
     try {
-      final response = await FreshApi(widget.backendUrl).geminiChat(
-        index: widget.selectedIndex,
-        question: 'Review the current ${widget.selectedIndex} signal using only the supplied live market snapshot, deterministic five-layer checks, option quote timestamps, entry, stop loss and target. Return a concise risk review with: data freshness, any conflicting direction, missing/invalid SL or target, risk-gate status, and reasons to WAIT. Do not invent prices. Do not turn WAIT into PASS. AI confidence is not a probability of profit.',
-      );
+      final response = await FreshApi(widget.backendUrl).reviewSignalWithGemini(index: widget.selectedIndex);
       final provider = (response['provider'] ?? 'unknown').toString().toLowerCase();
-      final used = response['llm_used'] == true && provider == 'gemini';
-      final answer = (response['answer'] ?? '').toString().trim();
-      if (answer.isEmpty) throw Exception('Gemini returned no review text.');
+      final used = response['ok'] == true && provider == 'gemini';
+      final verdict = (response['verdict'] ?? 'WAIT').toString().toUpperCase();
+      final decision = (response['decision'] ?? 'WAIT').toString().toUpperCase();
+      final reason = (response['reason'] ?? 'No review reason returned.').toString();
+      final blocks = (response['blocks'] as List? ?? const []).map((item) => item.toString()).join(', ');
+      final answer = 'Gemini verdict: $verdict • Decision: $decision\\n$reason'
+          '${blocks.isEmpty ? '' : '\\nBlocking checks: $blocks'}';
       if (!mounted) return;
       setState(() {
         _connected = used;
