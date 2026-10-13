@@ -332,6 +332,24 @@ class BackendApiTests(unittest.TestCase):
         self.assertNotIn("test-secret", str(result))
 
 
+    def test_ai_provider_rate_limit_is_reported_as_rate_limited_not_bad_json(self):
+        from email.message import Message
+        headers = Message()
+        headers["Retry-After"] = "30"
+        error = api.urllib.error.HTTPError(
+            "https://api.openai.com/v1/chat/completions", 429, "Too Many Requests", headers, None
+        )
+        with patch.object(api.urllib.request, "urlopen", side_effect=error):
+            result = api._run_ai_validation_probe(
+                "openai", "test-secret", "test-model", "https://api.openai.com/v1/chat/completions",
+                {"source": "angelone_smartapi", "source_timestamp": "2026-10-13T09:00:00+00:00",
+                 "ltp": 25000.0, "age_seconds": 2.0, "live": True},
+            )
+        self.assertEqual(result["status"], "rate_limited")
+        self.assertEqual(result["retry_after_seconds"], "30")
+        self.assertEqual(result["verdict"], "WAIT")
+        self.assertNotIn("test-secret", str(result))
+
     def test_commodity_footprint_uses_mcx_future_and_symbol_specific_price_step(self):
         expiry = (api.datetime.now(api.IST).date() + api.timedelta(days=7)).strftime("%d%b%Y").upper()
         rows = [
