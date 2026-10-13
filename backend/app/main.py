@@ -2291,8 +2291,8 @@ def _provider_key_present(*names: str) -> bool:
 def ai_status(_: str = Depends(_device)) -> dict[str, Any]:
     providers = [
         ("gemini", ("GEMINI_API_KEY", "GOOGLE_API_KEY"), os.getenv("GEMINI_MODEL", "gemini-2.5-flash")),
-        ("openrouter", ("OPENROUTER_API_KEY",), os.getenv("OPENROUTER_MODEL", "openrouter/free")),
-        ("openai", ("OPENAI_API_KEY",), os.getenv("OPENAI_MODEL", "gpt-4o-mini")),
+        ("openrouter", ("OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY"), os.getenv("OPENROUTER_MODEL", "openrouter/free")),
+        ("openai", ("OPENAI_API_KEY", "OPEN_AI_API_KEY", "OPENAI_KEY"), os.getenv("OPENAI_MODEL", "gpt-4o-mini")),
     ]
     selected = next((item for item in providers if _provider_key_present(*item[1])), None)
     provider_status = {
@@ -2466,8 +2466,8 @@ def test_ai_providers(_: str = Depends(_device)) -> dict[str, Any]:
             "provider": "gemini", "configured": False, "ok": False,
             "status": "not_configured", "verdict": "WAIT",
         })
-    openai_key = os.getenv("OPENAI_API_KEY", "").strip()
-    openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    openai_key = (os.getenv("OPENAI_API_KEY") or os.getenv("OPEN_AI_API_KEY") or os.getenv("OPENAI_KEY") or "").strip()
+    openrouter_key = (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPEN_ROUTER_API_KEY") or "").strip()
     if openai_key:
         checks.append(_run_ai_validation_probe(
             "openai", openai_key, os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip(),
