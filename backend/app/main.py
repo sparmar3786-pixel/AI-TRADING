@@ -98,6 +98,7 @@ _option_history: dict[str, dict[str, float]] = {}
 # Retain only real broker candles/depth observed since this process started,
 # so a WebSocket reconnect does not erase captured footprint levels.
 _footprint_history: dict[str, list[dict[str, Any]]] = {}
+_footprint_history_interval: dict[str, str] = {}
 
 def _record_request_metric(path: str, status_code: int, elapsed_ms: float, response_bytes: int | None) -> None:
     with _lock:
@@ -1183,13 +1184,20 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
     """Stream broker-only nearest-future snapshots without running the slow signal fan-out."""
     await websocket.accept()
     symbol = (websocket.query_params.get("symbol") or "NIFTY").strip().upper()
+    timeframe = (websocket.query_params.get("tf") or "1").strip().lower()
+    daily_mode = timeframe in {"1440", "1d", "d", "day"}
+    history_mode = "ONE_DAY" if daily_mode else "ONE_MINUTE"
+    max_candles = 2000 if daily_mode else 250
     supported_symbols = set(INDEXES) | {"CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM", "SILVER", "SILVERM", "COPPER", "ZINC", "ALUMINIUM", "LEAD", "NICKEL", "MENTHAOIL", "CASTORSEED", "COTTON", "RUBBER"}
     if symbol not in supported_symbols:
         await websocket.send_json({"type": "status", "mode": "wait", "message": "Unsupported index or commodity symbol"})
         await websocket.close(code=1008)
         return
     with _lock:
-        candles: list[dict[str, Any]] = [dict(item) for item in _footprint_history.get(symbol, [])]
+        candles: list[dict[str, Any]] = (
+            [dict(item) for item in _footprint_history.get(symbol, [])]
+            if _footprint_history_interval.get(symbol) == history_mode else []
+        )
     last_trade_volume: float | None = None
     last_source_timestamp: str | None = None
     future: dict[str, str] | None = None
@@ -1211,7 +1219,12 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
                 if not rows:
                     rows = _load_master()
                 if future is None:
-                    future = _find_nearest_future(rows, symbol)
+                    # Daily multi-year index history belongs to the underlying
+                    # index token, not the current expiring index-futures token.
+                    if daily_mode and symbol in INDEXES:
+                        future = {**INDEXES[symbol], "symbol": symbol, "expiry": ""}
+                    else:
+                        future = _find_nearest_future(rows, symbol)
                 if future is None:
                     await websocket.send_json({
                         "type": "snap", "symbol": symbol, "candles": candles, "step": _footprint_chart_step(symbol),
@@ -1224,8 +1237,18 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
                 if not history_loaded:
                     history_loaded = True
                     try:
-                        history_start, history_end = _session_range()
-                        history = adapter.candles(future["exchange"], future["token"], "ONE_MINUTE", history_start, history_end).get("candles") or []
+                        if daily_mode:
+                            history_end_dt = datetime.now(IST)
+                            history_start_dt = history_end_dt - timedelta(days=1825)
+                            history_start = history_start_dt.strftime("%Y-%m-%d %H:%M")
+                            history_end = history_end_dt.strftime("%Y-%m-%d %H:%M")
+                            history_interval = "ONE_DAY"
+                        else:
+                            history_start, history_end = _session_range()
+                            history_interval = "ONE_MINUTE"
+                        history = adapter.candles(
+                            future["exchange"], future["token"], history_interval, history_start, history_end
+                        ).get("candles") or []
                         for candle in history:
                             if not isinstance(candle, (list, tuple)) or len(candle) < 6:
                                 continue
@@ -1234,21 +1257,26 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
                             values = [_number(candle[pos]) for pos in (1, 2, 3, 4)]
                             if parsed_candle is None or any(value is None for value in values):
                                 continue
-                            candle_epoch = int(parsed_candle.timestamp())
+                            if daily_mode:
+                                local_day = parsed_candle.astimezone(IST).date()
+                                bar_time = datetime.combine(local_day, dt_time(9, 0), tzinfo=IST)
+                                candle_epoch = int(bar_time.timestamp())
+                            else:
+                                candle_epoch = int(parsed_candle.timestamp())
                             if any(int(item.get("t") or 0) == candle_epoch for item in candles):
-                                # Keep the already captured live/depth candle for this minute.
                                 continue
                             opened, high, low, close = values
                             candles.append({
                                 "t": candle_epoch, "o": opened, "h": high, "l": low, "c": close,
                                 "v": _number(candle[5]) or 0.0, "lv": {}, "source_timestamp": stamp,
-                                "historical": True, "level_semantics": "price-level depth unavailable for historical candles",
+                                "historical": True,
+                                "level_semantics": "price-level depth unavailable for historical candles",
                             })
                         candles.sort(key=lambda item: int(item.get("t") or 0))
-                        candles = candles[-250:]
+                        candles = candles[-max_candles:]
                     except Exception:
-                        # Historical candles are optional; never replace them with generated/sample prices.
-                        candles = sorted(candles, key=lambda item: int(item.get("t") or 0))[-250:]
+                        # Broker history can be shorter than requested; never synthesize missing bars.
+                        candles = sorted(candles, key=lambda item: int(item.get("t") or 0))[-max_candles:]
                 quote = _quotes(adapter, future["exchange"], [future["token"]]).get(future["token"])
                 ltp = _number(quote.get("ltp")) if quote else None
                 source_timestamp = _quote_timestamp(quote or {})
@@ -1258,16 +1286,17 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
                 if live and parsed and source_timestamp:
                     epoch = int(parsed.timestamp())
                     minute = epoch - epoch % 60
+                    bar_time = int(datetime.combine(parsed.astimezone(IST).date(), dt_time(9, 0), tzinfo=IST).timestamp()) if daily_mode else minute
                     levels, buy_orders, sell_orders = _footprint_levels(quote or {}, step=_footprint_chart_step(symbol))
                     _, _, buy_depth, sell_depth = _book(quote or {})
                     total_volume = _number((quote or {}).get("tradeVolume") or (quote or {}).get("volume"))
                     delta_volume = max(0.0, total_volume - last_trade_volume) if total_volume is not None and last_trade_volume is not None else 0.0
                     if total_volume is not None:
                         last_trade_volume = total_volume
-                    existing = next((item for item in reversed(candles) if int(item.get("t") or 0) == minute), None)
+                    existing = next((item for item in reversed(candles) if int(item.get("t") or 0) == bar_time), None)
                     if existing is None:
                         existing = {
-                            "t": minute, "o": ltp, "h": ltp, "l": ltp, "c": ltp,
+                            "t": bar_time, "o": ltp, "h": ltp, "l": ltp, "c": ltp,
                             "v": delta_volume, "d": buy_depth - sell_depth,
                             "bo": buy_orders, "so": sell_orders, "lv": levels,
                             "source_timestamp": source_timestamp,
@@ -1279,18 +1308,20 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
                         existing["h"] = max(float(existing["h"]), ltp)
                         existing["l"] = min(float(existing["l"]), ltp)
                         existing["c"] = ltp
-                        existing["v"] = delta_volume if existing.get("historical") is True else float(existing.get("v") or 0) + delta_volume
+                        if not (daily_mode and existing.get("historical") is True):
+                            existing["v"] = delta_volume if existing.get("historical") is True else float(existing.get("v") or 0) + delta_volume
                         existing.pop("historical", None)
                         existing["d"] = buy_depth - sell_depth
                         existing["bo"] = buy_orders
                         existing["so"] = sell_orders
                         existing["lv"] = levels
                         existing["source_timestamp"] = source_timestamp
-                    candles = candles[-250:]
+                    candles = candles[-max_candles:]
                     last_source_timestamp = source_timestamp
                 if candles:
                     with _lock:
-                        _footprint_history[symbol] = [dict(item) for item in candles[-250:]]
+                        _footprint_history[symbol] = [dict(item) for item in candles[-max_candles:]]
+                        _footprint_history_interval[symbol] = history_mode
                 mode = "live" if live else ("closed" if candles else "wait")
                 await websocket.send_json({
                     "type": "snap", "symbol": symbol, "candles": candles, "step": _footprint_chart_step(symbol),
@@ -1298,7 +1329,18 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
                     "source_timestamp": source_timestamp, "tick_age_ms": int(age * 1000) if age is not None else None,
                     "future_symbol": future["symbol"], "future_expiry": future["expiry"],
                     "level_semantics": "broker_best5_bid_ask_depth_not_trade_prints",
-                    "message": "Live requires a fresh exchange timestamp. Footprint cells show broker best-five bid/ask depth, not classified trade prints.",
+                    "history_interval": history_mode,
+                    "history_requested_days": 1825 if daily_mode else 1,
+                    "history_bars_returned": len(candles),
+                    "history_first_timestamp": candles[0].get("source_timestamp") if candles else None,
+                    "history_last_timestamp": candles[-1].get("source_timestamp") if candles else None,
+                    "message": (
+                        f"Daily chart requested 1825 days; broker returned {len(candles)} candle(s). "
+                        "Coverage depends on the selected instrument's historical retention; no synthetic bars are created. "
+                        "MCX current-contract history may not span five years."
+                        if daily_mode else
+                        "Live requires a fresh exchange timestamp. Footprint cells show broker best-five bid/ask depth, not classified trade prints."
+                    ),
                     "signal_only": True, "order_placement_enabled": False,
                 })
             except HTTPException as exc:
