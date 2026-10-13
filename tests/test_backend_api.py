@@ -39,7 +39,7 @@ class BackendApiTests(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        self.assertEqual(data["overall_status"], "NOT_CONFIGURED")
+        self.assertEqual(data["overall_status"], "BLOCKED_NO_LIVE_DATA")
         self.assertEqual(data["providers"]["openai"]["status"], "not_configured")
         self.assertEqual(data["providers"]["openrouter"]["status"], "not_configured")
         self.assertEqual(data["deterministic_decision"], "WAIT")
