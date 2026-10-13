@@ -16,6 +16,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import asyncio
 from datetime import date, datetime, time as dt_time, timedelta, timezone
@@ -25,6 +26,7 @@ from zoneinfo import ZoneInfo
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -1395,6 +1397,12 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
             pass
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> Response:
+    """Browsers and WebViews request this implicitly; it is not an API failure."""
+    return Response(status_code=204)
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     return {"status": "ok", "service": "ai-trading-readonly-api", "time": _utc_now().isoformat()}
@@ -2221,7 +2229,7 @@ def ai_status(_: str = Depends(_device)) -> dict[str, Any]:
         for name, env_names, model_name in providers
     }
     with _lock:
-        for name in ("openai", "openrouter"):
+        for name in ("gemini", "openai", "openrouter"):
             cached = _ai_provider_test_cache.get(name)
             if cached and cached.get("configured") == provider_status[name]["configured"]:
                 provider_status[name] = dict(cached)
@@ -2358,11 +2366,30 @@ def test_ai_providers(_: str = Depends(_device)) -> dict[str, Any]:
         and (_number(market_row.get("ltp")) or 0) > 0
         and actual_age is not None and 0 <= actual_age <= 60
     )
-    checks: list[dict[str, Any]] = [
-        {"provider": "gemini", "configured": _provider_key_present("GEMINI_API_KEY", "GOOGLE_API_KEY"),
-         "ok": False, "status": "configured_not_tested", "verdict": "WAIT",
-         "message": "Gemini remains separate; this button probes OpenAI and OpenRouter."}
-    ]
+    checks: list[dict[str, Any]] = []
+    gemini_key = (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()
+    gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
+    if gemini_key:
+        try:
+            probe = _run_gemini_completion(gemini_key, gemini_model, [
+                {"role": "system", "content": "You are a connectivity probe. Reply with the exact text GEMINI_OK."},
+                {"role": "user", "content": "Reply with GEMINI_OK only."},
+            ])
+            checks.append({
+                "provider": "gemini", "configured": True, "ok": True, "status": "ok",
+                "model": probe.get("model"), "latency_ms": probe.get("latency_ms"),
+                "verdict": "WAIT", "message": "Gemini authenticated and returned a response.",
+            })
+        except RuntimeError as exc:
+            checks.append({
+                "provider": "gemini", "configured": True, "ok": False, "status": str(exc)[:80],
+                "model": gemini_model, "verdict": "WAIT",
+            })
+    else:
+        checks.append({
+            "provider": "gemini", "configured": False, "ok": False,
+            "status": "not_configured", "verdict": "WAIT",
+        })
     openai_key = os.getenv("OPENAI_API_KEY", "").strip()
     openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
     if openai_key:
@@ -2377,7 +2404,7 @@ def test_ai_providers(_: str = Depends(_device)) -> dict[str, Any]:
             "https://openrouter.ai/api/v1/chat/completions", market_row))
     else:
         checks.append({"provider": "openrouter", "configured": False, "ok": False, "status": "not_configured", "verdict": "WAIT"})
-    tested = [item for item in checks if item.get("provider") in ("openai", "openrouter")]
+    tested = [item for item in checks if item.get("provider") in ("gemini", "openai", "openrouter")]
     with _lock:
         for item in tested:
             _ai_provider_test_cache[item["provider"]] = dict(item)
@@ -2386,8 +2413,8 @@ def test_ai_providers(_: str = Depends(_device)) -> dict[str, Any]:
         "status": "ok" if succeeded else ("not_configured" if not any(item.get("configured") for item in tested) else "failed"),
         "checks": checks, "providers": {item["provider"]: item for item in checks},
         "market_snapshot_available": bool(market_row.get("source_timestamp") and market_row.get("ltp") is not None),
-        "message": "Actual authenticated model calls completed. AI verdicts are secondary only and cannot override deterministic risk gates."
-            if succeeded else "OpenAI/OpenRouter test did not complete successfully. Inspect each provider status and Railway variables.",
+        "message": "At least one configured provider returned a real response. AI cannot override deterministic risk gates."
+            if succeeded else "No configured AI provider passed its real request. Inspect each provider status and Railway variables.",
         "signal_only": True, "order_placement_enabled": False,
     }
 
@@ -2471,6 +2498,65 @@ def _run_chat_completion(provider: str, api_key: str, model: str, endpoint: str,
         raise RuntimeError(f"{provider}_{type(exc).__name__.lower()}") from None
 
 
+def _run_gemini_completion(api_key: str, model: str, messages: list[dict[str, str]]) -> dict[str, Any]:
+    """Call Gemini's native generateContent API; never expose the key or raw provider body."""
+    started = time.perf_counter()
+    safe_model = re.sub(r"[^A-Za-z0-9._-]", "", model or "") or "gemini-2.5-flash"
+    system_text = "\n".join(
+        str(item.get("content") or "") for item in messages if item.get("role") == "system"
+    ).strip()
+    contents = []
+    for item in messages:
+        role = str(item.get("role") or "")
+        if role == "system":
+            continue
+        content = str(item.get("content") or "").strip()
+        if not content:
+            continue
+        contents.append({
+            "role": "model" if role == "assistant" else "user",
+            "parts": [{"text": content[:12000]}],
+        })
+    if not contents:
+        raise RuntimeError("gemini_empty_prompt")
+    payload: dict[str, Any] = {
+        "contents": contents,
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 700},
+    }
+    if system_text:
+        payload["systemInstruction"] = {"parts": [{"text": system_text[:6000]}]}
+    endpoint = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        + urllib.parse.quote(safe_model, safe="-_.")
+        + ":generateContent?key=" + urllib.parse.quote(api_key, safe="")
+    )
+    request = urllib.request.Request(
+        endpoint, data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"}, method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=18) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        candidates = data.get("candidates") or []
+        parts = ((candidates[0].get("content") or {}).get("parts") or []) if candidates else []
+        answer = "\n".join(str(part.get("text") or "") for part in parts if isinstance(part, dict)).strip()
+        if not answer:
+            raise RuntimeError("gemini_empty_response")
+        return {
+            "answer": answer, "provider": "gemini", "model": safe_model,
+            "llm_used": True, "status": "connected",
+            "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+        }
+    except urllib.error.HTTPError as exc:
+        if exc.code == 429:
+            raise RuntimeError("gemini_rate_limited") from None
+        if exc.code in (401, 403):
+            raise RuntimeError("gemini_authentication_failed") from None
+        raise RuntimeError(f"gemini_http_{exc.code}") from None
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        raise RuntimeError(f"gemini_{type(exc).__name__.lower()}") from None
+
+
 @app.post("/v1/ai/chat")
 def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
     """Use a real cloud provider when configured; disclose fallback if every provider fails."""
@@ -2520,20 +2606,15 @@ def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
             if content:
                 messages.append({"role": str(item["role"]), "content": content[:3000]})
         messages.append({"role": "user", "content": question[:3000]})
-        candidates = [
-            ("openai", os.getenv("OPENAI_API_KEY", "").strip(),
-             os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip(), "https://api.openai.com/v1/chat/completions"),
-            ("openrouter", os.getenv("OPENROUTER_API_KEY", "").strip(),
-             os.getenv("OPENROUTER_MODEL", "openrouter/free").strip(), "https://openrouter.ai/api/v1/chat/completions"),
-        ]
+        # The chat page is intentionally Gemini-only. OpenAI/OpenRouter remain
+        # separately testable validation providers, never silent chat fallbacks.
         failures: list[dict[str, str]] = []
-        for provider, key, model, endpoint in candidates:
-            if not key:
-                continue
-            if not model or model == "configured-model":
-                model = "gpt-4o-mini" if provider == "openai" else "openrouter/free"
+        gemini_key = (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()
+        if gemini_key:
             try:
-                result = _run_chat_completion(provider, key, model, endpoint, messages)
+                result = _run_gemini_completion(
+                    gemini_key, os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip(), messages
+                )
                 return {
                     **result, "index": index, "question": question,
                     "market": market, "signal": signal, "validation": validation,
@@ -2543,7 +2624,7 @@ def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
                     "order_placement_enabled": False,
                 }
             except RuntimeError as exc:
-                failures.append({"provider": provider, "status": str(exc)[:80]})
+                failures.append({"provider": "gemini", "status": str(exc)[:80]})
         answer = (
             f"{index} market context (deterministic fallback; no cloud LLM response succeeded): "
             f"LTP={market.get('ltp') if market.get('ltp') is not None else 'unavailable'}; "
