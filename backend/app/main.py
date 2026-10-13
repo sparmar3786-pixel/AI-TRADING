@@ -2059,11 +2059,21 @@ def ai_status(_: str = Depends(_device)) -> dict[str, Any]:
         ("openai", ("OPENAI_API_KEY",), os.getenv("OPENAI_MODEL", "configured-model")),
     ]
     selected = next((item for item in providers if _provider_key_present(*item[1])), None)
+    provider_status = {
+        name: {
+            "configured": _provider_key_present(*env_names),
+            "status": "configured_not_tested" if _provider_key_present(*env_names) else "not_configured",
+            "model": model_name,
+            "ok": False,
+        }
+        for name, env_names, model_name in providers
+    }
     return {
         "provider": selected[0] if selected else "deterministic_fallback",
         "model": selected[2] if selected else "five-layer-quant-context",
         "status": "configured" if selected else "fallback_ready",
         "llm_configured": selected is not None,
+        "providers": provider_status,
         "message": "Cloud model key detected; connectivity is tested separately." if selected else "No supported LLM key is configured. Chat can still report actual market fields and deterministic risk gates; it will not pretend an LLM answered.",
         "signal_only": True,
     }
