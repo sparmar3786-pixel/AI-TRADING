@@ -132,7 +132,7 @@ void main() {
     final dataHealth = find.byKey(const ValueKey('drawer-tab-Data Health'));
     await tester.scrollUntilVisible(dataHealth, 250, scrollable: drawerScrollable);
     expect(dataHealth, findsOneWidget);
-    final repositoryLibrary = find.byKey(const ValueKey('drawer-tab-Engine Data'));
+    final repositoryLibrary = find.byKey(const ValueKey('drawer-tab-Market Diagnostics'));
     await tester.scrollUntilVisible(repositoryLibrary, 250, scrollable: drawerScrollable);
     expect(repositoryLibrary, findsOneWidget);
     await tester.scrollUntilVisible(apiRailway, 250, scrollable: drawerScrollable);
