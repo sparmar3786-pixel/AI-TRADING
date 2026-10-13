@@ -9,6 +9,12 @@ class StrategyLibraryPage extends StatefulWidget {
   State<StrategyLibraryPage> createState() => _StrategyLibraryPageState();
 }
 
+Map<String, dynamic> marketRowFallback(Map<String, dynamic> market, String index) {
+  final row = market[index];
+  if (row is Map) return Map<String, dynamic>.from(row['strategy_suite'] as Map? ?? const {});
+  return <String, dynamic>{};
+}
+
 class _StrategyLibraryPageState extends State<StrategyLibraryPage> {
   final search = TextEditingController();
   String category = 'All';
@@ -40,6 +46,9 @@ class _StrategyLibraryPageState extends State<StrategyLibraryPage> {
     final signalRow = Map<String, dynamic>.from(widget.signals[widget.selectedIndex] as Map? ?? const {});
     final layers = Map<String, dynamic>.from(signalRow['layers'] as Map? ?? const {});
     final passedLayers = layers.values.whereType<Map>().where((layer) => layer['pass'] == true).length;
+    final suite = Map<String, dynamic>.from(signalRow['strategy_suite'] as Map? ?? marketRowFallback(widget.market, widget.selectedIndex));
+    final suiteStrategies = Map<String, dynamic>.from(suite['strategies'] as Map? ?? const {});
+    final suiteVotes = Map<String, dynamic>.from(suite['votes'] as Map? ?? const {});
     final fresh = marketRow['live'] == true;
     final ltp = marketRow['ltp'];
     return Scaffold(
@@ -60,6 +69,10 @@ class _StrategyLibraryPageState extends State<StrategyLibraryPage> {
             ]),
             const SizedBox(height: 5),
             Text('Signal: ${signalRow['decision'] ?? 'WAIT'} • Layers passed: $passedLayers / ${layers.length}', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+            Text('Strategy consumption: ${suiteStrategies.length} outputs • LONG votes ${suiteVotes['LONG'] ?? 0} • SHORT votes ${suiteVotes['SHORT'] ?? 0} • status ${suite['status'] ?? 'NOT RETURNED'}',
+              style: const TextStyle(color: Color(0xFF12D6FF), fontSize: 11, fontWeight: FontWeight.w700)),
+            const Text('This panel reads the shared backend signal snapshot. Empty strategy outputs mean the suite did not return results; catalogue entries alone do not prove execution.',
+              style: TextStyle(color: Colors.white60, fontSize: 10)),
             Text('Source: ${marketRow['source'] ?? 'not available'} • Quote age: ${marketRow['age_seconds'] ?? 'unknown'} sec', style: const TextStyle(color: Colors.white54, fontSize: 11)),
             if (marketRow['signal_error'] != null || marketRow['error'] != null)
               Text('Signal blocked: ${marketRow['signal_error'] ?? marketRow['error']}', style: const TextStyle(color: Colors.orangeAccent, fontSize: 11)),
