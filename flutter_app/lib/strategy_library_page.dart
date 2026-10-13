@@ -96,6 +96,8 @@ class _StrategyLibraryPageState extends State<StrategyLibraryPage> {
             ]),
             const SizedBox(height: 5),
             Text('Signal: ${signalRow['decision'] ?? 'WAIT'} • Layers passed: $passedLayers / ${layers.length}', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+            Text('Strategy consumption: ${suiteStrategies.length} outputs • LONG votes ${suiteVotes['LONG'] ?? 0} • SHORT votes ${suiteVotes['SHORT'] ?? 0} • status ${suite['status'] ?? 'NOT RETURNED'}',
+              style: const TextStyle(color: Color(0xFF12D6FF), fontSize: 11, fontWeight: FontWeight.w700)),
             if (suite['trace'] is Map) ...[
               Text('Backend execution ID: ${(suite['trace'] as Map)['execution_id'] ?? suite['execution_id'] ?? 'not supplied'}',
                 style: const TextStyle(fontSize: 10, color: Colors.white70)),
