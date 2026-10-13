@@ -87,6 +87,7 @@ _signal_cache: dict[str, Any] | None = None
 _signal_cache_at = 0.0
 # Prevent concurrent cache misses from launching duplicate broker fan-out.
 _signal_build_lock = threading.Lock()
+_signal_build_metrics: dict[str, Any] = {"last_duration_ms": None, "build_count": 0, "in_flight": False}
 _confirmation_states: dict[str, dict[str, Any]] = {}
 _last_market: dict[str, Any] = {}
 _option_history: dict[str, dict[str, float]] = {}
@@ -1238,6 +1239,7 @@ def diagnostics(_: str = Depends(_device)) -> dict[str, Any]:
     fresh_count = sum(1 for row in (_signal_cache or {}).get("market", {}).values() if row.get("live") is True)
     return {
         "service": "ai-trading-readonly-api",
+        "signal_build": dict(_signal_build_metrics),
         "angel": angel,
         "angel_one": {
             "authenticated": angel.get("authenticated", False),
@@ -1412,11 +1414,28 @@ def _get_signals(force: bool = False) -> dict[str, Any]:
     with _lock:
         if _signal_cache is not None and not force and time.monotonic() - _signal_cache_at < SIGNAL_CACHE_SECONDS:
             return _signal_cache
+    global _signal_build_metrics
     with _signal_build_lock:
         with _lock:
             if _signal_cache is not None and not force and time.monotonic() - _signal_cache_at < SIGNAL_CACHE_SECONDS:
                 return _signal_cache
-        return _get_signals_uncached(force=True)
+            _signal_build_metrics["in_flight"] = True
+        started = time.monotonic()
+        try:
+            payload = _get_signals_uncached(force=True)
+            elapsed_ms = round((time.monotonic() - started) * 1000, 1)
+            with _lock:
+                _signal_build_metrics["last_duration_ms"] = elapsed_ms
+                _signal_build_metrics["build_count"] = int(_signal_build_metrics.get("build_count", 0)) + 1
+                payload["performance"] = {
+                    "signal_build_ms": elapsed_ms,
+                    "signal_build_count": _signal_build_metrics["build_count"],
+                    "single_flight": True,
+                }
+            return payload
+        finally:
+            with _lock:
+                _signal_build_metrics["in_flight"] = False
 
 
 def _get_signals_uncached(force: bool = False) -> dict[str, Any]:
