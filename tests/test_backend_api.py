@@ -271,9 +271,8 @@ class BackendApiTests(unittest.TestCase):
             def __exit__(self, *_args):
                 return False
             def read(self):
-                return json.dumps({
-                    "choices": [{"message": {"content": "{\\"verdict\\":\\"PASS\\",\\"reason\\":\\"looks good\\"}"}}]
-                }).encode("utf-8")
+                model_output = json.dumps({"verdict": "PASS", "reason": "looks good"})
+                return json.dumps({"choices": [{"message": {"content": model_output}}]}).encode("utf-8")
 
         with patch.object(api.urllib.request, "urlopen", return_value=FakeResponse()):
             result = api._run_ai_validation_probe(
