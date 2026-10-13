@@ -198,7 +198,9 @@ class FreshApi {
   Future<Map<String, dynamic>> connectAngel(
     Map<String, dynamic> body,
   ) async {
-    await checkBackend();
+    // Broker credentials are submitted to the signal service, so health-check
+    // that same service rather than accidentally checking the separate AI host.
+    await FreshApi(signalBackendUrl, _testClient, signalBackendUrl).checkBackend();
     return postJson('/v1/angel/connect', body);
   }
 
