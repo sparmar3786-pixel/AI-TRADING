@@ -1,10 +1,11 @@
+import sys
 import unittest
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
-from backend.app import smc_api
+smc_api = sys.modules.get("app.smc_api") or sys.modules["backend.app.smc_api"]
 
 
 class SmcApiTests(unittest.TestCase):
