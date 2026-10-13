@@ -19,10 +19,75 @@ class BackendApiTests(unittest.TestCase):
         self.client = TestClient(api.app)
         self.device_headers = {"X-Device-Id": "A" * 43}
 
+    def test_live_validation_contract_returns_explicit_checks_and_fails_closed(self):
+        result = {"decision": "CALL BUY", "entry": 100.0, "stop_loss": 90.0, "target": 120.0}
+        layers = {
+            "data_quality": {"pass": True, "age_seconds": 3.0},
+            "trend_sentiment": {"pass": True, "trend": "BULLISH"},
+            "order_flow": {"pass": True},
+            "option_selection": {"pass": True},
+            "risk_levels": {"pass": True, "reward_risk": 2.0},
+            "confirmation": {"pass": True},
+        }
+        passed = api._live_validation_contract(result, layers, 2.0)
+        self.assertEqual(passed["verdict"], "PASS")
+        self.assertTrue(passed["checks"]["fresh_market_data"])
+        self.assertTrue(passed["checks"]["valid_option_quote"])
+        self.assertEqual(passed["decision"], "CALL BUY")
+
+        stale_quote = api._live_validation_contract(result, layers, 90.0)
+        self.assertEqual(stale_quote["verdict"], "WAIT")
+        self.assertEqual(stale_quote["decision"], "WAIT")
+        self.assertFalse(stale_quote["checks"]["valid_option_quote"])
+
+        bad_levels = api._live_validation_contract({**result, "stop_loss": 105.0}, layers, 2.0)
+        self.assertEqual(bad_levels["verdict"], "WAIT")
+        self.assertFalse(bad_levels["checks"]["valid_sl_target"])
+
+        conflicting_ai = api._live_validation_contract(result, layers, 2.0, {"ok": True, "decision": "PUT BUY"})
+        self.assertEqual(conflicting_ai["verdict"], "WAIT")
+        self.assertFalse(conflicting_ai["checks"]["ai_direction_consistent"])
+    def test_wait_signal_always_returns_fail_closed_validation_checks(self):
+        signal = api._wait_signal("NIFTY", "No fresh quote")
+        self.assertEqual(signal["decision"], "WAIT")
+        self.assertEqual(signal["live_validation"]["verdict"], "WAIT")
+        self.assertIn("checks", signal["live_validation"])
+        self.assertFalse(any(signal["live_validation"]["checks"].values()))
+    def test_gemini_review_cannot_override_or_conflict_with_deterministic_candidate(self):
+        payload = {
+            "market": {"NIFTY": {"ltp": 25000.0, "age_seconds": 3.0, "live": True}},
+            "signals": {"NIFTY": {
+                "decision": "CALL BUY", "entry": 100.0, "stop_loss": 90.0, "target": 120.0,
+                "live_validation": {"verdict": "PASS", "checks": {
+                    "fresh_market_data": True, "valid_option_quote": True, "five_layer_engine": True,
+                    "valid_sl_target": True, "risk_checks": True, "ai_direction_consistent": True,
+                }, "blocks": []},
+            }},
+        }
+        with patch.object(api, "_signal_cache", payload), \
+             patch.dict(os.environ, {"GEMINI_API_KEY": "test-key", "GOOGLE_API_KEY": ""}, clear=False), \
+             patch.object(api, "_run_gemini_completion", return_value={"answer": json.dumps({"verdict": "PASS", "decision": "CALL BUY", "conflicting_direction": False, "reason": "All checks agree."}), "model": "gemini-2.5-flash", "latency_ms": 25.0}):
+            response = self.client.post("/v1/ai/review-signal", headers=self.device_headers, json={"index": "NIFTY"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["verdict"], "PASS")
+        self.assertEqual(response.json()["decision"], "CALL BUY")
+
+        with patch.object(api, "_signal_cache", payload), \
+             patch.dict(os.environ, {"GEMINI_API_KEY": "test-key", "GOOGLE_API_KEY": ""}, clear=False), \
+             patch.object(api, "_run_gemini_completion", return_value={"answer": json.dumps({"verdict": "PASS", "decision": "PUT BUY", "conflicting_direction": True, "reason": "Direction conflicts."}), "model": "gemini-2.5-flash", "latency_ms": 25.0}):
+            response = self.client.post("/v1/ai/review-signal", headers=self.device_headers, json={"index": "NIFTY"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["verdict"], "WAIT")
+        self.assertEqual(response.json()["decision"], "WAIT")
+        self.assertFalse(response.json()["ai_direction_consistent"])
     def test_health_is_available_without_device_header(self):
         response = self.client.get("/health")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ok")
+
+    def test_favicon_request_is_not_reported_as_a_missing_route(self):
+        response = self.client.get("/favicon.ico")
+        self.assertEqual(response.status_code, 204)
 
     def test_ai_validation_reports_not_configured_without_server_keys(self):
         payload = {
@@ -32,7 +97,7 @@ class BackendApiTests(unittest.TestCase):
             "generated_at": "2026-10-13T00:00:00+00:00",
         }
         with patch.object(api, "_get_signals", return_value=payload), \
-             patch.dict(os.environ, {"OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
+             patch.dict(os.environ, {"GEMINI_API_KEY": "", "GOOGLE_API_KEY": "", "OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
             response = self.client.post(
                 "/v1/ai/validate",
                 headers=self.device_headers,
@@ -232,7 +297,7 @@ class BackendApiTests(unittest.TestCase):
             "signals": {"NIFTY": {"decision": "WAIT", "reasons": ["missing option evidence"], "live_validation": {"verdict": "WARN"}}},
         }
         with patch.object(api, "_get_signals", return_value=payload), \
-             patch.dict(os.environ, {"OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
+             patch.dict(os.environ, {"GEMINI_API_KEY": "", "GOOGLE_API_KEY": "", "OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
             response = self.client.post(
                 "/v1/ai/chat",
                 headers=self.device_headers,
@@ -257,7 +322,7 @@ class BackendApiTests(unittest.TestCase):
             }],
         }
         with patch.object(api, "_get_signals", return_value=payload), \
-             patch.dict(os.environ, {"OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
+             patch.dict(os.environ, {"GEMINI_API_KEY": "", "GOOGLE_API_KEY": "", "OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
             response = self.client.post(
                 "/v1/ai/chat", headers=self.device_headers,
                 json={"index": "CRUDEOILM", "question": "Analyze current MCX context", "history": []},
@@ -269,22 +334,20 @@ class BackendApiTests(unittest.TestCase):
         self.assertIn("5500.0", data["answer"])
         self.assertIn("verified Greeks", data["answer"])
 
-    def test_ai_chat_uses_real_provider_when_configured(self):
+    def test_ai_chat_uses_gemini_only_when_configured(self):
         payload = {
             "market": {"NIFTY": {"ltp": 25000.0, "age_seconds": 3, "live": True, "source": "angelone_smartapi"}},
             "signals": {"NIFTY": {"decision": "WAIT", "reasons": ["risk gate"], "live_validation": {"verdict": "WARN"}}},
         }
 
         class FakeResponse:
-            def __enter__(self):
-                return self
-            def __exit__(self, *_args):
-                return False
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
             def read(self):
-                return json.dumps({"choices": [{"message": {"content": "Snapshot reviewed; risk gate remains WAIT."}}]}).encode()
+                return json.dumps({"candidates": [{"content": {"parts": [{"text": "Snapshot reviewed; risk gate remains WAIT."}]}}]}).encode()
 
         with patch.object(api, "_get_signals", return_value=payload), \
-             patch.dict(os.environ, {"OPENAI_API_KEY": "test-key", "OPENAI_MODEL": "gpt-4o-mini", "OPENROUTER_API_KEY": ""}, clear=False), \
+             patch.dict(os.environ, {"GEMINI_API_KEY": "test-key", "GEMINI_MODEL": "gemini-2.5-flash", "GOOGLE_API_KEY": "", "OPENAI_API_KEY": "openai-key-must-not-be-used", "OPENAI_MODEL": "gpt-4o-mini", "OPENROUTER_API_KEY": "router-key-must-not-be-used"}, clear=False), \
              patch.object(api.urllib.request, "urlopen", return_value=FakeResponse()):
             response = self.client.post(
                 "/v1/ai/chat", headers=self.device_headers,
@@ -293,7 +356,7 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         data = response.json()
         self.assertTrue(data["llm_used"])
-        self.assertEqual(data["provider"], "openai")
+        self.assertEqual(data["provider"], "gemini")
         self.assertEqual(data["answer"], "Snapshot reviewed; risk gate remains WAIT.")
         self.assertFalse(data["order_placement_enabled"])
 

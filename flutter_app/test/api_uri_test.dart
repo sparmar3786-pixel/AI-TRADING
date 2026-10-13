@@ -86,6 +86,19 @@ void main() {
     expect(requestedUri!.path, '/v1/ai/chat');
   });
 
+  test('Gemini-only review uses the dedicated signal-service route', () async {
+    Uri? requestedUri;
+    final client = MockClient((request) async {
+      requestedUri = request.url;
+      return http.Response(jsonEncode({'answer': 'test response'}), 200);
+    });
+    addTearDown(client.close);
+    final api = FreshApi('https://legacy.example.test', client, 'https://signals.example.test');
+    await api.geminiChat(index: 'NIFTY', question: 'test');
+    expect(requestedUri!.origin, 'https://signals.example.test');
+    expect(requestedUri!.path, '/v1/ai/gemini-chat');
+  });
+
   test('signals keeps query parameters separate from the path', () async {
     Uri? requestedUri;
     final client = MockClient((request) async {

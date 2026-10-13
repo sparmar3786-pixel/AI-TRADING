@@ -52,6 +52,10 @@ class FreshApi {
 
   static const Set<String> _signalRoutes = <String>{
     '/v1/system/diagnostics',
+    '/v1/ai/status',
+    '/v1/ai/gemini-chat',
+    '/v1/ai/review-signal',
+    '/v1/providers/ai/test',
     '/v1/metadata',
     '/v1/ai/validate',
     '/v1/angel/status',
@@ -76,7 +80,8 @@ class FreshApi {
   Uri _uri(String path) {
     final suffix = path.startsWith('/') ? path : '/' + path;
     final suffixUri = Uri.parse(suffix);
-    final useSignalBackend = _signalRoutes.contains(suffixUri.path) || suffixUri.path.startsWith('/v1/paper/trades/');
+    final useSignalBackend = suffixUri.path != '/v1/ai/chat' &&
+        (_signalRoutes.contains(suffixUri.path) || suffixUri.path.startsWith('/v1/paper/trades/'));
     final routeBase = useSignalBackend ? signalBackendUrl : baseUrl;
     var normalized = routeBase.trim();
     while (normalized.endsWith('/')) {
@@ -329,8 +334,8 @@ class FreshApi {
         'notes': notes,
       });
 
-  /// Gemini + configured cloud fallback can take longer than a normal JSON call.
-  /// Keep this separate from offline Qwen, which runs directly on the handset.
+  /// Gemini-only cloud chat can take longer than a normal JSON call.
+  /// OpenAI and OpenRouter are separately tested validation providers, not chat fallbacks.
   Future<Map<String, dynamic>> aiChat({
     required String index,
     required String question,
@@ -342,6 +347,30 @@ class FreshApi {
           'question': question,
           'history': history,
         },
+        timeout: const Duration(seconds: 40),
+      );
+
+  /// Gemini-only review endpoint on the signal service. The legacy AI/chat
+  /// endpoint remains available for compatibility but is not used by this UI.
+  Future<Map<String, dynamic>> geminiChat({
+    required String index,
+    required String question,
+    List<Map<String, String>> history = const [],
+  }) => postJson(
+        '/v1/ai/gemini-chat',
+        {
+          'index': index,
+          'question': question,
+          'history': history,
+        },
+        timeout: const Duration(seconds: 40),
+      );
+
+  Future<Map<String, dynamic>> reviewSignalWithGemini({
+    required String index,
+  }) => postJson(
+        '/v1/ai/review-signal',
+        {'index': index},
         timeout: const Duration(seconds: 40),
       );
 

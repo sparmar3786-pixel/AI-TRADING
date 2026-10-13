@@ -1,5 +1,6 @@
 <!DOCTYPE html>
-<html lang="hi"><head><meta charset="utf-8">
+<html lang="hi"><head>
+<link rel="icon" href="data:,"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Order Flow</title>
 <style>
@@ -23,11 +24,12 @@ main{flex:1;min-height:0;position:relative}canvas{width:100%;height:100%;display
 #man .cols{columns:1;column-gap:24px}#mx{position:sticky;top:0;float:right;font-weight:700}
 @media(orientation:landscape) and (min-width:560px){#man .cols{columns:2}#man h3{break-after:avoid}#man section{break-inside:avoid}}
 .rr{color:var(--r)}.gg{color:var(--g)}
+body.fullview header{height:0;padding:0;border:0;overflow:visible;display:block}body.fullview header>*{display:none}body.fullview #fs{display:block;position:fixed;top:8px;right:8px;z-index:20;background:#121821}body.fullview #info{display:none}body.fullview main{flex:1}
 </style></head><body>
 <header>
  <select id="sym"><optgroup label="Indian Indices"><option>NIFTY</option><option>BANKNIFTY</option><option>FINNIFTY</option><option>MIDCPNIFTY</option><option>SENSEX</option><option>BANKEX</option></optgroup><optgroup label="MCX Commodity Futures"><option>CRUDEOIL</option><option>CRUDEOILM</option><option>NATURALGAS</option><option>NATGASMINI</option><option>GOLD</option><option>GOLDM</option><option>SILVER</option><option>SILVERM</option><option>COPPER</option><option>ZINC</option><option>ALUMINIUM</option><option>LEAD</option><option>NICKEL</option><option>MENTHAOIL</option><option>CASTORSEED</option><option>COTTON</option><option>RUBBER</option></optgroup></select>
- <select id="tf"><option value="1">1m</option><option value="3">3m</option><option value="5">5m</option><option value="15">15m</option><option value="30">30m</option><option value="60">1h</option><option value="1440">1D · 5Y</option></select>
- <button id="zo">−</button><button id="zi">+</button><button id="lt">Live ⇥</button><button id="hp">? Manual</button>
+ <select id="tf"><option value="1">1m</option><option value="3">3m</option><option value="5">5m</option><option value="15">15m</option><option value="30">30m</option><option value="60">1h</option><option value="1440">1 day</option><option value="10080">1 week</option></select>
+ <button id="zo">−</button><button id="zi">+</button><button id="lt">Live ⇥</button><button id="fs">⛶ Full</button><button id="hp">? Manual</button>
  <span id="st">...</span>
 </header>
 <div id="info"></div>
@@ -40,14 +42,15 @@ main{flex:1;min-height:0;position:relative}canvas{width:100%;height:100%;display
 <section><h3>6. Candle ke neeche</h3><ul><li><b>Δ (Delta)</b> = Buy − Sell volume. Plus (hara) = buyers jeete, minus (laal) = sellers jeete.</li><li><b>Vol</b> = total volume.</li><li><b>Buy ord / Sell ord</b> = bid aur ask ke best 5 levels me kitne orders lage hain.</li></ul></section>
 <section><h3>7. Padhne ke simple tareeke</h3><ul><li>Price upar + Δ plus = move mazboot.</li><li>Price upar par Δ minus = kamzor move (divergence), palatne ka chance.</li><li>Neeche ke levels pe bhaari sell volume ke baad bhi price na gire = buyers absorb kar rahe hain.</li></ul><p>Ye sirf samajhne ke liye hai, trading advice nahi.</p></section>
 <section><h3>8. Status (upar right)</h3><ul><li><b>● LIVE</b> = market khula, live data aa raha hai.</li><li><b>AFTER MARKET</b> = market band, last save hua data dikh raha hai (date + time ke saath).</li><li><b>Reconnecting</b> = net/server issue, apne aap dobara judega.</li></ul></section>
-<section><h3>9. Controls</h3><ul><li>Dropdown: index aur timeframe (1/3/5/15/30 min, 1 hour) badlo.</li><li>Chart ko ungli/mouse se drag karo = peeche ki candles.</li><li>+ / − ya mouse wheel = zoom.</li><li><b>Live ⇥</b> = latest candle pe wapas.</li><li>Phone ko landscape karo = zyada candles dikhengi.</li></ul></section>
+<section><h3>9. Controls</h3><ul><li>Dropdown: index aur timeframe (1/3/5/15/30 min, 1 hour, 1 day, 1 week) badlo.</li><li>Chart ko ungli/mouse se drag karo = peeche ki candles.</li><li>+ / − ya mouse wheel = zoom.</li><li><b>Live ⇥</b> = latest candle pe wapas.</li><li>Phone ko landscape karo = zyada candles dikhengi.</li></ul></section>
 <section><h3>10. Zaroori baatein</h3><ul><li>Buyer/seller <b>estimate</b> hai (LTP ko bid/ask se compare karke), exchange ka exact aggressor data nahi.</li><li>Index ka data uske nearest-expiry <b>futures</b> se aata hai, kyunki index spot pe volume nahi hota.</li><li>Order count sirf top-5 depth ka hai.</li><li>Data server chalu hone ke baad se banta hai.</li></ul></section>
 </div></div></div>
 <main><canvas id="c"></canvas></main>
 <script>
 const $=i=>document.getElementById(i),cv=$('c'),ctx=cv.getContext('2d');
 const FOOTPRINT_WS_URL = '__FOOTPRINT_WS_URL__';
-let sym='NIFTY',tf=1,step=5,raw=[],mode='',colW=100,off=0,ws,dirty=1,retry=0,historyBars=0;
+let sym='NIFTY',tf=1,step=5,raw=[],mode='',colW=100,off=0,ws,dirty=1,retry=0,historyBars=0,lastCacheWrite=0;
+const cacheKey=()=>`ai_trading_orderflow_${sym}_${tf}`;
 const COMMODITY_STEPS={CRUDEOIL:1,CRUDEOILM:1,NATURALGAS:0.5,NATGASMINI:0.5,GOLD:100,GOLDM:10,SILVER:100,SILVERM:10,COPPER:1,ZINC:0.5,ALUMINIUM:0.5,LEAD:0.5,NICKEL:1,MENTHAOIL:1,CASTORSEED:10,COTTON:10,RUBBER:1};
 const isCommodity=s=>Object.prototype.hasOwnProperty.call(COMMODITY_STEPS,s);
 const priceStep=s=>COMMODITY_STEPS[s]||(({SENSEX:20,BANKEX:20,BANKNIFTY:10})[s]||5);
@@ -58,15 +61,18 @@ const f=n=>{const a=Math.abs(n);return a>=1e7?(n/1e7).toFixed(2)+'Cr':a>=1e5?(n/
 
 function connect(){
  if(ws){ws.onclose=null;ws.close()}
- raw=[];off=0;
+ off=0;
+ try{const saved=JSON.parse(localStorage.getItem(cacheKey())||'[]');raw=Array.isArray(saved)?saved.filter(c=>c&&Number.isFinite(Number(c.t))):[]}catch(_){raw=[]}
+ historyBars=raw.length;if(raw.length)mode='after_market';dirty=1;
  const endpoint=FOOTPRINT_WS_URL==='__FOOTPRINT_WS_URL__' ? ((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws') : FOOTPRINT_WS_URL;
  ws=new WebSocket(endpoint+'?symbol='+encodeURIComponent(sym)+'&tf='+encodeURIComponent(String(tf)));
  ws.onopen=()=>{retry=0};
  ws.onmessage=e=>{const m=JSON.parse(e.data);mode=String(m.mode||'').toLowerCase();
-  if(m.type==='snap'){raw=Array.isArray(m.candles)?m.candles:[];step=Number(m.step)||priceStep(sym);historyBars=Number(m.history_bars_returned)||raw.length}
+  if(m.type==='snap'){const incoming=Array.isArray(m.candles)?m.candles:[];const merged=new Map(raw.map(c=>[Number(c.t),c]));incoming.forEach(c=>{if(c&&Number.isFinite(Number(c.t)))merged.set(Number(c.t),c)});raw=[...merged.values()].sort((a,b)=>a.t-b.t).slice(-2000);step=Number(m.step)||priceStep(sym);historyBars=Number(m.history_bars_returned)||raw.length}
   else if(m.candle&&typeof m.candle==='object'){const c=m.candle,l=raw[raw.length-1];if(l&&l.t===c.t)raw[raw.length-1]=c;else if(!l||c.t>l.t)raw.push(c);else{const i=raw.findIndex(x=>x.t===c.t);if(i>=0)raw[i]=c}}
   else if(Array.isArray(m.candles)){raw=m.candles}
   const latestCandle=(m.candle&&typeof m.candle==='object')?m.candle:raw[raw.length-1];
+  if(Date.now()-lastCacheWrite>10000){try{localStorage.setItem(cacheKey(),JSON.stringify(raw.slice(-2000)));lastCacheWrite=Date.now()}catch(_){}}
   if(window.Telemetry&&typeof window.Telemetry.postMessage==='function'){
    window.Telemetry.postMessage(JSON.stringify({
     symbol:m.symbol||sym,mode:m.mode||mode,live:m.live===true,
@@ -80,10 +86,10 @@ function connect(){
 }
 function status(){const s=$('st'),l=raw[raw.length-1],hasLevels=raw.some(c=>c.lv&&Object.keys(c.lv).length>0);
  s.className=mode==='live'?'live':(mode==='wait'||mode==='closed'||mode==='after_market')?'closed':'';
- s.textContent=tf===1440?(mode==='live'?'● LIVE · ':'● DAILY · ')+historyBars+' bars'+(hasLevels?' · DEPTH':' · DEPTH UNAVAILABLE'):mode==='live'?(hasLevels?'● LIVE':'● LIVE · DEPTH UNAVAILABLE'):mode==='wait'?'● CLOSED / WAITING FOR BROKER DATA':'● CLOSED · LAST DATA '+(l?dm(l.t)+' '+hm(l.t):'—')}
+ s.textContent=(tf===1440||tf===10080)?(mode==='live'?'● LIVE · ':'● HISTORICAL · ')+historyBars+' bars'+(hasLevels?' · DEPTH':' · DEPTH UNAVAILABLE'):mode==='live'?(hasLevels?'● LIVE':'● LIVE · DEPTH UNAVAILABLE'):mode==='wait'?'● CLOSED / WAITING FOR BROKER DATA':'● CLOSED · LAST DATA '+(l?dm(l.t)+' '+hm(l.t):'—')}
 
 function agg(){const m=new Map();
- for(const c of raw){const k=Math.floor(c.t/(tf*60))*tf*60;let a=m.get(k);
+ for(const c of raw){const k=tf===10080?Math.floor((c.t+19800+259200)/604800)*604800-259200-19800:Math.floor(c.t/(tf*60))*tf*60;let a=m.get(k);
   if(!a){a={t:k,o:c.o,h:c.h,l:c.l,c:c.c,lv:{},v:0,d:0,bo:null,so:null};m.set(k,a)}
   a.h=Math.max(a.h,c.h);a.l=Math.min(a.l,c.l);a.c=c.c;a.v+=Number(c.v)||0;a.d+=Number(c.d)||0;a.bo=c.bo??a.bo;a.so=c.so??a.so;
   for(const p in c.lv){const x=a.lv[p]||(a.lv[p]=[0,0]);x[0]+=c.lv[p][0];x[1]+=c.lv[p][1]}}
@@ -146,6 +152,7 @@ cv.onpointermove=e=>{if(dx==null)return;const d=Math.round((e.clientX-dx)/colW*1
 cv.onpointerup=()=>dx=null;
 cv.onwheel=e=>{e.preventDefault();colW=Math.max(64,Math.min(180,colW-Math.sign(e.deltaY)*8));dirty=1};
 $('zi').onclick=()=>{colW=Math.min(180,colW+12);dirty=1};
+$('fs').onclick=()=>{document.body.classList.toggle('fullview');$('fs').textContent=document.body.classList.contains('fullview')?'▣ Normal':'⛶ Full';dirty=1};
 $('zo').onclick=()=>{colW=Math.max(64,colW-12);dirty=1};
 $('lt').onclick=()=>{off=0;dirty=1};
 $('sym').onchange=e=>{sym=e.target.value;step=priceStep(sym);connect()};

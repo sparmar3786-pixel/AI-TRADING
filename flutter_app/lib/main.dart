@@ -8,21 +8,24 @@ import 'api.dart';
 import 'config.dart';
 import 'trade_engine_page.dart';
 import 'broker_home_prototype_page.dart';
-import 'pdf_report_solutions_page.dart';
 import 'ai_chat_page.dart';
 import 'quant_engine_lab_page.dart';
 import 'order_flow_page.dart';
 import 'strategy_library_page.dart';
 import 'flow_monitor_page.dart';
+import 'risk_calculator_page.dart';
+import 'gemini_signal_review.dart';
+import 'background_monitor.dart';
 import 'daily_ai_memory.dart';
 import 'daily_ai_memory_page.dart';
 
-const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Market Diagnostics','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','PDF Report & Fixes','AI Chat','Order Flow','Quant Engine Lab','Strategy Library','Flow Monitor','AI Memory'];
+const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Market Diagnostics','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','AI Chat','Order Flow','Quant Engine Lab','Strategy Library','Flow Monitor','AI Memory'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
 const commodityOptionUnderlyings = ['CRUDEOIL','CRUDEOILM','NATURALGAS','NATGASMINI','GOLD','GOLDM','SILVER','SILVERM','COPPER','ZINC','ALUMINIUM','LEAD','NICKEL'];
 const optionUnderlyings = [...indexes, ...commodityOptionUnderlyings];
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   // Capture Dart/Flutter errors in logcat so a phone-side crash can be
   // diagnosed without silently swallowing the framework's default handling.
   FlutterError.onError = (details) {
@@ -35,6 +38,7 @@ void main() {
     debugPrintStack(stackTrace: stack);
     return false; // Leave unhandled errors visible to Flutter's runtime.
   };
+  await initializeBackgroundMonitor();
   runApp(const FreshApp());
 }
 
@@ -636,7 +640,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         OIPage(signals:signals, market:market, commodities:commodities, optionChains:optionChainsByIndex),
         IndicatorsPage(selected:selectedIndex,signal:_signal(selectedIndex),fast:emaFast,slow:emaSlow,onChanged:(f,s){setState((){emaFast=f;emaSlow=s;});refresh();},onIndex:(v)=>setState(()=>selectedIndex=v)),
         SignalPage(backendUrl:backendUrl,liveStatus:liveTrading,index:selectedIndex,signals:signals,ai:ai,aiProviders:aiProviderStatus,tradePlans:tradePlans,market:market,onChanged:(v)=>setState(()=>selectedIndex=v)),
-        RiskPage(index:selectedIndex,signal:_signal(selectedIndex),plans:tradePlans),
+        RiskPage(index:selectedIndex,signal:_signal(selectedIndex),plans:tradePlans,market:market,commodities:commodities),
         CommodityPage(items:commodities),
         BacktestingPage(backendUrl: backendUrl),
         ApiPage(backendUrl:backendUrl,signalBackendUrl:signalBackendUrl,feed:feed,storeDiagnostics:storeDiagnostics,market:market,onSaved:(url){setState(()=>backendUrl=url);refresh();}),
@@ -656,7 +660,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         ),
         const ApiRailwayPage(),
         MarketDiagnosticsPage(market: market, signals: signals, feed: feed, diagnostics: storeDiagnostics, lastFetch: lastFetch),
-        TradingSetupPage(backendUrl: backendUrl, apiOnline: apiOnline, signalsOnline: signalsEndpointOnline, angelOnline: angelOnline, market: market, signals: signals, ai: ai, liveStatus: liveTrading, lastFetch: lastFetch),
+        TradingSetupPage(backendUrl: backendUrl, selectedIndex: selectedIndex, aiProviders: aiProviderStatus, apiOnline: apiOnline, signalsOnline: signalsEndpointOnline, angelOnline: angelOnline, market: market, signals: signals, ai: ai, liveStatus: liveTrading, lastFetch: lastFetch),
         ResearchEnginesPage(market: market, signals: signals, ai: ai, commodities: commodities, optionChains: optionChainsByIndex, lastFetch: lastFetch, selectedIndex: selectedIndex, onIndexChanged: (value) => setState(() => selectedIndex = value)),
         TradeEnginePage(
           backendUrl: backendUrl,
@@ -678,7 +682,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           status: status,
           onIndexSelected: (value) => setState(() => selectedIndex = value),
         ),
-        const PdfReportSolutionsPage(),
         AiChatPage(backendUrl: backendUrl, selectedIndex: selectedIndex),
         OrderFlowPage(signalBackendUrl: signalBackendUrl),
         Builder(
@@ -1200,6 +1203,12 @@ class ResearchEnginesPage extends StatelessWidget {
     }
     final m = commodity ?? Map<String, dynamic>.from(market[selectedIndex] as Map? ?? const {});
     final s = commodity ?? Map<String, dynamic>.from(signals[selectedIndex] as Map? ?? const {});
+    final strategySuite = Map<String, dynamic>.from(
+      s['strategy_suite'] as Map? ?? m['strategy_suite'] as Map? ?? const {},
+    );
+    final strategySignals = Map<String, dynamic>.from(strategySuite['strategies'] as Map? ?? const {});
+    final strategyVotes = Map<String, dynamic>.from(strategySuite['votes'] as Map? ?? const {});
+    final strategyLevels = Map<String, dynamic>.from(strategySuite['support_resistance'] as Map? ?? const {});
     final indicators = Map<String, dynamic>.from(s['indicators'] as Map? ?? const {});
     final chain = (m['option_chain'] as List?) ?? optionChains[selectedIndex] ?? const <dynamic>[];
     final chainRows = chain.whereType<Map>().map((row) => Map<String, dynamic>.from(row)).toList();
@@ -1272,6 +1281,26 @@ class ResearchEnginesPage extends StatelessWidget {
           if (entry.value is Map)
             InfoRow(entry.key.replaceAll('_', ' '), (entry.value as Map)['state']?.toString() ?? 'UNKNOWN'),
         const Divider(height: 22),
+        const Text('UNIFIED STRATEGY SUITE', style: TextStyle(fontWeight: FontWeight.w900)),
+        InfoRow('Suite status', (strategySuite['status'] ?? 'NOT AVAILABLE').toString()),
+        InfoRow('Consensus signal', (strategySuite['signal'] ?? 'WAIT').toString()),
+        InfoRow('Market regime', (strategySuite['market_regime'] ?? 'UNKNOWN').toString()),
+        InfoRow('Long votes', (strategyVotes['LONG'] ?? '—').toString()),
+        InfoRow('Short votes', (strategyVotes['SHORT'] ?? '—').toString()),
+        InfoRow('OI build-up context', (strategySuite['oi_context'] ?? 'UNKNOWN').toString()),
+        InfoRow('ATR 14', _val(strategySuite['atr_14'])),
+        InfoRow('Support (20 bars)', _val(strategyLevels['support'])),
+        InfoRow('Resistance (20 bars)', _val(strategyLevels['resistance'])),
+        for (final entry in strategySignals.entries)
+          InfoRow(entry.key.replaceAll('_', ' ').toUpperCase(), (entry.value ?? 'WAIT').toString()),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+          child: Text(
+            'Strategy suite is research-only. Missing OI change stays UNKNOWN; the suite cannot override the five-layer risk gate or place orders.',
+            style: TextStyle(color: Colors.white70, fontSize: 11),
+          ),
+        ),
+        const Divider(height: 22),
         const Text('SIGNAL & VALIDATION OUTPUT', style: TextStyle(fontWeight: FontWeight.w900)),
         InfoRow('Strategy candidate', (s['decision'] ?? 'NO DATA').toString()),
         InfoRow('Validated decision', (validation['decision'] ?? 'WAIT').toString()),
@@ -1297,6 +1326,8 @@ class ResearchEnginesPage extends StatelessWidget {
 class TradingSetupPage extends StatelessWidget {
   const TradingSetupPage({
     required this.backendUrl,
+    required this.selectedIndex,
+    required this.aiProviders,
     required this.apiOnline,
     required this.signalsOnline,
     required this.angelOnline,
@@ -1308,6 +1339,8 @@ class TradingSetupPage extends StatelessWidget {
     super.key,
   });
   final String backendUrl;
+  final String selectedIndex;
+  final Map<String, dynamic> aiProviders;
   final bool apiOnline, signalsOnline, angelOnline;
   final Map<String, dynamic> market, signals, ai, liveStatus;
   final String? lastFetch;
@@ -1325,6 +1358,9 @@ class TradingSetupPage extends StatelessWidget {
         final optionRows = market.values.whereType<Map>().fold<int>(0, (sum, row) => sum + (((row['option_chain'] as List?) ?? const []).length));
         final indicatorReady = signals.values.whereType<Map>().any((row) => row['indicators'] is Map);
         final validationReady = signals.values.whereType<Map>().any((row) => row['live_validation'] is Map);
+        final providerMap = Map<String, dynamic>.from(aiProviders['providers'] as Map? ?? const {});
+        final geminiProvider = Map<String, dynamic>.from(providerMap['gemini'] as Map? ?? const {});
+        final geminiReady = geminiProvider['ok'] == true;
         final aiReady = ai.values.whereType<Map>().any((row) => row['action'] != null);
         final checks = <(String, bool, String)>[
           ('1. Backend API', apiOnline, backendUrl),
@@ -1332,13 +1368,14 @@ class TradingSetupPage extends StatelessWidget {
           ('3. Live market data', liveIndexes > 0, '$liveIndexes of ${indexes.length} indexes fresh'),
           ('4. Indicators & strategy engine', indicatorReady, 'Deterministic indicators and OI strategy output'),
           ('5. Option chain / OI', optionRows > 0, '$optionRows option quotes in latest snapshots'),
-          ('6. Signal risk validation', validationReady, 'Fail-closed validation payload'),
+          ('6. Signal risk validation', validationReady, 'Backend supplies explicit fail-closed checks'),
           ('7. Historical backtest', angelOnline, 'Historical candle replay requires an authenticated Angel One session'),
-          ('8. AI analysis', aiReady, 'Cloud AI result returned by backend'),
-          ('9. Execution / order status', liveStatus.isNotEmpty, '${liveStatus['mode'] ?? 'Status not returned'} • live orders remain gated by risk and explicit approval'),
+          ('8. Gemini provider connectivity', geminiReady, (geminiProvider['status'] ?? 'Real Gemini test required').toString()),
+          ('9. AI signal analysis', aiReady, 'Review is advisory; provider connectivity alone is not a signal decision'),
+          ('10. Execution / order status', liveStatus.isNotEmpty, '${liveStatus['mode'] ?? 'Status not returned'} • live orders remain gated by risk and explicit approval'),
         ];
         return Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('LIVE SETUP CHECKLIST • 9 MODULES', style: TextStyle(fontWeight: FontWeight.w900)),
+          const Text('LIVE SETUP CHECKLIST • 10 MODULES', style: TextStyle(fontWeight: FontWeight.w900)),
           const SizedBox(height: 4),
           Text('Last snapshot: ${lastFetch ?? 'No market snapshot'}', style: const TextStyle(fontSize: 11, color: Colors.white60)),
           const Divider(),
@@ -1359,6 +1396,8 @@ class TradingSetupPage extends StatelessWidget {
           )),
         ])));
       }),
+      const SizedBox(height: 8),
+      GeminiSignalReview(backendUrl: backendUrl, selectedIndex: selectedIndex),
       const SizedBox(height: 8),
       const Text('Broker choice: Angel One SmartAPI. No Zerodha/Kite integration is required for this app.', style: TextStyle(color: Color(0xFF12D6FF), fontWeight: FontWeight.w700)),
       const SizedBox(height: 12),
@@ -1860,7 +1899,7 @@ class SignalPage extends StatelessWidget {
       Card(child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          InfoRow('AI mode', (agentAnalysis['mode'] ?? 'WAITING FOR OPENAI / OPENROUTER').toString()),
+          InfoRow('AI mode', (agentAnalysis['mode'] ?? (openaiProvider['ok'] == true ? 'OPENAI CONNECTED • SECONDARY REVIEW' : openrouterProvider['ok'] == true ? 'OPENROUTER CONNECTED • SECONDARY REVIEW' : 'WAITING FOR A REAL PROVIDER TEST')).toString()),
           InfoRow('OpenAI provider', (openaiProvider['status'] ?? 'STATUS NOT CHECKED').toString()),
           InfoRow('OpenAI model', (openaiProvider['model'] ?? '—').toString()),
           InfoRow('OpenRouter provider', (openrouterProvider['status'] ?? 'STATUS NOT CHECKED').toString()),
@@ -1887,7 +1926,9 @@ class SignalPage extends StatelessWidget {
           Text((agentAnalysis['safety_note'] ?? 'Specialist analysis appears after the cloud AI provider responds. Missing data must remain unavailable.').toString(), style: const TextStyle(fontSize: 11)),
         ]),
       )),
-      const Section('Live AI Validation'),
+      const Section('Gemini Signal Review'),
+      GeminiSignalReview(backendUrl: backendUrl, selectedIndex: index),
+            const Section('Live AI Validation'),
       Card(child:Padding(
         padding:const EdgeInsets.all(12),
         child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
@@ -1931,10 +1972,12 @@ class SignalPage extends StatelessWidget {
 }
 
 class RiskPage extends StatelessWidget {
-  const RiskPage({required this.index, required this.signal, required this.plans, super.key});
+  const RiskPage({required this.index, required this.signal, required this.plans, required this.market, required this.commodities, super.key});
   final String index;
   final Map<String, dynamic> signal;
   final List<dynamic> plans;
+  final Map<String, dynamic> market;
+  final List<dynamic> commodities;
 
   @override
   Widget build(BuildContext context) {
@@ -1944,6 +1987,11 @@ class RiskPage extends StatelessWidget {
       padding: const EdgeInsets.all(10),
       children: [
         Section('Risk — ' + index),
+        RiskCalculator(
+          selectedIndex: index,
+          marketByIndex: market,
+          commodities: commodities,
+        ),
         InfoRow('Entry', _val(signal['entry'])),
         InfoRow('Stop Loss', _val(signal['stop_loss'])),
         InfoRow('Target', _val(signal['target'])),
@@ -2182,8 +2230,8 @@ class _AiAccessState extends State<AiAccessPage>{
         final name = (item['provider'] ?? '').toString();
         if (name == 'gemini' || name == 'openai' || name == 'openrouter') {
           final check = Map<String, dynamic>.from(item);
-          check['configured'] = true;
-          check['status'] = check['ok'] == true ? 'ok' : (check['error'] ?? 'test_failed').toString();
+          check['configured'] = item['configured'] == true;
+          check['status'] = check['ok'] == true ? 'ok' : (item['status'] ?? item['error'] ?? 'test_failed').toString();
           updated[name] = check;
         }
       }
@@ -2268,7 +2316,7 @@ class _AiAccessState extends State<AiAccessPage>{
 
   @override
   Widget build(BuildContext context) => ListView(padding: const EdgeInsets.all(14), children: [
-    const Section('CLOUD AI • GEMINI + OPENAI + OPENROUTER'),
+    const Section('CLOUD AI • GEMINI CHAT + PROVIDER VALIDATION'),
     Card(child: ListTile(
       leading: Icon(
         providers['gemini']?['ok'] == true ? Icons.cloud_done : Icons.cloud_off,

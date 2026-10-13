@@ -16,6 +16,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import asyncio
 from datetime import date, datetime, time as dt_time, timedelta, timezone
@@ -25,6 +26,7 @@ from zoneinfo import ZoneInfo
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -38,6 +40,7 @@ from quant_engine import evaluate_five_layer_signal, evaluate_futures_signal
 
 from strategies.technical import atr as technical_atr, ema as technical_ema, rsi as technical_rsi, rsi_reversion, sma as technical_sma
 from strategies.advanced import bollinger_bands, macd as advanced_macd, donchian_channels
+from strategies.suite import evaluate_strategy_suite
 from risk.position_sizing import position_size
 
 app = FastAPI(title="AI-TRADING Read-only Signals API", version="1.0.0")
@@ -783,12 +786,27 @@ def _session_range() -> tuple[str, str]:
 
 
 def _wait_signal(index: str, reason: str) -> dict[str, Any]:
+    """A blocked/missing-data signal still returns the full validation contract."""
     return {
         "decision": "WAIT", "candidate_decision": "WAIT", "index": index,
         "entry": None, "stop_loss": None, "target": None, "strike": None,
         "expiry": None, "signal_only": True, "layers": {},
         "reasons": [reason], "signal_stability": {"state": "BLOCKED", "required_minutes": 10},
         "data_source": "angelone_smartapi", "data_fresh": False,
+        "five_layer_engine": {"layers": {}, "decision": "WAIT", "passed_layers": 0, "total_layers": 0},
+        "quant_engine": {"layers": {}, "decision": "WAIT", "passed_layers": 0, "total_layers": 0},
+        "live_validation": {
+            "decision": "WAIT", "verdict": "WAIT",
+            "checks": {
+                "fresh_market_data": False, "valid_option_quote": False,
+                "five_layer_engine": False, "valid_sl_target": False,
+                "risk_checks": False, "ai_direction_consistent": False,
+            },
+            "market_direction": "UNKNOWN", "market_age_seconds": None,
+            "option_age_seconds": None, "reward_risk": None,
+            "ai_decision": "NOT_RUN", "blocks": ["NO_LIVE_MARKET_DATA", reason],
+            "ai_conflict": False, "signal_only": True, "order_placement_enabled": False,
+        },
     }
 
 
@@ -859,6 +877,63 @@ def _market_chain_rows(options: list[dict[str, Any]]) -> list[dict[str, Any]]:
         })
     return output
 
+
+def _live_validation_contract(
+    result: dict[str, Any],
+    engine_layers: dict[str, Any],
+    option_age_seconds: Any,
+    ai_review: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return explicit fail-closed checks for the Flutter Risk & Validation panel."""
+    candidate = str(result.get("decision") or "WAIT").upper()
+    is_candidate = candidate in ("CALL BUY", "PUT BUY")
+    data_layer = dict(engine_layers.get("data_quality") or {})
+    option_layer = dict(engine_layers.get("option_selection") or {})
+    risk_layer = dict(engine_layers.get("risk_levels") or {})
+    age = _number(data_layer.get("age_seconds"))
+    option_age = _number(option_age_seconds)
+    fresh_market = data_layer.get("pass") is True and age is not None and 0 <= age <= 60
+    valid_option_quote = option_layer.get("pass") is True and option_age is not None and 0 <= option_age <= 60
+    entry = _number(result.get("entry"))
+    stop = _number(result.get("stop_loss"))
+    target = _number(result.get("target"))
+    valid_levels = entry is not None and stop is not None and target is not None and 0 < stop < entry < target
+    five_layer_pass = len(engine_layers) >= 5 and all(
+        isinstance(layer, dict) and layer.get("pass") is True for layer in engine_layers.values()
+    )
+    risk_pass = risk_layer.get("pass") is True
+    ai_conflict = False
+    ai_decision = "NOT_RUN"
+    if isinstance(ai_review, dict) and (ai_review.get("ok") is True or ai_review.get("validated") is True):
+        ai_decision = str(ai_review.get("decision") or ai_review.get("action") or "WAIT").upper()
+        if ai_decision in ("WAIT", "REJECT", "CALL BUY", "PUT BUY"):
+            ai_conflict = ai_decision != candidate
+    checks = {
+        "fresh_market_data": fresh_market,
+        "valid_option_quote": valid_option_quote,
+        "five_layer_engine": five_layer_pass,
+        "valid_sl_target": valid_levels,
+        "risk_checks": risk_pass,
+        "ai_direction_consistent": not ai_conflict,
+    }
+    blocks = [name.upper() for name, passed in checks.items() if not passed]
+    if not is_candidate:
+        blocks.append("NO_QUALIFIED_STRATEGY_CANDIDATE")
+    final_pass = is_candidate and all(checks.values())
+    return {
+        "decision": candidate if final_pass else "WAIT",
+        "verdict": "PASS" if final_pass else "WAIT",
+        "checks": checks,
+        "market_direction": (dict(engine_layers.get("trend_sentiment") or {}).get("trend") or "UNKNOWN"),
+        "market_age_seconds": age,
+        "option_age_seconds": option_age,
+        "reward_risk": risk_layer.get("reward_risk") or risk_layer.get("risk_reward"),
+        "ai_decision": ai_decision,
+        "blocks": blocks,
+        "ai_conflict": ai_conflict,
+        "signal_only": True,
+        "order_placement_enabled": False,
+    }
 
 def _index_snapshot(
     adapter: AngelOneReadOnly,
@@ -1117,15 +1192,19 @@ def _index_snapshot(
         "target": result.get("target"),
         "signal_only": True,
     }
-    result["live_validation"] = {
-        "decision": result.get("decision", "WAIT"),
-        "verdict": "PASS" if result.get("decision") in ("CALL BUY", "PUT BUY") else "WARN",
-        "market_direction": result.get("layers", {}).get("trend_sentiment", {}).get("trend", "UNKNOWN"),
-        "market_age_seconds": result.get("layers", {}).get("data_quality", {}).get("age_seconds"),
-        "option_age_seconds": next((item.get("age_seconds") for item in chain_payload if item.get("strike") == result.get("strike")), None),
-        "ai_decision": "NOT_CONFIGURED",
-        "blocks": list(result.get("reasons") or []),
-    }
+    option_age_seconds = next((item.get("age_seconds") for item in chain_payload if item.get("strike") == result.get("strike")), None)
+    live_validation = _live_validation_contract(result, engine_layers, option_age_seconds)
+    if live_validation["verdict"] != "PASS":
+        if result.get("decision") in ("CALL BUY", "PUT BUY"):
+            result["candidate_decision"] = result.get("decision")
+        result["decision"] = "WAIT"
+        result["five_layer_engine"]["decision"] = "WAIT"
+        result["quant_engine"] = result["five_layer_engine"]
+        result["trade_plan"]["selection_grade"] = "WAIT"
+        existing_reasons = list(result.get("reasons") or [])
+        existing_reasons.extend("VALIDATION_BLOCKED:" + item for item in live_validation["blocks"])
+        result["reasons"] = list(dict.fromkeys(existing_reasons))
+    result["live_validation"] = live_validation
     chart_5m: list[dict[str, Any]] = []
     for candle in candle_rows:
         if not isinstance(candle, (list, tuple)) or len(candle) < 6:
@@ -1153,6 +1232,10 @@ def _index_snapshot(
             "low": min(row["low"] for row in group), "close": group[-1]["close"],
             "volume": sum(value for value in volumes if value is not None) if any(value is not None for value in volumes) else None,
         })
+    # Run the full local research suite against the same completed 5m
+    # candles exposed to the app. It remains advisory and never overrides the
+    # deterministic five-layer risk gate or authorizes an order.
+    result["strategy_suite"] = evaluate_strategy_suite(chart_5m, oi_change=None)
     result["indicators"] = indicators
     result["oi_summary"] = {
         "call_oi": call_oi, "put_oi": put_oi, "pcr": pcr,
@@ -1180,6 +1263,7 @@ def _index_snapshot(
         "indicators": indicators,
         "timeframes": {"1m": [], "5m": chart_5m, "15m": chart_15m},
         "option_chain": chain_payload,
+        "strategy_suite": result["strategy_suite"],
     }
     return result, market
 
@@ -1205,9 +1289,9 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
     await websocket.accept()
     symbol = (websocket.query_params.get("symbol") or "NIFTY").strip().upper()
     timeframe = (websocket.query_params.get("tf") or "1").strip().lower()
-    daily_mode = timeframe in {"1440", "1d", "d", "day"}
+    daily_mode = timeframe in {"1440", "10080", "1d", "1w", "d", "day", "week", "w"}
     history_mode = "ONE_DAY" if daily_mode else "ONE_MINUTE"
-    max_candles = 2000 if daily_mode else 250
+    max_candles = 2000 if daily_mode else 500
     supported_symbols = set(INDEXES) | {"CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM", "SILVER", "SILVERM", "COPPER", "ZINC", "ALUMINIUM", "LEAD", "NICKEL", "MENTHAOIL", "CASTORSEED", "COTTON", "RUBBER"}
     if symbol not in supported_symbols:
         await websocket.send_json({"type": "status", "mode": "wait", "message": "Unsupported index or commodity symbol"})
@@ -1218,11 +1302,19 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
             [dict(item) for item in _footprint_history.get(symbol, [])]
             if _footprint_history_interval.get(symbol) == history_mode else []
         )
+    if not daily_mode:
+        # Intraday views must show this whole session, not the last 250 minutes
+        # carried over from a prior day. Keep same-day cached candles on tab changes.
+        today = datetime.now(IST).date()
+        candles = [
+            item for item in candles
+            if datetime.fromtimestamp(int(item.get("t") or 0), IST).date() == today
+        ]
     last_trade_volume: float | None = None
     last_source_timestamp: str | None = None
     future: dict[str, str] | None = None
     rows: list[dict[str, Any]] = []
-    history_loaded = False
+    history_loaded = bool(candles)
     daily_history_sent = False
     try:
         while True:
@@ -1387,6 +1479,12 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
             await websocket.close()
         except Exception:
             pass
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> Response:
+    """Browsers and WebViews request this implicitly; it is not an API failure."""
+    return Response(status_code=204)
 
 
 @app.get("/health")
@@ -2200,9 +2298,9 @@ def _provider_key_present(*names: str) -> bool:
 @app.get("/v1/ai/status")
 def ai_status(_: str = Depends(_device)) -> dict[str, Any]:
     providers = [
-        ("gemini", ("GEMINI_API_KEY", "GOOGLE_API_KEY"), os.getenv("GEMINI_MODEL", "gemini")),
-        ("openrouter", ("OPENROUTER_API_KEY",), os.getenv("OPENROUTER_MODEL", "openrouter/free")),
-        ("openai", ("OPENAI_API_KEY",), os.getenv("OPENAI_MODEL", "gpt-4o-mini")),
+        ("gemini", ("GEMINI_API_KEY", "GOOGLE_API_KEY"), os.getenv("GEMINI_MODEL", "gemini-2.5-flash")),
+        ("openrouter", ("OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY"), os.getenv("OPENROUTER_MODEL", "openrouter/free")),
+        ("openai", ("OPENAI_API_KEY", "OPEN_AI_API_KEY", "OPENAI_KEY"), os.getenv("OPENAI_MODEL", "gpt-4o-mini")),
     ]
     selected = next((item for item in providers if _provider_key_present(*item[1])), None)
     provider_status = {
@@ -2215,7 +2313,7 @@ def ai_status(_: str = Depends(_device)) -> dict[str, Any]:
         for name, env_names, model_name in providers
     }
     with _lock:
-        for name in ("openai", "openrouter"):
+        for name in ("gemini", "openai", "openrouter"):
             cached = _ai_provider_test_cache.get(name)
             if cached and cached.get("configured") == provider_status[name]["configured"]:
                 provider_status[name] = dict(cached)
@@ -2352,13 +2450,32 @@ def test_ai_providers(_: str = Depends(_device)) -> dict[str, Any]:
         and (_number(market_row.get("ltp")) or 0) > 0
         and actual_age is not None and 0 <= actual_age <= 60
     )
-    checks: list[dict[str, Any]] = [
-        {"provider": "gemini", "configured": _provider_key_present("GEMINI_API_KEY", "GOOGLE_API_KEY"),
-         "ok": False, "status": "configured_not_tested", "verdict": "WAIT",
-         "message": "Gemini remains separate; this button probes OpenAI and OpenRouter."}
-    ]
-    openai_key = os.getenv("OPENAI_API_KEY", "").strip()
-    openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    checks: list[dict[str, Any]] = []
+    gemini_key = (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()
+    gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
+    if gemini_key:
+        try:
+            probe = _run_gemini_completion(gemini_key, gemini_model, [
+                {"role": "system", "content": "You are a connectivity probe. Reply with the exact text GEMINI_OK."},
+                {"role": "user", "content": "Reply with GEMINI_OK only."},
+            ])
+            checks.append({
+                "provider": "gemini", "configured": True, "ok": True, "status": "ok",
+                "model": probe.get("model"), "latency_ms": probe.get("latency_ms"),
+                "verdict": "WAIT", "message": "Gemini authenticated and returned a response.",
+            })
+        except RuntimeError as exc:
+            checks.append({
+                "provider": "gemini", "configured": True, "ok": False, "status": str(exc)[:80],
+                "model": gemini_model, "verdict": "WAIT",
+            })
+    else:
+        checks.append({
+            "provider": "gemini", "configured": False, "ok": False,
+            "status": "not_configured", "verdict": "WAIT",
+        })
+    openai_key = (os.getenv("OPENAI_API_KEY") or os.getenv("OPEN_AI_API_KEY") or os.getenv("OPENAI_KEY") or "").strip()
+    openrouter_key = (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPEN_ROUTER_API_KEY") or "").strip()
     if openai_key:
         checks.append(_run_ai_validation_probe(
             "openai", openai_key, os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip(),
@@ -2371,7 +2488,7 @@ def test_ai_providers(_: str = Depends(_device)) -> dict[str, Any]:
             "https://openrouter.ai/api/v1/chat/completions", market_row))
     else:
         checks.append({"provider": "openrouter", "configured": False, "ok": False, "status": "not_configured", "verdict": "WAIT"})
-    tested = [item for item in checks if item.get("provider") in ("openai", "openrouter")]
+    tested = [item for item in checks if item.get("provider") in ("gemini", "openai", "openrouter")]
     with _lock:
         for item in tested:
             _ai_provider_test_cache[item["provider"]] = dict(item)
@@ -2380,10 +2497,79 @@ def test_ai_providers(_: str = Depends(_device)) -> dict[str, Any]:
         "status": "ok" if succeeded else ("not_configured" if not any(item.get("configured") for item in tested) else "failed"),
         "checks": checks, "providers": {item["provider"]: item for item in checks},
         "market_snapshot_available": bool(market_row.get("source_timestamp") and market_row.get("ltp") is not None),
-        "message": "Actual authenticated model calls completed. AI verdicts are secondary only and cannot override deterministic risk gates."
-            if succeeded else "OpenAI/OpenRouter test did not complete successfully. Inspect each provider status and Railway variables.",
+        "message": "At least one configured provider returned a real response. AI cannot override deterministic risk gates."
+            if succeeded else "No configured AI provider passed its real request. Inspect each provider status and Railway variables.",
         "signal_only": True, "order_placement_enabled": False,
     }
+
+@app.post("/v1/ai/review-signal")
+def review_signal_with_gemini(payload: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
+    """Gemini may veto a candidate; it can never promote a blocked deterministic signal."""
+    index = str(payload.get("index") or "").strip().upper()
+    if index not in INDEXES:
+        return {"provider": "gemini", "ok": False, "verdict": "WAIT", "decision": "WAIT", "status": "invalid_index", "reason": "Index is not supported."}
+    snapshot = dict(_signal_cache or {})
+    signal_map = dict(snapshot.get("signals") or {})
+    market_map = dict(snapshot.get("market") or {})
+    signal = dict(signal_map.get(index) or {})
+    market = dict(market_map.get(index) or {})
+    validation = dict(signal.get("live_validation") or {})
+    checks = dict(validation.get("checks") or {})
+    expected = str(signal.get("decision") or "WAIT").upper()
+    if expected not in ("CALL BUY", "PUT BUY") or validation.get("verdict") != "PASS" or not checks or not all(value is True for value in checks.values()):
+        return {
+            "provider": "gemini", "configured": _provider_key_present("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+            "ok": False, "verdict": "WAIT", "decision": "WAIT", "status": "deterministic_gate_blocked",
+            "reason": "The backend five-layer checks are not all PASS; Gemini cannot override them.",
+            "blocks": list(validation.get("blocks") or ["DETERMINISTIC_VALIDATION_NOT_PASS"]),
+            "checks": {"backend_validation": False, "ai_direction_consistent": False},
+            "signal_only": True, "order_placement_enabled": False,
+        }
+    api_key = (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()
+    model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
+    if not api_key:
+        return {
+            "provider": "gemini", "configured": False, "ok": False, "verdict": "WAIT",
+            "decision": "WAIT", "status": "not_configured", "reason": "GEMINI_API_KEY is not configured on the signal service.",
+            "blocks": ["GEMINI_NOT_CONFIGURED"], "checks": {"backend_validation": True, "ai_direction_consistent": False},
+            "signal_only": True, "order_placement_enabled": False,
+        }
+    review_input = {
+        "index": index, "candidate_decision": expected,
+        "market": {key: market.get(key) for key in ("ltp", "source", "source_timestamp", "timestamp", "age_seconds", "live")},
+        "signal": {key: signal.get(key) for key in ("decision", "strike", "option_side", "entry", "stop_loss", "target", "data_fresh")},
+        "live_validation": validation,
+    }
+    try:
+        result = _run_gemini_completion(api_key, model, [
+            {"role": "system", "content": "You are a strict independent trading risk reviewer. Read only the supplied JSON. Return ONLY JSON with keys verdict (PASS or WAIT), decision (CALL BUY, PUT BUY, or WAIT), conflicting_direction (boolean), reason (string). Return PASS only when the provided deterministic checks are all true and the candidate has no missing/stale data, invalid quote, conflicting direction, invalid stop loss/target, or failed risk gate. If uncertain return WAIT. Do not invent prices. Confidence is not profit probability."},
+            {"role": "user", "content": json.dumps(review_input, separators=(",", ":"), default=str)[:10000]},
+        ])
+        text_response = str(result.get("answer") or "").strip()
+        match = re.search(r"\{.*\}", text_response, re.DOTALL)
+        parsed = json.loads(match.group(0)) if match else {}
+        ai_decision = str(parsed.get("decision") or "WAIT").strip().upper()
+        ai_verdict = str(parsed.get("verdict") or "WAIT").strip().upper()
+        conflict = parsed.get("conflicting_direction") is True or ai_decision != expected
+        passed = ai_verdict == "PASS" and ai_decision == expected and not conflict
+        return {
+            "provider": "gemini", "configured": True, "ok": True, "status": "ok",
+            "model": result.get("model"), "latency_ms": result.get("latency_ms"),
+            "verdict": "PASS" if passed else "WAIT", "decision": expected if passed else "WAIT",
+            "ai_decision": ai_decision, "ai_direction_consistent": not conflict,
+            "reason": str(parsed.get("reason") or "Gemini did not confirm every risk condition.")[:500],
+            "blocks": [] if passed else ["GEMINI_REVIEW_NOT_PASS"],
+            "checks": {"backend_validation": True, "ai_direction_consistent": not conflict, "ai_verdict_pass": ai_verdict == "PASS"},
+            "signal_only": True, "order_placement_enabled": False,
+        }
+    except (RuntimeError, ValueError, TypeError) as exc:
+        return {
+            "provider": "gemini", "configured": True, "ok": False, "verdict": "WAIT",
+            "decision": "WAIT", "status": str(exc)[:100], "reason": "Gemini review failed or returned invalid JSON.",
+            "blocks": ["GEMINI_REVIEW_FAILED"],
+            "checks": {"backend_validation": True, "ai_direction_consistent": False},
+            "signal_only": True, "order_placement_enabled": False,
+        }
 
 @app.post("/v1/providers/search/status")
 def search_provider_status(_: str = Depends(_device)) -> dict[str, Any]:
@@ -2465,7 +2651,67 @@ def _run_chat_completion(provider: str, api_key: str, model: str, endpoint: str,
         raise RuntimeError(f"{provider}_{type(exc).__name__.lower()}") from None
 
 
+def _run_gemini_completion(api_key: str, model: str, messages: list[dict[str, str]]) -> dict[str, Any]:
+    """Call Gemini's native generateContent API; never expose the key or raw provider body."""
+    started = time.perf_counter()
+    safe_model = re.sub(r"[^A-Za-z0-9._-]", "", model or "") or "gemini-2.5-flash"
+    system_text = "\n".join(
+        str(item.get("content") or "") for item in messages if item.get("role") == "system"
+    ).strip()
+    contents = []
+    for item in messages:
+        role = str(item.get("role") or "")
+        if role == "system":
+            continue
+        content = str(item.get("content") or "").strip()
+        if not content:
+            continue
+        contents.append({
+            "role": "model" if role == "assistant" else "user",
+            "parts": [{"text": content[:12000]}],
+        })
+    if not contents:
+        raise RuntimeError("gemini_empty_prompt")
+    payload: dict[str, Any] = {
+        "contents": contents,
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 700},
+    }
+    if system_text:
+        payload["systemInstruction"] = {"parts": [{"text": system_text[:6000]}]}
+    endpoint = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        + urllib.parse.quote(safe_model, safe="-_.")
+        + ":generateContent?key=" + urllib.parse.quote(api_key, safe="")
+    )
+    request = urllib.request.Request(
+        endpoint, data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"}, method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=18) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        candidates = data.get("candidates") or []
+        parts = ((candidates[0].get("content") or {}).get("parts") or []) if candidates else []
+        answer = "\n".join(str(part.get("text") or "") for part in parts if isinstance(part, dict)).strip()
+        if not answer:
+            raise RuntimeError("gemini_empty_response")
+        return {
+            "answer": answer, "provider": "gemini", "model": safe_model,
+            "llm_used": True, "status": "connected",
+            "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+        }
+    except urllib.error.HTTPError as exc:
+        if exc.code == 429:
+            raise RuntimeError("gemini_rate_limited") from None
+        if exc.code in (401, 403):
+            raise RuntimeError("gemini_authentication_failed") from None
+        raise RuntimeError(f"gemini_http_{exc.code}") from None
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        raise RuntimeError(f"gemini_{type(exc).__name__.lower()}") from None
+
+
 @app.post("/v1/ai/chat")
+@app.post("/v1/ai/gemini-chat")
 def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
     """Use a real cloud provider when configured; disclose fallback if every provider fails."""
     index = str(body.get("index") or "NIFTY").strip().upper()
@@ -2514,20 +2760,15 @@ def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
             if content:
                 messages.append({"role": str(item["role"]), "content": content[:3000]})
         messages.append({"role": "user", "content": question[:3000]})
-        candidates = [
-            ("openai", os.getenv("OPENAI_API_KEY", "").strip(),
-             os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip(), "https://api.openai.com/v1/chat/completions"),
-            ("openrouter", os.getenv("OPENROUTER_API_KEY", "").strip(),
-             os.getenv("OPENROUTER_MODEL", "openrouter/free").strip(), "https://openrouter.ai/api/v1/chat/completions"),
-        ]
+        # The chat page is intentionally Gemini-only. OpenAI/OpenRouter remain
+        # separately testable validation providers, never silent chat fallbacks.
         failures: list[dict[str, str]] = []
-        for provider, key, model, endpoint in candidates:
-            if not key:
-                continue
-            if not model or model == "configured-model":
-                model = "gpt-4o-mini" if provider == "openai" else "openrouter/free"
+        gemini_key = (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()
+        if gemini_key:
             try:
-                result = _run_chat_completion(provider, key, model, endpoint, messages)
+                result = _run_gemini_completion(
+                    gemini_key, os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip(), messages
+                )
                 return {
                     **result, "index": index, "question": question,
                     "market": market, "signal": signal, "validation": validation,
@@ -2537,7 +2778,7 @@ def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
                     "order_placement_enabled": False,
                 }
             except RuntimeError as exc:
-                failures.append({"provider": provider, "status": str(exc)[:80]})
+                failures.append({"provider": "gemini", "status": str(exc)[:80]})
         answer = (
             f"{index} market context (deterministic fallback; no cloud LLM response succeeded): "
             f"LTP={market.get('ltp') if market.get('ltp') is not None else 'unavailable'}; "
@@ -2738,6 +2979,29 @@ def paper_report(_: str = Depends(_device)) -> dict[str, Any]:
         "trades": closed, "mode": "PAPER_ONLY",
         "message": "Metrics are computed only from recorded closed paper trades; they are not a forecast or live P&L.",
     }
+
+
+@app.post("/v1/strategies/evaluate")
+def evaluate_strategies(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
+    """Evaluate supplied completed candles with the local research strategy suite."""
+    candles = body.get("candles")
+    if not isinstance(candles, list) or not candles:
+        raise HTTPException(status_code=422, detail="candles must be a non-empty list.")
+    if len(candles) > 5000:
+        raise HTTPException(status_code=422, detail="At most 5000 candles may be evaluated per request.")
+    raw_consensus = body.get("min_consensus", 3)
+    if isinstance(raw_consensus, bool) or not isinstance(raw_consensus, int) or not 1 <= raw_consensus <= 8:
+        raise HTTPException(status_code=422, detail="min_consensus must be an integer from 1 to 8.")
+    reward_risk = _number(body.get("risk_reward", 2.0))
+    if reward_risk is None or reward_risk <= 0 or reward_risk > 10:
+        raise HTTPException(status_code=422, detail="risk_reward must be finite and between 0 and 10.")
+    result = evaluate_strategy_suite(
+        candles,
+        oi_change=body.get("oi_change"),
+        min_consensus=raw_consensus,
+        risk_reward=reward_risk,
+    )
+    return {**result, "source": "submitted_completed_candles", "order_placement_enabled": False}
 
 
 @app.get("/v1/signals")

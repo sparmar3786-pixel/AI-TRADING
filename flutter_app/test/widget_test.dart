@@ -24,27 +24,11 @@ void main() {
     expect(find.text('Markets, watchlist & account overview'), findsOneWidget);
   });
 
-  testWidgets('PDF report tab includes all report pages and screenshot index', (tester) async {
+  // Keep this regression guard: selecting a removed tab caused TabController.index < 0 in CI.
+  testWidgets('non-functional PDF report tab is removed until real export exists', (tester) async {
     await tester.pumpWidget(const FreshApp());
-    final tabBarContext = tester.element(find.byType(TabBar).first);
-    DefaultTabController.of(tabBarContext).animateTo(tabs.indexOf('PDF Report & Fixes'));
-    await tester.pumpAndSettle();
-    expect(find.text('PDF REPORT • PAGE-BY-PAGE ERROR & FIX CHECKLIST'), findsOneWidget);
-    expect(find.textContaining('PDF Page 1'), findsOneWidget);
-    final reportScrollable = find.descendant(
-      of: find.byType(ListView).last,
-      matching: find.byType(Scrollable),
-    );
-    expect(find.text('PAGE-BY-PAGE REPORT'), findsOneWidget);
-    final pageTen = find.textContaining('PDF Page 10');
-    await tester.scrollUntilVisible(pageTen, 300, scrollable: reportScrollable);
-    expect(pageTen, findsOneWidget);
-    final repositoryLinks = find.text('REPOSITORY & DOCUMENTATION LINKS');
-    expect(repositoryLinks, findsNothing);
-    final priorityRootCause = find.text('PRIORITY ROOT CAUSE');
-    await tester.drag(reportScrollable, const Offset(0, 3000));
-    await tester.pumpAndSettle();
-    expect(priorityRootCause, findsOneWidget);
+    expect(tabs.contains('PDF Report & Fixes'), isFalse);
+    expect(find.text('PDF REPORT • PAGE-BY-PAGE ERROR & FIX CHECKLIST'), findsNothing);
   });
 
   testWidgets('pro option chain renders quote table controls', (tester) async {

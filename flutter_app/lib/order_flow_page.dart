@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter/services.dart' show rootBundle, SystemChrome, DeviceOrientation;
 import 'package:webview_flutter/webview_flutter.dart';
 
 /// Latest measured WebSocket transport metrics from the original chart.
@@ -37,6 +37,15 @@ class _OrderFlowPageState extends State<OrderFlowPage> {
   WebViewController? _controller;
   String? _error;
   bool _loading = true;
+  bool _landscape = false;
+
+  Future<void> _toggleLandscape() async {
+    final next = !_landscape;
+    await SystemChrome.setPreferredOrientations(next
+        ? const [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]
+        : const [DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
+    if (mounted) setState(() => _landscape = next);
+  }
 
   @override
   void initState() {
@@ -81,12 +90,32 @@ class _OrderFlowPageState extends State<OrderFlowPage> {
   }
 
   @override
+  void dispose() {
+    SystemChrome.setPreferredOrientations(const [DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) => Scaffold(
         backgroundColor: const Color(0xFF0B0F14),
         body: SafeArea(
           child: Stack(
             children: [
               if (_controller != null) WebViewWidget(controller: _controller!),
+              Positioned(
+                bottom: 12,
+                right: 8,
+                child: Material(
+                  color: const Color(0xCC111923),
+                  borderRadius: BorderRadius.circular(24),
+                  child: IconButton(
+                    tooltip: _landscape ? 'Return to portrait' : 'Landscape chart',
+                    onPressed: _toggleLandscape,
+                    icon: Icon(_landscape ? Icons.stay_current_portrait : Icons.stay_current_landscape,
+                        color: Colors.white),
+                  ),
+                ),
+              ),
               if (_loading)
                 const Center(child: CircularProgressIndicator()),
               if (_error != null)
