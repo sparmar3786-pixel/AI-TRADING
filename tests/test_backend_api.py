@@ -19,6 +19,19 @@ class BackendApiTests(unittest.TestCase):
         self.client = TestClient(api.app)
         self.device_headers = {"X-Device-Id": "A" * 43}
 
+    def test_credentials_from_env_accepts_railway_angel_client_id_name(self):
+        keys = ("ANGEL_API_KEY", "ANGEL_CLIENT_CODE", "ANGEL_CLIENT_ID", "ANGEL_PIN", "ANGEL_TOTP_SECRET")
+        with patch.dict(os.environ, {
+            "ANGEL_API_KEY": "api-test",
+            "ANGEL_CLIENT_ID": "client-test",
+            "ANGEL_PIN": "pin-test",
+            "ANGEL_TOTP_SECRET": "totp-test",
+        }, clear=False):
+            os.environ.pop("ANGEL_CLIENT_CODE", None)
+            credentials = api._credentials_from_env()
+        self.assertEqual(credentials["angel_client_code"], "client-test")
+        self.assertEqual(set(credentials), {"angel_api_key", "angel_client_code", "angel_pin", "angel_totp_secret"})
+
     def test_live_validation_contract_returns_explicit_checks_and_fails_closed(self):
         result = {"decision": "CALL BUY", "entry": 100.0, "stop_loss": 90.0, "target": 120.0}
         layers = {
