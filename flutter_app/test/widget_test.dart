@@ -14,30 +14,6 @@ void main() {
   });
 
 
-  testWidgets('Quant Research Hub lists the requested research repositories', (tester) async {
-    await tester.pumpWidget(const FreshApp());
-    final tabBarContext = tester.element(find.byType(TabBar).first);
-    DefaultTabController.of(tabBarContext).animateTo(tabs.indexOf('Quant Research Hub'));
-    await tester.pumpAndSettle();
-    expect(find.text('QUANT RESEARCH HUB'), findsOneWidget);
-    final hubScrollable = find.descendant(
-      of: find.byType(ListView).last,
-      matching: find.byType(Scrollable),
-    );
-    for (final title in [
-      'Awesome Systematic Trading',
-      'Awesome Algorithmic Trading',
-      'Awesome Quant',
-      'Awesome Deep Trading',
-      'Stock Market Dashboard',
-      'AI Stock Market Dashboard',
-    ]) {
-      final item = find.text(title);
-      await tester.scrollUntilVisible(item, 250, scrollable: hubScrollable);
-      expect(item, findsOneWidget);
-    }
-  });
-
   testWidgets('Broker Home uses Angel One-backed market data', (tester) async {
     await tester.pumpWidget(const FreshApp());
     final tabBarContext = tester.element(find.byType(TabBar).first);
@@ -48,12 +24,12 @@ void main() {
     expect(find.text('Markets, watchlist & account overview'), findsOneWidget);
   });
 
-  testWidgets('PDF report tab includes all report pages, screenshot index and repository links', (tester) async {
+  testWidgets('PDF report tab includes all report pages and screenshot index', (tester) async {
     await tester.pumpWidget(const FreshApp());
     final tabBarContext = tester.element(find.byType(TabBar).first);
-    DefaultTabController.of(tabBarContext).animateTo(tabs.indexOf('PDF Report & Repositories'));
+    DefaultTabController.of(tabBarContext).animateTo(tabs.indexOf('PDF Report & Fixes'));
     await tester.pumpAndSettle();
-    expect(find.text('PDF REPORT • ALL 10 PAGES & FIX CHECKLIST'), findsOneWidget);
+    expect(find.text('PDF REPORT • PAGE-BY-PAGE ERROR & FIX CHECKLIST'), findsOneWidget);
     expect(find.textContaining('PDF Page 1'), findsOneWidget);
     final reportScrollable = find.descendant(
       of: find.byType(ListView).last,
@@ -66,8 +42,7 @@ void main() {
     await tester.scrollUntilVisible(screenshotIndex, 300, scrollable: reportScrollable);
     expect(screenshotIndex, findsOneWidget);
     final repositoryLinks = find.text('REPOSITORY & DOCUMENTATION LINKS');
-    await tester.scrollUntilVisible(repositoryLinks, 300, scrollable: reportScrollable);
-    expect(repositoryLinks, findsOneWidget);
+    expect(repositoryLinks, findsNothing);
     final priorityRootCause = find.text('PRIORITY ROOT CAUSE');
     await tester.drag(reportScrollable, const Offset(0, 3000));
     await tester.pumpAndSettle();
@@ -142,9 +117,9 @@ void main() {
       of: find.byType(ListView).last,
       matching: find.byType(Scrollable),
     );
-    final researchSources = find.text('RESEARCH SOURCES • NON-CHART REPOSITORIES');
-    await tester.scrollUntilVisible(researchSources, 250, scrollable: researchScrollable);
-    expect(researchSources, findsOneWidget);
+    final validationPerformance = find.text('VALIDATION PERFORMANCE');
+    await tester.scrollUntilVisible(validationPerformance, 250, scrollable: researchScrollable);
+    expect(validationPerformance, findsOneWidget);
   });
 
   testWidgets('hamburger drawer exposes API and Railway navigation', (tester) async {
@@ -162,17 +137,18 @@ void main() {
     final dataHealth = find.byKey(const ValueKey('drawer-tab-Data Health'));
     await tester.scrollUntilVisible(dataHealth, 250, scrollable: drawerScrollable);
     expect(dataHealth, findsOneWidget);
-    final repositoryLibrary = find.byKey(const ValueKey('drawer-tab-Repository Library'));
+    final repositoryLibrary = find.byKey(const ValueKey('drawer-tab-Engine Data'));
     await tester.scrollUntilVisible(repositoryLibrary, 250, scrollable: drawerScrollable);
     expect(repositoryLibrary, findsOneWidget);
     await tester.scrollUntilVisible(apiRailway, 250, scrollable: drawerScrollable);
     await tester.tap(apiRailway);
     await tester.pumpAndSettle();
     expect(find.text('ADVANCED API + RAILWAY CONNECTION'), findsOneWidget);
-    expect(find.text('Railway FastAPI starter'), findsOneWidget);
+    expect(find.text('Secret handling'), findsOneWidget);
+    expect(find.textContaining('github.com'), findsNothing);
   });
 
-  testWidgets('Trading Setup shows Angel One architecture and research links', (tester) async {
+  testWidgets('Trading Setup shows Angel One architecture without repository links', (tester) async {
     await tester.pumpWidget(const FreshApp());
     await tester.tap(find.byTooltip('Open navigation menu'));
     await tester.pumpAndSettle();
@@ -196,6 +172,7 @@ void main() {
     final systemFlow = find.text('SYSTEM FLOW');
     await tester.scrollUntilVisible(systemFlow, 250, scrollable: setupScrollable);
     expect(systemFlow, findsOneWidget);
+    expect(find.textContaining('github.com'), findsNothing);
   });
 
   testWidgets('5-Layer Quant Signal Engine shows signal, validation and monitoring layers', (tester) async {
@@ -229,6 +206,17 @@ void main() {
     final orderBookButton = find.text('LOAD / REFRESH ANGEL ONE ORDER BOOK');
     await tester.scrollUntilVisible(orderBookButton, 250, scrollable: engineScrollable);
     expect(orderBookButton, findsOneWidget);
+  });
+
+  testWidgets('Flow Monitor exposes measured API and provider validation telemetry', (tester) async {
+    await tester.pumpWidget(const FreshApp());
+    final tabBarContext = tester.element(find.byType(TabBar).first);
+    DefaultTabController.of(tabBarContext).animateTo(tabs.indexOf('Flow Monitor'));
+    await tester.pumpAndSettle();
+    expect(find.text('FLOW MONITOR • API SPEED • ENGINE VALIDATION'), findsOneWidget);
+    expect(find.text('SERVER API ROUTE METRICS'), findsOneWidget);
+    expect(find.text('OPENAI + OPENROUTER DATA VALIDATION'), findsOneWidget);
+    expect(find.text('TEST OPENAI + OPENROUTER'), findsOneWidget);
   });
 
   testWidgets('Pro chart clearly reports missing candles instead of fabricating data', (tester) async {
