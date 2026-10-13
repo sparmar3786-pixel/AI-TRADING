@@ -98,8 +98,11 @@ def _structure(candles: list[dict[str, float]]) -> dict[str, Any]:
     if len(cs) < 3 or not highs or not lows:
         return {"bias": "NO CLEAR BIAS", "bos": False, "choch": False, "swings": swings}
     last = cs[-1]
-    bos_up = last["close"] > highs[-1]
-    bos_down = last["close"] < lows[-1]
+    previous_close = cs[-2]["close"] if len(cs) >= 2 else last["close"]
+    # BOS is a candle-close crossing event, not merely price remaining beyond
+    # a pivot. This prevents the same old break being reported on every bar.
+    bos_up = previous_close <= highs[-1] and last["close"] > highs[-1]
+    bos_down = previous_close >= lows[-1] and last["close"] < lows[-1]
     # Conservative local shift: close breaks the latest opposing confirmed pivot.
     previous_bias = "BULLISH" if len(highs) >= 2 and len(lows) >= 2 and highs[-1] > highs[-2] and lows[-1] > lows[-2] else (
         "BEARISH" if len(highs) >= 2 and len(lows) >= 2 and highs[-1] < highs[-2] and lows[-1] < lows[-2] else "NO CLEAR BIAS")
