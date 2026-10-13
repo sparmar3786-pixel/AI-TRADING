@@ -1773,7 +1773,7 @@ def _get_signals_uncached(force: bool = False) -> dict[str, Any]:
                         spot_timestamp = _quote_timestamp(spot_fallback)
                         parsed_spot_timestamp = datetime.fromisoformat(_iso(spot_timestamp)) if spot_timestamp and _iso(spot_timestamp) else None
                         spot_age = (_utc_now() - parsed_spot_timestamp).total_seconds() if parsed_spot_timestamp else None
-                        spot_live = spot_ltp is not None and spot_ltp > 0 and spot_age is not None and 0 <= spot_age <= 60
+                        spot_live = spot_ltp is not None and spot_ltp > 0 and spot_age is not None and 0 <= spot_age <= 60 and _is_market_session_open(index)
                         bid_fallback, ask_fallback, buy_depth_fallback, sell_depth_fallback = _book(spot_fallback)
                         market_row.update({
                             "ltp": spot_ltp, "age_seconds": round(spot_age, 2) if spot_age is not None else None,
@@ -1903,7 +1903,7 @@ def _commodity_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]]) -
             timestamp = _quote_timestamp(quote)
             parsed_timestamp = datetime.fromisoformat(timestamp) if timestamp else None
             age = (_utc_now() - parsed_timestamp).total_seconds() if parsed_timestamp else None
-            live = ltp is not None and ltp > 0 and age is not None and 0 <= age <= 60
+            live = ltp is not None and ltp > 0 and age is not None and 0 <= age <= 60 and _is_market_session_open(name)
             bid, ask, buy_depth, sell_depth = _book(quote)
             trend = "UNKNOWN"
             sentiment = None
