@@ -2214,7 +2214,7 @@ def _provider_key_present(*names: str) -> bool:
 @app.get("/v1/ai/status")
 def ai_status(_: str = Depends(_device)) -> dict[str, Any]:
     providers = [
-        ("gemini", ("GEMINI_API_KEY", "GOOGLE_API_KEY"), os.getenv("GEMINI_MODEL", "gemini")),
+        ("gemini", ("GEMINI_API_KEY", "GOOGLE_API_KEY"), os.getenv("GEMINI_MODEL", "gemini-2.5-flash")),
         ("openrouter", ("OPENROUTER_API_KEY",), os.getenv("OPENROUTER_MODEL", "openrouter/free")),
         ("openai", ("OPENAI_API_KEY",), os.getenv("OPENAI_MODEL", "gpt-4o-mini")),
     ]
