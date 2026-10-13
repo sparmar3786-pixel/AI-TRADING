@@ -13,6 +13,7 @@ dependencies:
   shared_preferences: ^2.5.3
   url_launcher: ^6.3.2
   stream_chat_flutter_ai: ^0.1.0
+  webview_flutter: ^4.10.0
 
 dev_dependencies:
   flutter_test:
@@ -21,3 +22,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/order_flow.html
