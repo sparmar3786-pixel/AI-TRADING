@@ -2837,6 +2837,49 @@ def _run_gemini_completion(api_key: str, model: str, messages: list[dict[str, st
         raise RuntimeError(f"gemini_{type(exc).__name__.lower()}") from None
 
 
+def _run_openai_compatible_completion(
+    api_key: str, model: str, messages: list[dict[str, str]], *,
+    provider: str, endpoint: str, referer: str | None = None,
+) -> dict[str, Any]:
+    """Call an OpenAI-compatible chat endpoint without leaking credentials."""
+    started = time.perf_counter()
+    safe_model = (model or "").strip()
+    if not safe_model:
+        raise RuntimeError(f"{provider}_model_not_configured")
+    payload = {
+        "model": safe_model,
+        "messages": [{"role": str(m.get("role")), "content": str(m.get("content") or "")[:12000]}
+                     for m in messages if m.get("role") in ("system", "user", "assistant")],
+        "temperature": 0.2,
+        "max_tokens": 900,
+    }
+    headers = {"Authorization": "Bearer " + api_key, "Content-Type": "application/json"}
+    if provider == "openrouter":
+        headers["HTTP-Referer"] = referer or "https://github.com/sparmar3786-pixel/AI-TRADING"
+        headers["X-Title"] = "AI-TRADING"
+    request = urllib.request.Request(endpoint, data=json.dumps(payload).encode("utf-8"),
+                                     headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=22) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        choices = data.get("choices") or []
+        message = (choices[0].get("message") or {}) if choices else {}
+        answer = str(message.get("content") or "").strip()
+        if not answer:
+            raise RuntimeError(f"{provider}_empty_response")
+        return {"answer": answer, "provider": provider, "model": safe_model,
+                "llm_used": True, "ok": True, "status": "connected",
+                "latency_ms": round((time.perf_counter() - started) * 1000, 1)}
+    except urllib.error.HTTPError as exc:
+        if exc.code == 429:
+            raise RuntimeError(f"{provider}_rate_limited") from None
+        if exc.code in (401, 403):
+            raise RuntimeError(f"{provider}_authentication_failed") from None
+        raise RuntimeError(f"{provider}_http_{exc.code}") from None
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        raise RuntimeError(f"{provider}_{type(exc).__name__.lower()}") from None
+
+
 @app.post("/v1/ai/chat")
 @app.post("/v1/ai/gemini-chat")
 def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
@@ -2891,15 +2934,35 @@ def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
             if content:
                 messages.append({"role": str(item["role"]), "content": content[:3000]})
         messages.append({"role": "user", "content": question[:3000]})
-        # The chat page is intentionally Gemini-only. OpenAI/OpenRouter remain
-        # separately testable validation providers, never silent chat fallbacks.
+        # Try every configured provider in deterministic order. Configuration alone is
+        # not success: each provider must return a real inference response.
         failures: list[dict[str, str]] = []
-        gemini_key = (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()
-        if gemini_key:
+        providers = [
+            ("gemini", (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()),
+            ("openai", (os.getenv("OPENAI_API_KEY") or "").strip()),
+            ("openrouter", (os.getenv("OPENROUTER_API_KEY") or "").strip()),
+        ]
+        for provider, api_key in providers:
+            if not api_key:
+                failures.append({"provider": provider, "status": "not_configured"})
+                continue
             try:
-                result = _run_gemini_completion(
-                    gemini_key, os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip(), messages
-                )
+                if provider == "gemini":
+                    result = _run_gemini_completion(
+                        api_key, os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip(), messages
+                    )
+                elif provider == "openai":
+                    result = _run_openai_compatible_completion(
+                        api_key, os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip(), messages,
+                        provider="openai",
+                        endpoint=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1/chat/completions").strip(),
+                    )
+                else:
+                    result = _run_openai_compatible_completion(
+                        api_key, os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini").strip(), messages,
+                        provider="openrouter",
+                        endpoint=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1/chat/completions").strip(),
+                    )
                 return {
                     **result, "index": index, "question": question,
                     "market": market, "signal": signal, "validation": validation,
@@ -2909,7 +2972,7 @@ def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
                     "order_placement_enabled": False,
                 }
             except RuntimeError as exc:
-                failures.append({"provider": "gemini", "status": str(exc)[:80]})
+                failures.append({"provider": provider, "status": str(exc)[:80]})
         answer = (
             f"{index} market context (deterministic fallback; no cloud LLM response succeeded): "
             f"LTP={market.get('ltp') if market.get('ltp') is not None else 'unavailable'}; "
