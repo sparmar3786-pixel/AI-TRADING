@@ -64,6 +64,13 @@ class _TradeEnginePageState extends State<TradeEnginePage> {
     final m = _map(market[selectedIndex]);
     final s = _map(signals[selectedIndex]);
     final a = _map(ai[selectedIndex]);
+    final strategySuite = _map(s['strategy_suite'] ?? m['strategy_suite']);
+    final strategySignals = _map(strategySuite['strategies']);
+    final strategyTrace = _map(strategySuite['trace']);
+    final strategyTraceRows = (strategySuite['strategy_trace'] as List? ?? const <dynamic>[])
+        .whereType<Map>()
+        .map((row) => Map<String, dynamic>.from(row))
+        .toList(growable: false);
     final validation = _map(s['live_validation']);
     final checks = _map(validation['checks']);
     final quant = _map(s['quant_engine'] ?? s['five_layer_engine']);
@@ -128,6 +135,41 @@ class _TradeEnginePageState extends State<TradeEnginePage> {
           ),
         ),
         const SizedBox(height: 4),
+        if (strategySuite.isNotEmpty)
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('STRATEGY LIBRARY → TRADING SETUP TRACE',
+                    style: TextStyle(fontWeight: FontWeight.w900, color: Color(0xFF12D6FF))),
+                const SizedBox(height: 6),
+                Text('Execution ID: ${strategyTrace['execution_id'] ?? strategySuite['execution_id'] ?? 'not supplied'}',
+                    style: const TextStyle(fontSize: 10, color: Colors.white70)),
+                Text('Version: ${strategyTrace['strategy_version'] ?? 'unknown'} • Completed candles: ${strategyTrace['input_candle_count'] ?? 'unknown'}',
+                    style: const TextStyle(fontSize: 10, color: Colors.white70)),
+                Text('Input SHA-256: ${strategyTrace['input_sha256'] ?? 'unknown'}',
+                    style: const TextStyle(fontSize: 9, color: Colors.white54)),
+                if (strategyTraceRows.isNotEmpty)
+                  ...strategyTraceRows.map((row) => Padding(
+                    padding: const EdgeInsets.only(top: 5),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('${row['strategy_name'] ?? 'Strategy'}: ${row['signal'] ?? 'WAIT'}',
+                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
+                      Text('Reason: ${row['rejection_reason'] ?? 'Directional output returned'}',
+                          style: const TextStyle(fontSize: 10, color: Colors.white60)),
+                    ]),
+                  ))
+                else
+                  ...strategySignals.entries.map((entry) => InfoRow(
+                    entry.key.replaceAll('_', ' ').toUpperCase(),
+                    (entry.value ?? 'WAIT').toString(),
+                  )),
+                const SizedBox(height: 6),
+                const Text('Research evidence only. It cannot bypass live-data freshness, option validation, the deterministic risk gate, or order safeguards.',
+                    style: TextStyle(fontSize: 10, color: Colors.orangeAccent)),
+              ]),
+            ),
+          ),
         _layerHeader('01', 'SIGNAL ENGINE', 'Candidate generation • Layer 1', candidate ? 'CANDIDATE' : 'WAIT / NO TRADE', candidate ? Colors.lightBlueAccent : Colors.orangeAccent),
         Card(
           child: Padding(
