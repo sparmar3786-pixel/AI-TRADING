@@ -8,15 +8,12 @@ import 'api.dart';
 import 'config.dart';
 import 'trade_engine_page.dart';
 import 'broker_home_prototype_page.dart';
-import 'pdf_report_solutions_page.dart';
-import 'quant_research_hub_page.dart';
-import 'quant_repositories_page.dart';
 import 'ai_chat_page.dart';
 import 'quant_engine_lab_page.dart';
 import 'order_flow_page.dart';
 import 'strategy_library_page.dart';
 
-const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Repository Library','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','PDF Report & Repositories','Quant Research Hub','Quant & Trading Repositories','AI Chat','Order Flow','Quant Engine Lab','Strategy Library'];
+const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','AI Chat','Order Flow','Quant Engine Lab','Strategy Library'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
 
 void main() {
@@ -392,11 +389,17 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
 
   String get _appBarStatus {
     if (!apiOnline) return "API OFFLINE";
-    if (!signalsEndpointOnline) return "API UP • DATA ERROR";
+    if (!signalsEndpointOnline) {
+      final error = (signalsFetchError ?? '').toLowerCase();
+      if (error.contains('timeout') || error.contains('timed out')) {
+        return "API UP • SIGNAL TIMEOUT";
+      }
+      return "API UP • SIGNAL ERROR";
+    }
     if (!_marketOpenNow) return "API UP • MARKET CLOSED";
     if (status == "LIVE market feed connected.") return "API LIVE";
     if (status.startsWith("Backend online")) return "API UP • WAITING DATA";
-    return "API UP • DATA ERROR";
+    return "API UP • WAITING / STALE DATA";
   }
 
   Color get _appBarStatusColor {
@@ -570,7 +573,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           onRefresh: refresh,
         ),
         const ApiRailwayPage(),
-        RepositoryLibraryPage(market: market, signals: signals, feed: feed, diagnostics: storeDiagnostics, lastFetch: lastFetch),
         TradingSetupPage(backendUrl: backendUrl, apiOnline: apiOnline, signalsOnline: signalsEndpointOnline, angelOnline: angelOnline, market: market, signals: signals, ai: ai, liveStatus: liveTrading, lastFetch: lastFetch),
         ResearchEnginesPage(market: market, signals: signals, ai: ai, lastFetch: lastFetch, selectedIndex: selectedIndex, onIndexChanged: (value) => setState(() => selectedIndex = value)),
         TradeEnginePage(
@@ -593,9 +595,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           status: status,
           onIndexSelected: (value) => setState(() => selectedIndex = value),
         ),
-        const PdfReportSolutionsPage(),
-        const QuantResearchHubPage(),
-        const QuantRepositoriesPage(),
         AiChatPage(backendUrl: backendUrl, selectedIndex: selectedIndex),
         OrderFlowPage(signalBackendUrl: signalBackendUrl),
         Builder(
