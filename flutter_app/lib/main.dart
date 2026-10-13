@@ -607,7 +607,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
             onOpenBacktest: () => DefaultTabController.of(tabContext).animateTo(tabs.indexOf('Backtesting')),
           ),
         ),
-        const StrategyLibraryPage(),
+        StrategyLibraryPage(market: market, signals: signals, selectedIndex: selectedIndex),
       ]),
     ),
   );
