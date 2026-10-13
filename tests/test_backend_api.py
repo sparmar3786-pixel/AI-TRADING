@@ -19,6 +19,25 @@ class BackendApiTests(unittest.TestCase):
         self.client = TestClient(api.app)
         self.device_headers = {"X-Device-Id": "A" * 43}
 
+    def test_provider_json_retries_one_transient_503(self):
+        class FakeResponse:
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def read(self):
+                return json.dumps({"choices": [{"message": {"content": "ROUTER_OK"}}]}).encode()
+
+        transient = api.urllib.error.HTTPError(
+            "https://openrouter.ai/api/v1/chat/completions", 503, "Service Unavailable", {}, None
+        )
+        request = api.urllib.request.Request(
+            "https://openrouter.ai/api/v1/chat/completions",
+            data=b"{}", headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with patch.object(api.urllib.request, "urlopen", side_effect=[transient, FakeResponse()]) as urlopen:
+            result = api._provider_json_with_retry(request, timeout=1, provider="openrouter")
+        self.assertEqual(result["choices"][0]["message"]["content"], "ROUTER_OK")
+        self.assertEqual(urlopen.call_count, 2)
+
     def test_credentials_from_env_accepts_railway_angel_client_id_name(self):
         keys = ("ANGEL_API_KEY", "ANGEL_CLIENT_CODE", "ANGEL_CLIENT_ID", "ANGEL_PIN", "ANGEL_TOTP_SECRET")
         with patch.dict(os.environ, {
