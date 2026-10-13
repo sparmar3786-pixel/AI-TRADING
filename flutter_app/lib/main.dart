@@ -77,6 +77,12 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
   List<dynamic> commodities = const [];
   bool _refreshing = false;
   Map<String,dynamic> market = const {};
+  // Shared, per-index option-chain cache lets Option Chain and OI Lab consume
+  // the same timestamped broker quotes even when signal qualification fails.
+  final Map<String, List<dynamic>> optionChainsByIndex = <String, List<dynamic>>{};
+  DateTime? _lastOptionChainFetchAt;
+  String? _lastOptionChainIndex;
+  String? optionChainError;
   List<dynamic> tradePlans = const [];
   int qualifiedCount = 0;
   String? lastFetch;
@@ -260,6 +266,37 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         if (mounted) setState(() { signalsEndpointOnline = false; signalsFetchError = e.toString().replaceFirst('Exception: ', ''); });
         s = _makeCachedSignalsNonActionable(await _loadCachedSignals());
       }
+      // The signal endpoint deliberately fails closed when candles/Greeks are
+      // incomplete. Fetch the option chain independently so its valid quotes
+      // can still populate Option Chain/OI Lab. Throttle this heavier endpoint.
+      final responseMarket = Map<String, dynamic>.from(s['market'] as Map? ?? const {});
+      final selectedMarket = Map<String, dynamic>.from(responseMarket[selectedIndex] as Map? ?? const {});
+      final embeddedChain = (selectedMarket['option_chain'] as List?) ?? const <dynamic>[];
+      if (embeddedChain.isNotEmpty) {
+        optionChainsByIndex[selectedIndex] = List<dynamic>.from(embeddedChain);
+        optionChainError = null;
+      } else {
+        final now = DateTime.now();
+        final shouldFetchChain = _lastOptionChainIndex != selectedIndex ||
+            _lastOptionChainFetchAt == null ||
+            now.difference(_lastOptionChainFetchAt!) >= const Duration(seconds: 30);
+        if (shouldFetchChain) {
+          _lastOptionChainIndex = selectedIndex;
+          _lastOptionChainFetchAt = now;
+          try {
+            final chainResponse = await signalApi.getJson('/v1/option-chain?index=${Uri.encodeQueryComponent(selectedIndex)}', timeout: const Duration(seconds: 35));
+            final chainRows = (chainResponse['option_chain'] as List?) ?? const <dynamic>[];
+            if (chainRows.isNotEmpty) {
+              optionChainsByIndex[selectedIndex] = List<dynamic>.from(chainRows);
+              optionChainError = null;
+            } else {
+              optionChainError = (chainResponse['reason'] ?? 'Broker returned no option-chain quotes yet.').toString();
+            }
+          } catch (e) {
+            optionChainError = e.toString().replaceFirst('Exception: ', '');
+          }
+        }
+      }
       try {
         latestSystemDiagnostics = await signalApi.systemDiagnostics();
         latestSystemDiagnosticsError = null;
@@ -278,7 +315,15 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         feed = (s['feed'] as Map?)?.cast<String,dynamic>() ?? {};
         storeDiagnostics = (s['store'] as Map?)?.cast<String,dynamic>() ?? {};
         signals = (s['signals'] as Map?)?.cast<String,dynamic>() ?? {};
-        market = (s['market'] as Map?)?.cast<String,dynamic>() ?? {};
+        market = responseMarket.map((key, value) {
+          final row = Map<String, dynamic>.from(value as Map? ?? const {});
+          final cachedChain = optionChainsByIndex[key];
+          if (((row['option_chain'] as List?) ?? const <dynamic>[]).isEmpty && cachedChain != null) {
+            row['option_chain'] = cachedChain;
+            row['option_chain_source'] = 'independent_timestamped_broker_quote';
+          }
+          return MapEntry(key, row);
+        });
         commodities = (s['commodities'] as List?) ?? [];
         tradePlans = ((s['trade_plans'] as List?) ?? const []).whereType<Map>().map((plan) => Map<String, dynamic>.from(plan)).toList();
         qualifiedCount = (s['qualified_trade_count'] as num?)?.toInt() ?? tradePlans.length;
@@ -379,7 +424,15 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
   }
 
   Map<String,dynamic> _signal(String i) => Map<String,dynamic>.from(signals[i] as Map? ?? const {});
-  Map<String,dynamic> _market(String i) => Map<String,dynamic>.from(market[i] as Map? ?? const {});
+  Map<String,dynamic> _market(String i) {
+    final row = Map<String, dynamic>.from(market[i] as Map? ?? const {});
+    final cachedChain = optionChainsByIndex[i];
+    if (((row['option_chain'] as List?) ?? const <dynamic>[]).isEmpty && cachedChain != null) {
+      row['option_chain'] = cachedChain;
+      row['option_chain_source'] = 'independent_timestamped_broker_quote';
+    }
+    return row;
+  }
 
   @override
   Widget build(BuildContext context) => DefaultTabController(
@@ -446,7 +499,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         DashboardPage(index:selectedIndex, connected:status == 'LIVE market feed connected.', status:status, signals:signals, market:market, tradePlans:tradePlans, qualifiedCount:qualifiedCount, lastFetch:lastFetch, onSelected:(v)=>setState(()=>selectedIndex=v)),
         MarketPage(selected:selectedIndex,onChanged:(v)=>setState(()=>selectedIndex=v), signal:_signal(selectedIndex), market:_market(selectedIndex)),
         ChainPage(selected:selectedIndex,onChanged:(v)=>setState(()=>selectedIndex=v), market:_market(selectedIndex)),
-        OIPage(signals:signals),
+        OIPage(signals:signals, market:market),
         IndicatorsPage(selected:selectedIndex,signal:_signal(selectedIndex),fast:emaFast,slow:emaSlow,onChanged:(f,s){setState((){emaFast=f;emaSlow=s;});refresh();},onIndex:(v)=>setState(()=>selectedIndex=v)),
         SignalPage(backendUrl:backendUrl,liveStatus:liveTrading,index:selectedIndex,signals:signals,ai:ai,tradePlans:tradePlans,market:market,onChanged:(v)=>setState(()=>selectedIndex=v)),
         RiskPage(index:selectedIndex,signal:_signal(selectedIndex),plans:tradePlans),
