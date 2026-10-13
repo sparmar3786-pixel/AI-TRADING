@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 import 'api.dart';
 
 const _smcIndexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
@@ -16,7 +18,13 @@ class SmcChartPage extends StatefulWidget {
   @override State<SmcChartPage> createState()=>_SmcChartPageState();
 }
 class _SmcChartPageState extends State<SmcChartPage> {
+  @override void initState(){super.initState();_proChartController=WebViewController()..setJavaScriptMode(JavaScriptMode.unrestricted)..setBackgroundColor(const Color(0xFF0E1420))..setNavigationDelegate(NavigationDelegate(onPageFinished:(_){_proChartReady=true;_pushProChartCandles();}))..loadFlutterAsset('assets/prochart.html');}
+  @override void didUpdateWidget(covariant SmcChartPage oldWidget){super.didUpdateWidget(oldWidget);if(oldWidget.market!=widget.market||oldWidget.index!=widget.index)_pushProChartCandles();}
+  void _pushProChartCandles(){if(!_proChartReady)return;final payload=jsonEncode({'symbol':widget.index,'candles':bars});_proChartController.runJavaScript('window.setMarketData($payload)');}
   String tf='15m';
+  String strategyFormat='Guardeer';
+  late final WebViewController _proChartController;
+  bool _proChartReady=false;
   bool showOb=true, showFvg=true, showLiquidity=true, _engineBusy=false;
   Map<String,dynamic> _engineResult=const {};
   String? _engineError;
@@ -39,6 +47,7 @@ class _SmcChartPageState extends State<SmcChartPage> {
         'mtf_candles':mtf,
         'ltf_candles':ltf,
         'in_killzone':true,
+        'strategy_format':strategyFormat,
       }, timeout:const Duration(seconds:20));
       if(mounted)setState(()=>_engineResult=response);
     } catch(e) { if(mounted)setState(()=>_engineError=e.toString()); }
@@ -93,9 +102,15 @@ class _SmcChartPageState extends State<SmcChartPage> {
       const SizedBox(height:8),
       DropdownButtonFormField<String>(initialValue:widget.index,decoration:const InputDecoration(labelText:'Indian Index / MCX'),items:_smcUnderlyings.map((s)=>DropdownMenuItem(value:s,child:Text(_smcCommodities.contains(s)?'MCX • $s':s))).toList(),onChanged:(v){if(v!=null)widget.onIndexChanged(v);}),
       const SizedBox(height:8),
+      Wrap(spacing:6,runSpacing:4,children:[for(final format in const ['Guardeer','Inner Circle']) ChoiceChip(label:Text(format),selected:strategyFormat==format,onSelected:(_)=>setState(()=>strategyFormat=format))]),
+      const SizedBox(height:8),
       Wrap(spacing:6,runSpacing:4,children:[for(final period in const ['1m','3m','5m','15m','30m','1H','2H','4H','1D','1W','1M']) ChoiceChip(label:Text(period),selected:tf==period,onSelected:(_)=>setState(()=>tf=period))]),
       const SizedBox(height:8),
       Card(child:Padding(padding:const EdgeInsets.all(10),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+        const Text('PROCHART • LIVE API ONLY',style:TextStyle(fontWeight:FontWeight.w900)),
+        const SizedBox(height:6),
+        SizedBox(height:320,child:WebViewWidget(controller:_proChartController)),
+        const SizedBox(height:8),
         Row(children:[Expanded(child:Text(widget.index,style:const TextStyle(fontWeight:FontWeight.w800,fontSize:15))),Text(_last?.toStringAsFixed(2)??'—',style:const TextStyle(fontWeight:FontWeight.w900,fontSize:18))]),
         const SizedBox(height:8),
         SizedBox(height:270,width:double.infinity,child:bars.length<2?const Center(child:Text('No real candles received — demo data is disabled.')):CustomPaint(painter:SmcCandlePainter(bars:bars,orderBlocks:showOb?(a['ob'] as List<Map<String,dynamic>>):const[],fvgs:showFvg?(a['fvg'] as List<Map<String,dynamic>>):const[]))),
