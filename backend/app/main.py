@@ -1213,7 +1213,7 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
     await websocket.accept()
     symbol = (websocket.query_params.get("symbol") or "NIFTY").strip().upper()
     timeframe = (websocket.query_params.get("tf") or "1").strip().lower()
-    daily_mode = timeframe in {"1440", "1d", "d", "day"}
+    daily_mode = timeframe in {"1440", "10080", "1d", "1w", "d", "day", "week", "w"}
     history_mode = "ONE_DAY" if daily_mode else "ONE_MINUTE"
     max_candles = 2000 if daily_mode else 250
     supported_symbols = set(INDEXES) | {"CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM", "SILVER", "SILVERM", "COPPER", "ZINC", "ALUMINIUM", "LEAD", "NICKEL", "MENTHAOIL", "CASTORSEED", "COTTON", "RUBBER"}
