@@ -1571,6 +1571,141 @@ def research_indicators(body: ResearchIndicatorsRequest, _: str = Depends(_devic
     }
 
 
+def _provider_key_present(*names: str) -> bool:
+    return any(os.getenv(name, "").strip() for name in names)
+
+
+@app.get("/v1/ai/status")
+def ai_status(_: str = Depends(_device)) -> dict[str, Any]:
+    providers = [
+        ("gemini", ("GEMINI_API_KEY", "GOOGLE_API_KEY"), os.getenv("GEMINI_MODEL", "gemini")),
+        ("openrouter", ("OPENROUTER_API_KEY",), os.getenv("OPENROUTER_MODEL", "configured-model")),
+        ("openai", ("OPENAI_API_KEY",), os.getenv("OPENAI_MODEL", "configured-model")),
+    ]
+    selected = next((item for item in providers if _provider_key_present(*item[1])), None)
+    return {
+        "provider": selected[0] if selected else "deterministic_fallback",
+        "model": selected[2] if selected else "five-layer-quant-context",
+        "status": "configured" if selected else "fallback_ready",
+        "llm_configured": selected is not None,
+        "message": "Cloud model key detected; connectivity is tested separately." if selected else "No supported LLM key is configured. Chat can still report actual market fields and deterministic risk gates; it will not pretend an LLM answered.",
+        "signal_only": True,
+    }
+
+
+@app.post("/v1/providers/ai/test")
+def test_ai_providers(_: str = Depends(_device)) -> dict[str, Any]:
+    checks = [
+        {"provider": "gemini", "configured": _provider_key_present("GEMINI_API_KEY", "GOOGLE_API_KEY"), "ok": False},
+        {"provider": "openrouter", "configured": _provider_key_present("OPENROUTER_API_KEY"), "ok": False},
+        {"provider": "openai", "configured": _provider_key_present("OPENAI_API_KEY"), "ok": False},
+    ]
+    return {
+        "status": "configured_not_connectivity_tested" if any(item["configured"] for item in checks) else "not_configured",
+        "checks": checks,
+        "message": "Credentials are present, but no provider response is marked OK until an actual authenticated model request is implemented and verified." if any(item["configured"] for item in checks) else "No cloud AI provider key is configured.",
+    }
+
+
+@app.post("/v1/providers/search/status")
+def search_provider_status(_: str = Depends(_device)) -> dict[str, Any]:
+    exa = _provider_key_present("EXA_API_KEY")
+    tavily = _provider_key_present("TAVILY_API_KEY")
+    return {
+        "status": "configured" if exa or tavily else "not_configured",
+        "providers": {
+            "exa": {"configured": exa, "ok": False, "status": "configured_not_tested" if exa else "not_configured"},
+            "tavily": {"configured": tavily, "ok": False, "status": "configured_not_tested" if tavily else "not_configured"},
+        },
+        "message": "Keys are present; use Search Test to verify an actual request." if exa or tavily else "Configure EXA_API_KEY and/or TAVILY_API_KEY on Railway.",
+    }
+
+
+@app.post("/v1/providers/search/test")
+def test_search_providers(_: str = Depends(_device)) -> dict[str, Any]:
+    exa = _provider_key_present("EXA_API_KEY")
+    tavily = _provider_key_present("TAVILY_API_KEY")
+    evidence = fetch_market_news_sentiment("NIFTY", exa_api_key=os.getenv("EXA_API_KEY"), tavily_api_key=os.getenv("TAVILY_API_KEY"))
+    sources = list(evidence.get("sources") or [])
+    articles = list(evidence.get("articles") or [])
+    checks = [
+        {"provider": "exa", "configured": exa, "ok": "exa" in sources},
+        {"provider": "tavily", "configured": tavily, "ok": "tavily" in sources},
+    ]
+    return {
+        "status": "ok" if any(item["ok"] for item in checks) else "failed_or_no_evidence",
+        "checks": checks, "providers": {item["provider"]: item for item in checks},
+        "evidence_count": len(articles), "search_evidence": articles[:8],
+        "errors": evidence.get("errors", []),
+        "message": "Search returned source-backed headlines." if articles else "No source-backed headlines returned; check provider status, key permissions and Railway outbound access.",
+    }
+
+
+@app.post("/v1/ai/chat")
+def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
+    """Honest deterministic fallback until an authenticated LLM adapter is available."""
+    index = str(body.get("index") or "NIFTY").strip().upper()
+    if index not in INDEXES:
+        raise HTTPException(status_code=400, detail="Unsupported index.")
+    question = str(body.get("question") or "").strip()
+    if not question:
+        raise HTTPException(status_code=422, detail="A question is required.")
+    try:
+        payload = _get_signals()
+        market = dict((payload.get("market") or {}).get(index) or {})
+        signal = dict((payload.get("signals") or {}).get(index) or {})
+        news = dict(signal.get("news_sentiment") or cached_market_news_sentiment(index))
+        validation = dict(signal.get("live_validation") or {})
+        reasons = signal.get("reasons") or signal.get("reason") or []
+        if not isinstance(reasons, list):
+            reasons = [str(reasons)]
+        answer = (
+            f"{index} market context (deterministic backend fallback, not an LLM response): "
+            f"LTP={market.get('ltp') if market.get('ltp') is not None else 'unavailable'}; "
+            f"quote age={market.get('age_seconds') if market.get('age_seconds') is not None else 'unknown'} seconds; "
+            f"signal={signal.get('decision', 'WAIT')}; validation={validation.get('verdict', 'NOT_AVAILABLE')}. "
+            f"Reason: {'; '.join(str(item) for item in reasons[:5]) or 'No verified signal explanation returned'}. "
+            "Missing/stale evidence blocks action. This API is signal-only and never places broker orders."
+        )
+        return {
+            "answer": answer, "provider": "deterministic_fallback",
+            "model": "five-layer-quant-context", "llm_used": False,
+            "index": index, "question": question,
+            "market": market, "signal": signal, "validation": validation,
+            "search_evidence": news.get("articles", [])[:8],
+            "status": "fallback_response", "signal_only": True,
+        }
+    except HTTPException as exc:
+        raise HTTPException(status_code=503, detail={"message": "Current market context is unavailable.", "reason": str(exc.detail)[:180]}) from exc
+
+
+@app.get("/v1/live/orders")
+def live_orders(_: str = Depends(_device)) -> dict[str, Any]:
+    return {
+        "status": "read_only", "orders": [], "order_placement_enabled": False,
+        "message": "This backend intentionally does not expose order placement or a live order book. Connect a read-only broker order-history adapter before displaying broker orders.",
+    }
+
+
+@app.get("/v1/portfolio")
+def portfolio(_: str = Depends(_device)) -> dict[str, Any]:
+    return {
+        "status": "not_available", "positions": [], "holdings": [], "orders": [],
+        "source": "angelone_smartapi", "read_only": True,
+        "message": "The current adapter does not implement authenticated holdings/positions endpoints. No portfolio values are fabricated.",
+    }
+
+
+@app.get("/v1/paper/trades")
+def paper_trades(_: str = Depends(_device)) -> dict[str, Any]:
+    return {"status": "not_configured", "trades": [], "message": "Paper-trade persistence is not configured on this deployment."}
+
+
+@app.get("/v1/paper/report")
+def paper_report(_: str = Depends(_device)) -> dict[str, Any]:
+    return {"status": "not_configured", "trade_count": 0, "metrics": {}, "message": "No persisted paper-trade dataset is configured; performance is not inferred."}
+
+
 @app.get("/v1/signals")
 def signals(ema_fast: int = Query(default=8, ge=2, le=50), ema_slow: int = Query(default=13, ge=3, le=100), _: str = Depends(_device)) -> dict[str, Any]:
     if ema_fast >= ema_slow:
