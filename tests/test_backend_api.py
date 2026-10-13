@@ -331,6 +331,21 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(result["verdict"], "WAIT")
         self.assertNotIn("test-secret", str(result))
 
+
+    def test_commodity_footprint_uses_mcx_future_and_symbol_specific_price_step(self):
+        expiry = (api.datetime.now(api.IST).date() + api.timedelta(days=7)).strftime("%d%b%Y").upper()
+        rows = [
+            {"exch_seg": "MCX", "name": "CRUDEOIL", "symbol": f"CRUDEOILM{expiry}FUT",
+             "instrumenttype": "FUTCOM", "token": "987654", "expiry": expiry},
+        ]
+        contract = api._find_nearest_future(rows, "CRUDEOILM")
+        self.assertIsNotNone(contract)
+        self.assertEqual(contract["exchange"], "MCX")
+        self.assertEqual(contract["token"], "987654")
+        self.assertEqual(api._footprint_chart_step("CRUDEOILM"), 1.0)
+        self.assertEqual(api._footprint_chart_step("NATURALGAS"), 0.5)
+        self.assertEqual(api._footprint_chart_step("NIFTY"), 5.0)
+
     def test_footprint_levels_use_only_broker_best5_depth(self):
         quote = {
             "best5Data": {
