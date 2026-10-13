@@ -23,4 +23,4 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/order_flow_footprint.html
+    - assets/order_flow.html
