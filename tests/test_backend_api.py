@@ -113,6 +113,14 @@ class BackendApiTests(unittest.TestCase):
         self.assertIsNotNone(indicators["rsi_14"])
         self.assertIsNotNone(indicators["underlying_atr_14"])
         self.assertIsNotNone(indicators["vwap"])
+        # Flutter pages consume these stable aliases; older backend keys alone
+        # made Dashboard/Market/Indicators appear blank despite valid candles.
+        self.assertEqual(indicators["ema_fast"], indicators["ema_fast_8"])
+        self.assertEqual(indicators["ema_slow"], indicators["ema_slow_21"])
+        self.assertEqual(indicators["rsi14"], indicators["rsi_14"])
+        self.assertEqual(indicators["atr14"], indicators["underlying_atr_14"])
+        self.assertIn("bb_upper", indicators)
+        self.assertIn("stochastic_k14", indicators)
 
     def test_backtest_accepts_flutter_form_payload(self):
         request = api.BacktestRequest(
@@ -213,6 +221,34 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(body["provider"], "deterministic_fallback")
         self.assertIn("25000.0", body["answer"])
         self.assertIn("missing option evidence", body["answer"])
+
+    def test_paper_trade_open_close_and_report_deduct_costs(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(api, "_paper_trade_path", return_value=Path(tmp) / "paper.json"):
+            api._paper_trades_memory.clear()
+            opened = self.client.post(
+                "/v1/paper/trades/open",
+                headers=self.device_headers,
+                json={
+                    "trade_id": "test-paper-trade", "strategy_id": "unit-test",
+                    "index": "NIFTY", "side": "CALL BUY", "regime": "TEST",
+                    "slippage_r": 0.02, "transaction_cost_r": 0.02,
+                    "notes": "No broker order",
+                },
+            )
+            self.assertEqual(opened.status_code, 200, opened.text)
+            closed = self.client.post(
+                "/v1/paper/trades/test-paper-trade/close",
+                headers=self.device_headers,
+                json={"gross_r": 1.0, "notes": "test result"},
+            )
+            self.assertEqual(closed.status_code, 200, closed.text)
+            self.assertEqual(closed.json()["trade"]["net_r"], 0.96)
+            report = self.client.get("/v1/paper/report", headers=self.device_headers)
+            self.assertEqual(report.status_code, 200, report.text)
+            self.assertEqual(report.json()["metrics"]["trade_count"], 1)
+            self.assertEqual(report.json()["metrics"]["net_total_r"], 0.96)
+            api._paper_trades_memory.clear()
 
 
 if __name__ == "__main__":
