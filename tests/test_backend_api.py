@@ -24,6 +24,10 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ok")
 
+    def test_favicon_request_is_not_reported_as_a_missing_route(self):
+        response = self.client.get("/favicon.ico")
+        self.assertEqual(response.status_code, 204)
+
     def test_ai_validation_reports_not_configured_without_server_keys(self):
         payload = {
             "live": False,
@@ -32,7 +36,7 @@ class BackendApiTests(unittest.TestCase):
             "generated_at": "2026-10-13T00:00:00+00:00",
         }
         with patch.object(api, "_get_signals", return_value=payload), \
-             patch.dict(os.environ, {"OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
+             patch.dict(os.environ, {"GEMINI_API_KEY": "", "GOOGLE_API_KEY": "", "OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
             response = self.client.post(
                 "/v1/ai/validate",
                 headers=self.device_headers,
@@ -232,7 +236,7 @@ class BackendApiTests(unittest.TestCase):
             "signals": {"NIFTY": {"decision": "WAIT", "reasons": ["missing option evidence"], "live_validation": {"verdict": "WARN"}}},
         }
         with patch.object(api, "_get_signals", return_value=payload), \
-             patch.dict(os.environ, {"OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
+             patch.dict(os.environ, {"GEMINI_API_KEY": "", "GOOGLE_API_KEY": "", "OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
             response = self.client.post(
                 "/v1/ai/chat",
                 headers=self.device_headers,
@@ -257,7 +261,7 @@ class BackendApiTests(unittest.TestCase):
             }],
         }
         with patch.object(api, "_get_signals", return_value=payload), \
-             patch.dict(os.environ, {"OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
+             patch.dict(os.environ, {"GEMINI_API_KEY": "", "GOOGLE_API_KEY": "", "OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
             response = self.client.post(
                 "/v1/ai/chat", headers=self.device_headers,
                 json={"index": "CRUDEOILM", "question": "Analyze current MCX context", "history": []},
@@ -269,22 +273,20 @@ class BackendApiTests(unittest.TestCase):
         self.assertIn("5500.0", data["answer"])
         self.assertIn("verified Greeks", data["answer"])
 
-    def test_ai_chat_uses_real_provider_when_configured(self):
+    def test_ai_chat_uses_gemini_only_when_configured(self):
         payload = {
             "market": {"NIFTY": {"ltp": 25000.0, "age_seconds": 3, "live": True, "source": "angelone_smartapi"}},
             "signals": {"NIFTY": {"decision": "WAIT", "reasons": ["risk gate"], "live_validation": {"verdict": "WARN"}}},
         }
 
         class FakeResponse:
-            def __enter__(self):
-                return self
-            def __exit__(self, *_args):
-                return False
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
             def read(self):
-                return json.dumps({"choices": [{"message": {"content": "Snapshot reviewed; risk gate remains WAIT."}}]}).encode()
+                return json.dumps({"candidates": [{"content": {"parts": [{"text": "Snapshot reviewed; risk gate remains WAIT."}]}}]}).encode()
 
-        with patch.object(api, "_get_signals", return_value=payload), \
-             patch.dict(os.environ, {"OPENAI_API_KEY": "test-key", "OPENAI_MODEL": "gpt-4o-mini", "OPENROUTER_API_KEY": ""}, clear=False), \
+        with patch.object(api, "_get_signals", return_value=payload), \\
+             patch.dict(os.environ, {"GEMINI_API_KEY": "test-key", "GEMINI_MODEL": "gemini-2.5-flash", "GOOGLE_API_KEY": "", "OPENAI_API_KEY": "openai-key-must-not-be-used", "OPENAI_MODEL": "gpt-4o-mini", "OPENROUTER_API_KEY": "router-key-must-not-be-used"}, clear=False), \\
              patch.object(api.urllib.request, "urlopen", return_value=FakeResponse()):
             response = self.client.post(
                 "/v1/ai/chat", headers=self.device_headers,
@@ -293,10 +295,9 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         data = response.json()
         self.assertTrue(data["llm_used"])
-        self.assertEqual(data["provider"], "openai")
+        self.assertEqual(data["provider"], "gemini")
         self.assertEqual(data["answer"], "Snapshot reviewed; risk gate remains WAIT.")
         self.assertFalse(data["order_placement_enabled"])
-
     def test_search_provider_test_uses_live_provider_checks(self):
         fake_evidence = {
             "provider_checks": {
