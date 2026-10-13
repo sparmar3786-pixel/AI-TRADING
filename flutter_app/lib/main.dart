@@ -8,7 +8,6 @@ import 'api.dart';
 import 'config.dart';
 import 'trade_engine_page.dart';
 import 'broker_home_prototype_page.dart';
-import 'pdf_report_solutions_page.dart';
 import 'ai_chat_page.dart';
 import 'quant_engine_lab_page.dart';
 import 'order_flow_page.dart';
@@ -18,7 +17,7 @@ import 'risk_calculator_page.dart';
 import 'daily_ai_memory.dart';
 import 'daily_ai_memory_page.dart';
 
-const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Market Diagnostics','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','PDF Report & Fixes','AI Chat','Order Flow','Quant Engine Lab','Strategy Library','Flow Monitor','AI Memory'];
+const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Market Diagnostics','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','AI Chat','Order Flow','Quant Engine Lab','Strategy Library','Flow Monitor','AI Memory'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
 const commodityOptionUnderlyings = ['CRUDEOIL','CRUDEOILM','NATURALGAS','NATGASMINI','GOLD','GOLDM','SILVER','SILVERM','COPPER','ZINC','ALUMINIUM','LEAD','NICKEL'];
 const optionUnderlyings = [...indexes, ...commodityOptionUnderlyings];
@@ -679,7 +678,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           status: status,
           onIndexSelected: (value) => setState(() => selectedIndex = value),
         ),
-        const PdfReportSolutionsPage(),
         AiChatPage(backendUrl: backendUrl, selectedIndex: selectedIndex),
         OrderFlowPage(signalBackendUrl: signalBackendUrl),
         Builder(
@@ -2216,8 +2214,8 @@ class _AiAccessState extends State<AiAccessPage>{
         final name = (item['provider'] ?? '').toString();
         if (name == 'gemini' || name == 'openai' || name == 'openrouter') {
           final check = Map<String, dynamic>.from(item);
-          check['configured'] = true;
-          check['status'] = check['ok'] == true ? 'ok' : (check['error'] ?? 'test_failed').toString();
+          check['configured'] = item['configured'] == true;
+          check['status'] = check['ok'] == true ? 'ok' : (item['status'] ?? item['error'] ?? 'test_failed').toString();
           updated[name] = check;
         }
       }
@@ -2302,7 +2300,7 @@ class _AiAccessState extends State<AiAccessPage>{
 
   @override
   Widget build(BuildContext context) => ListView(padding: const EdgeInsets.all(14), children: [
-    const Section('CLOUD AI • GEMINI + OPENAI + OPENROUTER'),
+    const Section('CLOUD AI • GEMINI CHAT + PROVIDER VALIDATION'),
     Card(child: ListTile(
       leading: Icon(
         providers['gemini']?['ok'] == true ? Icons.cloud_done : Icons.cloud_off,
