@@ -201,7 +201,7 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(orders.json()["orders"], [])
         portfolio = self.client.get("/v1/portfolio", headers=self.device_headers)
         self.assertEqual(portfolio.status_code, 200, portfolio.text)
-        self.assertEqual(portfolio.json()["status"], "not_available")
+        self.assertEqual(portfolio.json()["status"], "not_connected")
         self.assertEqual(portfolio.json()["positions"], [])
 
     def test_ai_chat_fallback_uses_real_payload_fields_and_discloses_no_llm(self):
