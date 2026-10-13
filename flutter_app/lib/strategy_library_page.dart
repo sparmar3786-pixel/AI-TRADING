@@ -77,7 +77,6 @@ class _StrategyLibraryPageState extends State<StrategyLibraryPage> {
           Text('Risk gate: ${x['risk']}', style: const TextStyle(color: Color(0xFF12D6FF), fontSize: 12)),
         ])))),
         const SizedBox(height: 10),
-        const SizedBox(height: 10),
         const Text('Safety: this page is a research catalogue, not proof of profitability. No strategy is marked live or approved here. Use timestamped market data, brokerage costs/slippage, out-of-sample and walk-forward tests, and existing fail-closed risk gates. Deep-learning/RL models must be trained and validated separately; no strategy is approved until measured tests pass.', style: TextStyle(color: Colors.orangeAccent, fontSize: 12)),
       ])),
     );
