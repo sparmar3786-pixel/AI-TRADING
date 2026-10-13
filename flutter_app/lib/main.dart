@@ -559,7 +559,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       body: TabBarView(children: [
         DashboardPage(index:selectedIndex, connected:status == 'LIVE market feed connected.', status:status, signals:signals, market:market, aiProviders:aiProviderStatus, tradePlans:tradePlans, qualifiedCount:qualifiedCount, lastFetch:lastFetch, onSelected:(v)=>setState(()=>selectedIndex=v)),
         MarketPage(selected:selectedIndex,onChanged:(v)=>setState(()=>selectedIndex=v), signal:_signal(selectedIndex), market:_market(selectedIndex)),
-        ChainPage(selected:selectedIndex,onChanged:(v)=>setState(()=>selectedIndex=v), market:_market(selectedIndex), error:optionChainError),
+        ChainPage(selected:selectedIndex,onChanged:(v){setState(()=>selectedIndex=v);refresh();}, market:_market(selectedIndex), error:optionChainError),
         OIPage(signals:signals, market:market, commodities:commodities, optionChains:optionChainsByIndex),
         IndicatorsPage(selected:selectedIndex,signal:_signal(selectedIndex),fast:emaFast,slow:emaSlow,onChanged:(f,s){setState((){emaFast=f;emaSlow=s;});refresh();},onIndex:(v)=>setState(()=>selectedIndex=v)),
         SignalPage(backendUrl:backendUrl,liveStatus:liveTrading,index:selectedIndex,signals:signals,ai:ai,aiProviders:aiProviderStatus,tradePlans:tradePlans,market:market,onChanged:(v)=>setState(()=>selectedIndex=v)),
