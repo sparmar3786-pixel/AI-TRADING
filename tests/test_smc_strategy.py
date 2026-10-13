@@ -1,6 +1,6 @@
 import unittest
 from datetime import datetime, timezone
-from strategies.smc import analyze_smc, analyze_guardeer, analyze_inner_circle, detect_fvg, detect_order_blocks, ict_killzone_status
+from strategies.smc import analyze_smc, analyze_guardeer, analyze_inner_circle, detect_fvg, detect_order_blocks, ict_killzone_status, _structure
 
 
 def bars(values):
@@ -15,6 +15,21 @@ class SmcTests(unittest.TestCase):
     def test_order_block_detects_bullish_displacement(self):
         candles = bars([(10,11,8,9),(9,13,9,12)])
         self.assertTrue(any(x["type"] == "bullish" for x in detect_order_blocks(candles)))
+
+    def test_bos_is_a_single_close_cross_event_against_prebreak_pivot(self):
+        candles = bars([
+            (8, 10, 7, 9),
+            (9, 11, 8, 10),
+            (10, 15, 6, 14),
+            (10, 13, 8, 11),
+            (11, 14, 9, 12),
+            (14, 16, 13, 15.5),
+            (15, 17, 14, 16.5),
+        ])
+        first_break = _structure(candles[:6])
+        following_bar = _structure(candles)
+        self.assertTrue(first_break["bos"])
+        self.assertFalse(following_bar["bos"])
 
     def test_no_candles_never_generates_trade(self):
         result = analyze_smc([], [], [], instrument="CRUDEOIL")
