@@ -16,6 +16,8 @@ class FreshApi {
   /// Latest measured API transfer diagnostics for the in-app health/notification UI.
   /// response_bytes is the UTF-8 body size; duration_ms measures request-to-body latency.
   static Map<String, dynamic> lastRequestMetrics = <String, dynamic>{};
+  /// Latest request telemetry per API path (latest response per route, not a historical average).
+  static final Map<String, Map<String, dynamic>> requestMetricsByPath = <String, Map<String, dynamic>>{};
 
   static void _recordRequestMetric({
     required String method,
@@ -26,7 +28,7 @@ class FreshApi {
     stopwatch.stop();
     final responseBytes = utf8.encode(response.body).length;
     final elapsedMs = stopwatch.elapsedMilliseconds;
-    lastRequestMetrics = <String, dynamic>{
+    final metric = <String, dynamic>{
       'method': method,
       'path': uri.path,
       'status_code': response.statusCode,
@@ -35,6 +37,8 @@ class FreshApi {
       'bytes_per_second': elapsedMs > 0 ? (responseBytes * 1000 / elapsedMs).round() : null,
       'received_at': DateTime.now().toUtc().toIso8601String(),
     };
+    lastRequestMetrics = metric;
+    requestMetricsByPath[uri.path] = Map<String, dynamic>.from(metric);
   }
 
 
