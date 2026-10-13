@@ -64,18 +64,16 @@ class BackendApiTests(unittest.TestCase):
                 }, "blocks": []},
             }},
         }
-        class FakeGemini:
-            def __init__(self, answer): self.answer = answer
-        with patch.object(api, "_signal_cache", payload), \\
-             patch.dict(os.environ, {"GEMINI_API_KEY": "test-key", "GOOGLE_API_KEY": ""}, clear=False), \\
+        with patch.object(api, "_signal_cache", payload), \
+             patch.dict(os.environ, {"GEMINI_API_KEY": "test-key", "GOOGLE_API_KEY": ""}, clear=False), \
              patch.object(api, "_run_gemini_completion", return_value={"answer": json.dumps({"verdict": "PASS", "decision": "CALL BUY", "conflicting_direction": False, "reason": "All checks agree."}), "model": "gemini-2.5-flash", "latency_ms": 25.0}):
             response = self.client.post("/v1/ai/review-signal", headers=self.device_headers, json={"index": "NIFTY"})
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["verdict"], "PASS")
         self.assertEqual(response.json()["decision"], "CALL BUY")
 
-        with patch.object(api, "_signal_cache", payload), \\
-             patch.dict(os.environ, {"GEMINI_API_KEY": "test-key", "GOOGLE_API_KEY": ""}, clear=False), \\
+        with patch.object(api, "_signal_cache", payload), \
+             patch.dict(os.environ, {"GEMINI_API_KEY": "test-key", "GOOGLE_API_KEY": ""}, clear=False), \
              patch.object(api, "_run_gemini_completion", return_value={"answer": json.dumps({"verdict": "PASS", "decision": "PUT BUY", "conflicting_direction": True, "reason": "Direction conflicts."}), "model": "gemini-2.5-flash", "latency_ms": 25.0}):
             response = self.client.post("/v1/ai/review-signal", headers=self.device_headers, json={"index": "NIFTY"})
         self.assertEqual(response.status_code, 200, response.text)
