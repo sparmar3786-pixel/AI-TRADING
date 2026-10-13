@@ -65,8 +65,8 @@ jobs:
               break
             fi
             rm -rf "$NDK_DIR"
-            yes | sdkmanager --licenses >/dev/null || true
-            if sdkmanager --install "ndk;$NDK_VERSION" && [ -x "$NDK_DIR/ndk-build" ]; then
+            timeout 20s bash -c 'yes | sdkmanager --licenses >/dev/null' || true
+            if timeout 90s sdkmanager --install "ndk;$NDK_VERSION" && [ -x "$NDK_DIR/ndk-build" ]; then
               installed=true
               break
             fi
