@@ -819,17 +819,6 @@ class ApiRailwayPage extends StatelessWidget {
         const Divider(height: 1),
         const ListTile(leading: Icon(Icons.vpn_key_outlined), title: Text('Secret handling'), subtitle: Text('Store credentials as Railway variables or encrypted server-side settings. Never commit .env files, API keys, Angel password, PIN, or TOTP seed.')),
       ])),
-      for (final item in links)
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.open_in_new, color: Color(0xFF12D6FF)),
-            title: Text(item.$1),
-            subtitle: Text(item.$3),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => _openExternal(context, item.$2),
-          ),
-        ),
-      const Text('Links open in your browser. A repository/template link is a reference, not proof that your current Railway service is connected or deployed.', style: TextStyle(fontSize: 12, color: Colors.white70)),
     ],
   );
 }
@@ -1223,16 +1212,7 @@ class ResearchEnginesPage extends StatelessWidget {
         InfoRow('AI action', (aiRow['action'] ?? 'AI NOT READY').toString()),
         InfoRow('Blocked reasons', ((validation['blocks'] as List?) ?? const []).map((x) => x.toString()).join(', ').isEmpty ? 'None reported' : ((validation['blocks'] as List?) ?? const []).map((x) => x.toString()).join(', ')),
       ]))),
-      const Section('RESEARCH SOURCES • NON-CHART REPOSITORIES'),
-      for (final source in sources)
-        Card(child: ListTile(
-          leading: const Icon(Icons.auto_awesome, color: Color(0xFF12D6FF)),
-          title: Text(source.$1, style: const TextStyle(fontWeight: FontWeight.w800)),
-          subtitle: Text(source.$3),
-          trailing: const Icon(Icons.open_in_new),
-          onTap: () => _openExternal(context, source.$2),
-        )),
-      const Text('Important: these external repositories are research sources, not proof of installed code. Fresh’s own deterministic modules are what generate the values above; no third-party result is marked live unless the backend actually returns it.', style: TextStyle(fontSize: 11, color: Colors.white70)),
+      const Text('Research results above come from the selected index snapshot and deterministic backend modules. External repository links are hidden from this operational view.', style: TextStyle(fontSize: 11, color: Colors.white70)),
     ]);
   }
 
@@ -1392,21 +1372,9 @@ class TradingSetupPage extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
                 child: Text(section.$2),
               ),
-              for (final link in section.$3)
-                ListTile(
-                  dense: true,
-                  leading: const Icon(Icons.open_in_new, size: 18),
-                  title: Text(link.$1),
-                  subtitle: Text(link.$3),
-                  onTap: () => _openExternal(context, link.$2),
-                ),
             ],
           ),
         ),
-      const Card(child: Padding(
-        padding: EdgeInsets.all(12),
-        child: Text('Important: GitHub links are references, not proof that third-party code is installed or compatible. Review licenses, security, API limits and Indian exchange/broker rules before integration. This app is for decision support. Review historical assumptions and validate the live feed before any live order; live endpoints remain gated and are not a promise of profit.', style: TextStyle(fontSize: 12, color: Colors.white70)),
-      )),
     ],
   );
 }
