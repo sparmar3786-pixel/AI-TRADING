@@ -2843,6 +2843,37 @@ def _run_chat_completion(provider: str, api_key: str, model: str, endpoint: str,
         raise RuntimeError(f"{provider}_{type(exc).__name__.lower()}") from None
 
 
+def _provider_json_with_retry(request: urllib.request.Request, *, timeout: float, provider: str) -> dict[str, Any]:
+    """Retry one transient transport/5xx or empty-body response without retrying auth/quota errors."""
+    last_error: Exception | None = None
+    for attempt in range(2):
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                data = json.loads(response.read().decode("utf-8"))
+            if provider == "gemini":
+                candidates = data.get("candidates") or []
+                parts = ((candidates[0].get("content") or {}).get("parts") or []) if candidates else []
+                answer = "\n".join(str(part.get("text") or "") for part in parts if isinstance(part, dict)).strip()
+            else:
+                choices = data.get("choices") or []
+                answer = str(((choices[0].get("message") or {}).get("content") if choices else "") or "").strip()
+            if answer or attempt == 1:
+                return data
+            last_error = RuntimeError(f"{provider}_empty_response")
+        except urllib.error.HTTPError as exc:
+            last_error = exc
+            if attempt == 1 or exc.code not in (502, 503, 504):
+                raise
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+            last_error = exc
+            if attempt == 1:
+                raise
+        time.sleep(0.25)
+    if last_error:
+        raise last_error
+    raise RuntimeError(f"{provider}_request_failed")
+
+
 def _run_gemini_completion(api_key: str, model: str, messages: list[dict[str, str]]) -> dict[str, Any]:
     """Call Gemini's native generateContent API; never expose the key or raw provider body."""
     started = time.perf_counter()
@@ -2880,8 +2911,7 @@ def _run_gemini_completion(api_key: str, model: str, messages: list[dict[str, st
         headers={"Content-Type": "application/json"}, method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=18) as response:
-            data = json.loads(response.read().decode("utf-8"))
+        data = _provider_json_with_retry(request, timeout=18, provider="gemini")
         candidates = data.get("candidates") or []
         parts = ((candidates[0].get("content") or {}).get("parts") or []) if candidates else []
         answer = "\n".join(str(part.get("text") or "") for part in parts if isinstance(part, dict)).strip()
@@ -2925,8 +2955,7 @@ def _run_openai_compatible_completion(
     request = urllib.request.Request(endpoint, data=json.dumps(payload).encode("utf-8"),
                                      headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(request, timeout=22) as response:
-            data = json.loads(response.read().decode("utf-8"))
+        data = _provider_json_with_retry(request, timeout=22, provider=provider)
         choices = data.get("choices") or []
         message = (choices[0].get("message") or {}) if choices else {}
         answer = str(message.get("content") or "").strip()
