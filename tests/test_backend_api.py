@@ -30,7 +30,7 @@ class BackendApiTests(unittest.TestCase):
             "signals": {"NIFTY": {"decision": "WAIT", "layers": {}, "reasons": ["No fresh quote"]}},
             "generated_at": "2026-10-13T00:00:00+00:00",
         }
-        with patch.object(api, "_get_signals", return_value=payload), \\
+        with patch.object(api, "_get_signals", return_value=payload), \
              patch.dict(os.environ, {"OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
             response = self.client.post(
                 "/v1/ai/validate",
