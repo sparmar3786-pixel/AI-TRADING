@@ -302,7 +302,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           final normalized = <String, dynamic>{};
           for (final item in (providerStatus['provider_health'] as List).whereType<Map>()) {
             final name = (item['name'] ?? '').toString().toLowerCase();
-            if (!['gemini', 'openai', 'openrouter'].contains(name)) continue;
+            if (!['gemini', 'openrouter'].contains(name)) continue;
             normalized[name] = <String, dynamic>{
               'configured': true,
               'ok': false,
@@ -310,7 +310,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
               'model': item['model'] ?? item['model_name'] ?? 'not reported',
             };
           }
-          for (final name in ['gemini', 'openai', 'openrouter']) {
+          for (final name in ['gemini', 'openrouter']) {
             normalized.putIfAbsent(name, () => <String, dynamic>{
               'configured': false, 'ok': false, 'status': 'not_configured', 'model': '—',
             });
@@ -1510,7 +1510,6 @@ class DashboardPage extends StatelessWidget {
     final s=Map<String,dynamic>.from(signals[index] as Map? ?? const{}),m=Map<String,dynamic>.from(market[index] as Map? ?? const{});
     final f=Map<String,dynamic>.from(s['order_flow'] as Map? ?? m['order_flow'] as Map? ?? const{}),i=Map<String,dynamic>.from(s['indicators'] as Map? ?? const{}),v=Map<String,dynamic>.from(s['live_validation'] as Map? ?? const{}),g=(s['guards'] as List? ?? const[]);
     final providers=Map<String,dynamic>.from(aiProviders['providers'] as Map? ?? const{});
-    final openai=Map<String,dynamic>.from(providers['openai'] as Map? ?? const{});
     final openrouter=Map<String,dynamic>.from(providers['openrouter'] as Map? ?? const{});
     final d=(s['decision']??'WAIT').toString().toUpperCase(),fresh=s['data_fresh']==true&&connected,buy=_n(f['buy_volume']),sell=_n(f['sell_volume']),total=buy+sell;
     final layers=<List<dynamic>>[
@@ -1543,9 +1542,9 @@ class DashboardPage extends StatelessWidget {
         const SizedBox(height:12),Row(children:[Expanded(child:_metric('CONFIDENCE',s['confidence']==null?'—':s['confidence'].toString()+'%')),Expanded(child:_metric('REGIME',(s['regime']??'—').toString())),Expanded(child:_metric('QUALIFIED',qualifiedCount.toString()+' / 5'))]),
       ])),
       const SizedBox(height:10),_status('Market feed',fresh?'LIVE VERIFIED':'NOT VERIFIED',fresh),
-      const Section('AI PROVIDERS • OPENAI + OPENROUTER'),
+      const Section('AI PROVIDERS • GEMINI + OPENROUTER'),
       Card(child: Column(children: [
-        ListTile(leading: Icon(Icons.circle, color: openai['ok'] == true ? Colors.greenAccent : Colors.redAccent, size: 12), title: const Text('OpenAI'), subtitle: Text((openai['status'] ?? 'STATUS NOT CHECKED').toString()), trailing: Text((openai['model'] ?? '—').toString(), style: const TextStyle(fontSize: 10))),
+        ListTile(leading: Icon(Icons.circle, color: aiProviders['provider'] == 'gemini' ? Colors.greenAccent : Colors.redAccent, size: 12), title: const Text('Gemini'), subtitle: Text((aiProviders['status'] ?? 'STATUS NOT CHECKED').toString()), trailing: Text((aiProviders['model'] ?? '—').toString(), style: const TextStyle(fontSize: 10))),
         ListTile(leading: Icon(Icons.circle, color: openrouter['ok'] == true ? Colors.greenAccent : Colors.redAccent, size: 12), title: const Text('OpenRouter'), subtitle: Text((openrouter['status'] ?? 'STATUS NOT CHECKED').toString()), trailing: Text((openrouter['model'] ?? '—').toString(), style: const TextStyle(fontSize: 10))),
       ])),
       const SizedBox(height:18),const Text('ORDER FLOW',style:TextStyle(fontSize:15,fontWeight:FontWeight.w900,letterSpacing:1)),
@@ -1885,7 +1884,6 @@ class SignalPage extends StatelessWidget {
     final researchChecks = Map<String, dynamic>.from(researchPack['checks'] as Map? ?? const {});
     final aiDecision = Map<String, dynamic>.from(ai[index] as Map? ?? const {});
     final providerMap = Map<String, dynamic>.from(aiProviders['providers'] as Map? ?? const {});
-    final openaiProvider = Map<String, dynamic>.from(providerMap['openai'] as Map? ?? const {});
     final openrouterProvider = Map<String, dynamic>.from(providerMap['openrouter'] as Map? ?? const {});
     final agentAnalysis = Map<String, dynamic>.from(aiDecision['agent_analysis'] as Map? ?? const {});
     final specialists = Map<String, dynamic>.from(agentAnalysis['specialists'] as Map? ?? const {});
@@ -1967,9 +1965,7 @@ class SignalPage extends StatelessWidget {
       Card(child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          InfoRow('AI mode', (agentAnalysis['mode'] ?? (openaiProvider['ok'] == true ? 'OPENAI CONNECTED • SECONDARY REVIEW' : openrouterProvider['ok'] == true ? 'OPENROUTER CONNECTED • SECONDARY REVIEW' : 'WAITING FOR A REAL PROVIDER TEST')).toString()),
-          InfoRow('OpenAI provider', (openaiProvider['status'] ?? 'STATUS NOT CHECKED').toString()),
-          InfoRow('OpenAI model', (openaiProvider['model'] ?? '—').toString()),
+          InfoRow('AI mode', (agentAnalysis['mode'] ?? (openrouterProvider['ok'] == true ? 'OPENROUTER CONNECTED • SECONDARY REVIEW' : 'WAITING FOR GEMINI / OPENROUTER PROVIDER TEST')).toString()),
           InfoRow('OpenRouter provider', (openrouterProvider['status'] ?? 'STATUS NOT CHECKED').toString()),
           InfoRow('OpenRouter model', (openrouterProvider['model'] ?? '—').toString()),
           InfoRow('Evidence supplied', (agentAnalysis['source_evidence_count'] ?? aiDecision['evidence_count'] ?? 0).toString()),
@@ -2253,7 +2249,7 @@ class _AiAccessState extends State<AiAccessPage>{
       final result = await api.aiStatus();
       final raw = result['providers'];
       if (raw is Map) {
-        for (final name in ['gemini', 'openai', 'openrouter']) {
+        for (final name in ['gemini', 'openrouter']) {
           final value = raw[name];
           if (value is Map) next[name] = Map<String, dynamic>.from(value);
         }
@@ -2265,7 +2261,7 @@ class _AiAccessState extends State<AiAccessPage>{
         if (health is List) {
           for (final item in health.whereType<Map>()) {
             final name = (item['name'] ?? '').toString().toLowerCase();
-            if (!['gemini', 'openai', 'openrouter'].contains(name)) continue;
+            if (!['gemini', 'openrouter'].contains(name)) continue;
             next[name] = <String, dynamic>{
               'configured': true,
               'ok': false,
@@ -2276,7 +2272,7 @@ class _AiAccessState extends State<AiAccessPage>{
             };
           }
         }
-        for (final name in ['gemini', 'openai', 'openrouter']) {
+        for (final name in ['gemini', 'openrouter']) {
           next.putIfAbsent(name, () => <String, dynamic>{
             'configured': false, 'ok': false, 'working': false, 'status': 'not_configured',
           });
@@ -2296,7 +2292,7 @@ class _AiAccessState extends State<AiAccessPage>{
       final updated = <String, Map<String, dynamic>>{...providers};
       for (final item in checks.whereType<Map>()) {
         final name = (item['provider'] ?? '').toString();
-        if (name == 'gemini' || name == 'openai' || name == 'openrouter') {
+        if (name == 'gemini' || name == 'openrouter') {
           final check = Map<String, dynamic>.from(item);
           check['configured'] = item['configured'] == true;
           check['status'] = check['ok'] == true ? 'ok' : (item['status'] ?? item['error'] ?? 'test_failed').toString();
@@ -2367,7 +2363,6 @@ class _AiAccessState extends State<AiAccessPage>{
     final title = switch (name) {
       'exa' => 'Exa Search',
       'tavily' => 'Tavily Search',
-      'openai' => 'OpenAI',
       'openrouter' => 'OpenRouter',
       _ => name,
     };
@@ -2396,11 +2391,11 @@ class _AiAccessState extends State<AiAccessPage>{
         '${providers['gemini']?['status'] ?? 'not tested'} • AI remains advisory; deterministic freshness and risk gates control trade eligibility.',
       ),
     )),
-    FilledButton.icon(onPressed: working ? null : test, icon: const Icon(Icons.psychology), label: Text(working ? 'TESTING GEMINI + OPENAI + OPENROUTER…' : 'TEST GEMINI + OPENAI + OPENROUTER')),
+    FilledButton.icon(onPressed: working ? null : test, icon: const Icon(Icons.psychology), label: Text(working ? 'TESTING GEMINI + OPENROUTER…' : 'TEST GEMINI + OPENROUTER')),
     const SizedBox(height: 10),
     Card(child: Padding(padding: const EdgeInsets.all(12), child: Text(message))),
-    const Section('LLM PROVIDERS • OPENAI + OPENROUTER'),
-    provider('openai'), provider('openrouter'),
+    const Section('LLM PROVIDERS • GEMINI + OPENROUTER'),
+    provider('gemini'), provider('openrouter'),
     OutlinedButton.icon(onPressed: checking ? null : refresh, icon: const Icon(Icons.refresh), label: Text(checking ? 'CHECKING…' : 'REFRESH LLM STATUS')),
     const Section('SEARCH EVIDENCE • BACKEND CONFIGURED'),
     provider('exa'), provider('tavily'),
