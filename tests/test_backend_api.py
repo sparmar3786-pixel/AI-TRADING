@@ -262,7 +262,7 @@ class BackendApiTests(unittest.TestCase):
         thread.return_value.start.assert_called_once()
         self.assertTrue(result["refreshing"])
         self.assertFalse(result["live"])
-        self.assertIn("loading in the background", result["message"])
+        self.assertIn("loading in the background", result["feed"]["message"])
 
     def test_ai_probe_cannot_pass_stale_market_data(self):
         class FakeResponse:
