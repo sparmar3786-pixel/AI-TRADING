@@ -850,6 +850,7 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
     }
     # A source timestamp that is missing or older than the freshness gate will
     # make the quant engine return WAIT; do not substitute the local clock.
+    validation_started = time.monotonic()
     result = evaluate_five_layer_signal(
         snapshot,
         confirmation_state=_confirmation_states.get(index),
@@ -857,6 +858,8 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
         confirmation_seconds=600,
         max_confirmation_gap_seconds=60,
     )
+    # Actual deterministic engine execution time, excluding broker/network collection.
+    result["validation_timing_ms"] = round((time.monotonic() - validation_started) * 1000, 2)
     # Publish one normalized engine contract consumed by Dashboard, Signals,
     # Risk, Trading Setup, the five-layer page and Quant Engine Lab.
     engine_layers = dict(result.get("layers") or {})
@@ -935,6 +938,7 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
         "market_age_seconds": result.get("layers", {}).get("data_quality", {}).get("age_seconds"),
         "option_age_seconds": next((item.get("age_seconds") for item in chain_payload if item.get("strike") == result.get("strike")), None),
         "ai_decision": "NOT_CONFIGURED",
+        "validation_timing_ms": result.get("validation_timing_ms"),
         "blocks": list(result.get("reasons") or []),
     }
     chart_5m: list[dict[str, Any]] = []
