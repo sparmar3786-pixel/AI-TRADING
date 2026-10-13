@@ -145,7 +145,7 @@ class _FlowMonitorPageState extends State<FlowMonitorPage> {
     final signalBuild = Map<String, dynamic>.from(diagnostics['signal_build'] as Map? ?? const {});
     final serverRoutes = Map<String, dynamic>.from(diagnostics['api_performance'] as Map? ?? const {});
     final clientRoutes = FreshApi.requestMetrics;
-    final aiChecks = (providerResult['checks'] as List? ?? const []).whereType<Map>().where((c) => c['provider'] == 'openai' || c['provider'] == 'openrouter').toList();
+    final aiChecks = (providerResult['checks'] as List? ?? const []).whereType<Map>().where((c) => c['provider'] == 'gemini' || c['provider'] == 'openai' || c['provider'] == 'openrouter').toList();
     return RefreshIndicator(
       onRefresh: refresh,
       child: ListView(
