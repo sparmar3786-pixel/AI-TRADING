@@ -380,6 +380,22 @@ def _load_master(force: bool = False) -> list[dict[str, Any]]:
         return _master_rows
 
 
+def _commodity_contract_matches(row: dict[str, Any], requested: str) -> bool:
+    """Match a requested MCX future to its instrument-master name/symbol without mixing mini and standard contracts."""
+    key = requested.strip().upper()
+    name = str(row.get("name", "")).upper().replace(" ", "")
+    symbol = str(row.get("symbol", "")).upper()
+    if key == "CRUDEOIL":
+        return (name == key or symbol.startswith(key)) and not symbol.startswith("CRUDEOILM")
+    if key == "CRUDEOILM":
+        return symbol.startswith(key)
+    if key == "NATURALGAS":
+        return name == key or symbol.startswith(key)
+    if key == "NATGASMINI":
+        return symbol.startswith(key)
+    return name == key or symbol.startswith(key)
+
+
 def _start_stream(adapter: AngelOneReadOnly, rows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     global _stream, _stream_adapter, _stream_start_error
     subscriptions: dict[int, list[str]] = {}
@@ -393,7 +409,7 @@ def _start_stream(adapter: AngelOneReadOnly, rows: list[dict[str, Any]] | None =
             contracts = [
                 row for row in rows
                 if str(row.get("exch_seg", "")).upper() == "MCX"
-                and str(row.get("name", "")).upper() == name
+                and _commodity_contract_matches(row, name)
                 and str(row.get("instrumenttype", "")).upper() == "FUTCOM"
                 and row.get("token")
                 and _expiry_date(row.get("expiry")) is not None
@@ -1858,7 +1874,7 @@ def _commodity_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]]) -
         contracts = [
             row for row in rows
             if str(row.get("exch_seg", "")).upper() == "MCX"
-            and str(row.get("name", "")).upper() == name
+            and _commodity_contract_matches(row, name)
             and str(row.get("instrumenttype", "")).upper() == "FUTCOM"
             and _expiry_date(row.get("expiry")) is not None
             and _expiry_date(row.get("expiry")) >= today
