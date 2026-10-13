@@ -2634,6 +2634,7 @@ def _run_gemini_completion(api_key: str, model: str, messages: list[dict[str, st
 
 
 @app.post("/v1/ai/chat")
+@app.post("/v1/ai/gemini-chat")
 def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
     """Use a real cloud provider when configured; disclose fallback if every provider fails."""
     index = str(body.get("index") or "NIFTY").strip().upper()
