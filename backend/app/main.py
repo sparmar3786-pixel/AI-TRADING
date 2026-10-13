@@ -1779,9 +1779,10 @@ def _get_signals_uncached(force: bool = False) -> dict[str, Any]:
                         except Exception:
                             # Missing history remains missing; the valid spot quote is retained.
                             pass
-                except Exception:
-                    # Preserve the primary failure; never substitute server time or sample prices.
-                    pass
+                except Exception as fallback_exc:
+                    # Preserve a specific diagnostic instead of hiding why the
+                    # independently fetched spot quote could not be retained.
+                    market_row["fallback_error"] = f"{type(fallback_exc).__name__}: {str(fallback_exc)[:180]}"
                 market[index] = market_row
         commodities = _commodity_snapshot(adapter, rows)
         confirmed = []
