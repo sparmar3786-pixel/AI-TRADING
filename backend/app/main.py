@@ -2159,8 +2159,8 @@ def _provider_key_present(*names: str) -> bool:
 def ai_status(_: str = Depends(_device)) -> dict[str, Any]:
     providers = [
         ("gemini", ("GEMINI_API_KEY", "GOOGLE_API_KEY"), os.getenv("GEMINI_MODEL", "gemini")),
-        ("openrouter", ("OPENROUTER_API_KEY",), os.getenv("OPENROUTER_MODEL", "configured-model")),
-        ("openai", ("OPENAI_API_KEY",), os.getenv("OPENAI_MODEL", "configured-model")),
+        ("openrouter", ("OPENROUTER_API_KEY",), os.getenv("OPENROUTER_MODEL", "openrouter/free")),
+        ("openai", ("OPENAI_API_KEY",), os.getenv("OPENAI_MODEL", "gpt-4o-mini")),
     ]
     selected = next((item for item in providers if _provider_key_present(*item[1])), None)
     provider_status = {
