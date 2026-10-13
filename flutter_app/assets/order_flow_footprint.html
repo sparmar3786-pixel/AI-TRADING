@@ -60,7 +60,8 @@ function connect(){
  ws.onopen=()=>{retry=0};
  ws.onmessage=e=>{const m=JSON.parse(e.data);mode=String(m.mode||'').toLowerCase();
   if(m.type==='snap'){raw=Array.isArray(m.candles)?m.candles:[];step=Number(m.step)||step||5}
-  else{const c=m.candle,l=raw[raw.length-1];if(l&&l.t===c.t)raw[raw.length-1]=c;else if(!l||c.t>l.t)raw.push(c);else{const i=raw.findIndex(x=>x.t===c.t);if(i>=0)raw[i]=c}}
+  else if(m.candle&&typeof m.candle==='object'){const c=m.candle,l=raw[raw.length-1];if(l&&l.t===c.t)raw[raw.length-1]=c;else if(!l||c.t>l.t)raw.push(c);else{const i=raw.findIndex(x=>x.t===c.t);if(i>=0)raw[i]=c}}
+  else if(Array.isArray(m.candles)){raw=m.candles}
   status();dirty=1};
  ws.onclose=()=>{$('st').className='';$('st').textContent='Reconnecting...';setTimeout(connect,Math.min(1000*++retry,8000))};
 }
