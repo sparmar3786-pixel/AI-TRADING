@@ -37,6 +37,7 @@ class _DailyAiMemoryPageState extends State<DailyAiMemoryPage> {
     final latest = snapshots.isEmpty ? <String, dynamic>{} : _map(snapshots.last);
     final market = _map(latest['market_analysis']);
     final oi = _map(latest['oi_analysis']);
+    final footprint = _map(latest['footprint_analysis']);
     return Scaffold(
       backgroundColor: const Color(0xFF070B12),
       body: RefreshIndicator(
@@ -86,6 +87,13 @@ class _DailyAiMemoryPageState extends State<DailyAiMemoryPage> {
                   ),
                 ],
               )),
+            const SizedBox(height: 8),
+            const Text('ORDER FLOW / SUPPORT / RESISTANCE', style: TextStyle(fontWeight: FontWeight.w800)),
+            Card(child: ListTile(
+              title: Text('Symbol: ${footprint['symbol'] ?? 'No footprint snapshot yet'}'),
+              subtitle: Text('Support: ${footprint['support_from_observed_candle_lows'] ?? '—'} • Resistance: ${footprint['resistance_from_observed_candle_highs'] ?? '—'}\nWindow: ${footprint['window'] ?? 'Awaiting observed candles'}'),
+              isThreeLine: true,
+            )),
             const SizedBox(height: 8),
             const Text('OPEN-INTEREST BUILDUP / UNWINDING', style: TextStyle(fontWeight: FontWeight.w800)),
             if (oi.isEmpty)
