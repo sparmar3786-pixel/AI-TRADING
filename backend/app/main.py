@@ -913,6 +913,39 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
         "ai_decision": "NOT_CONFIGURED",
         "blocks": list(result.get("reasons") or []),
     }
+    chart_5m: list[dict[str, Any]] = []
+    for candle in candle_rows:
+        if not isinstance(candle, (list, tuple)) or len(candle) < 6:
+            continue
+        stamp = _iso(candle[0])
+        parsed_stamp = datetime.fromisoformat(stamp) if stamp else None
+        opened, high, low, closed = (_number(candle[i]) for i in (1, 2, 3, 4))
+        if parsed_stamp is None or any(value is None for value in (opened, high, low, closed)):
+            continue
+        chart_5m.append({
+            "t": int(parsed_stamp.timestamp()), "timestamp": stamp,
+            "open": opened, "high": high, "low": low, "close": closed,
+            "volume": _number(candle[5]),
+        })
+    chart_5m = chart_5m[-250:]
+    chart_15m: list[dict[str, Any]] = []
+    for offset in range(0, len(chart_5m) - 2, 3):
+        group = chart_5m[offset:offset + 3]
+        if len(group) != 3:
+            continue
+        volumes = [_number(row.get("volume")) for row in group]
+        chart_15m.append({
+            "t": group[-1]["t"], "timestamp": group[-1]["timestamp"],
+            "open": group[0]["open"], "high": max(row["high"] for row in group),
+            "low": min(row["low"] for row in group), "close": group[-1]["close"],
+            "volume": sum(value for value in volumes if value is not None) if any(value is not None for value in volumes) else None,
+        })
+    result["indicators"] = indicators
+    result["oi_summary"] = {
+        "call_oi": call_oi, "put_oi": put_oi, "pcr": pcr,
+        "classification": "PUT OI HEAVY" if pcr is not None and pcr >= 1.10 else "CALL OI HEAVY" if pcr is not None and pcr <= 0.80 else "BALANCED" if pcr is not None else "DATA REQUIRED",
+        "selected_oi_regime": "PUT OI HEAVY" if pcr is not None and pcr >= 1.10 else "CALL OI HEAVY" if pcr is not None and pcr <= 0.80 else "BALANCED" if pcr is not None else "DATA REQUIRED",
+    }
     market = {
         "ltp": spot, "age_seconds": result.get("layers", {}).get("data_quality", {}).get("age_seconds"),
         "feed_mode": spot_quote.get("_source_mode", "REST_FULL_DEPTH"), "source": "angelone_smartapi",
@@ -926,7 +959,13 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
         "session_open": day_open, "session_high": day_high, "session_low": day_low,
         "session_range_position": round(day_range_position, 4),
         "depth_imbalance": round(depth_imbalance, 4),
+        "order_flow": {
+            "bid": bid, "ask": ask, "buy_volume": buy_volume, "sell_volume": sell_volume,
+            "depth_imbalance": depth_imbalance,
+            "semantics": "bid_ask_depth_not_classified_trade_volume",
+        },
         "indicators": indicators,
+        "timeframes": {"1m": [], "5m": chart_5m, "15m": chart_15m},
         "option_chain": chain_payload,
     }
     return result, market
