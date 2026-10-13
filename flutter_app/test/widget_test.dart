@@ -115,6 +115,45 @@ void main() {
     expect(find.text('VALIDATION PERFORMANCE'), findsNothing);
   });
 
+  testWidgets('Research Engines exposes MCX snapshot and keeps commodity CE PE gated', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: ResearchEnginesPage(
+          market: const {},
+          signals: const {},
+          ai: const {},
+          commodities: const [
+            {
+              'name': 'CRUDEOIL',
+              'symbol': 'CRUDEOIL26OCTFUT',
+              'live': true,
+              'ltp': 5500.0,
+              'decision': 'WAIT',
+              'candidate_decision': 'WAIT',
+              'indicators': {'ema_fast': 5501.0, 'ema_slow': 5498.0},
+            },
+          ],
+          optionChains: const {
+            'CRUDEOIL': [
+              {'side': 'CE', 'strike': 5500.0, 'oi': 10},
+              {'side': 'PE', 'strike': 5500.0, 'oi': 20},
+            ],
+          },
+          lastFetch: 'test snapshot',
+          selectedIndex: 'CRUDEOIL',
+          onIndexChanged: (_) {},
+        ),
+      ),
+    ));
+
+    expect(find.text('TECHNICAL INDICATOR ENGINE'), findsOneWidget);
+    expect(find.text('OPTIONS / OPEN INTEREST ENGINE'), findsOneWidget);
+    expect(find.text('MCX CE quotes'), findsOneWidget);
+    expect(find.text('MCX PE quotes'), findsOneWidget);
+    expect(find.text('WAIT until option Greeks, option ATR and risk inputs are verified'), findsOneWidget);
+    expect(find.text('5500.00'), findsWidgets);
+  });
+
   testWidgets('hamburger drawer exposes API and Railway navigation', (tester) async {
     await tester.pumpWidget(const FreshApp());
     await tester.tap(find.byKey(const ValueKey('open-navigation-menu')));
