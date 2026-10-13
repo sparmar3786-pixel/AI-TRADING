@@ -53,7 +53,7 @@ class FreshApi {
   static const Set<String> _signalRoutes = <String>{
     '/v1/system/diagnostics',
     '/v1/ai/status',
-    '/v1/ai/chat',
+    '/v1/ai/gemini-chat',
     '/v1/providers/ai/test',
     '/v1/metadata',
     '/v1/ai/validate',
@@ -340,6 +340,22 @@ class FreshApi {
     List<Map<String, String>> history = const [],
   }) => postJson(
         '/v1/ai/chat',
+        {
+          'index': index,
+          'question': question,
+          'history': history,
+        },
+        timeout: const Duration(seconds: 40),
+      );
+
+  /// Gemini-only review endpoint on the signal service. The legacy AI/chat
+  /// endpoint remains available for compatibility but is not used by this UI.
+  Future<Map<String, dynamic>> geminiChat({
+    required String index,
+    required String question,
+    List<Map<String, String>> history = const [],
+  }) => postJson(
+        '/v1/ai/gemini-chat',
         {
           'index': index,
           'question': question,
