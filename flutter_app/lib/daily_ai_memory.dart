@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 /// observed backend data only; it never fabricates candles, OI, or book depth.
 class DailyAiMemory {
   static String? lastWritePath;
+  static String? lastChatPath;
   static String? lastWriteError;
   static String? _lastMinuteKey;
 
@@ -205,6 +206,63 @@ class DailyAiMemory {
       lastWriteError = null;
     } catch (error) {
       lastWriteError = error.toString();
+    }
+  }
+
+  static Future<void> saveChatTurn({
+    required String question,
+    required String answer,
+    required String provider,
+    required String model,
+    required bool llmUsed,
+  }) async {
+    final now = DateTime.now();
+    try {
+      final dir = await _memoryDirectory();
+      final path = '${dir.path}/${_dayKey(now)}-ai-chat.json';
+      final file = File(path);
+      List<dynamic> turns = <dynamic>[];
+      if (await file.exists()) {
+        try {
+          final decoded = jsonDecode(await file.readAsString());
+          if (decoded is Map && decoded['turns'] is List) {
+            turns = List<dynamic>.from(decoded['turns'] as List);
+          }
+        } catch (_) {
+          turns = <dynamic>[];
+        }
+      }
+      turns.add({
+        'saved_at': now.toIso8601String(),
+        'question': question,
+        'answer': answer,
+        'provider': provider,
+        'model': model,
+        'llm_used': llmUsed,
+      });
+      if (turns.length > 2000) turns = turns.sublist(turns.length - 2000);
+      await file.writeAsString(jsonEncode({
+        'schema_version': 1,
+        'date': _dayKey(now),
+        'turn_count': turns.length,
+        'turns': turns,
+      }), flush: true);
+      lastChatPath = path;
+    } catch (error) {
+      lastWriteError = error.toString();
+    }
+  }
+
+  static Future<List<dynamic>> readChatDay(DateTime date) async {
+    try {
+      final dir = await _memoryDirectory();
+      final file = File('${dir.path}/${_dayKey(date)}-ai-chat.json');
+      if (!await file.exists()) return <dynamic>[];
+      final decoded = jsonDecode(await file.readAsString());
+      if (decoded is Map && decoded['turns'] is List) return List<dynamic>.from(decoded['turns'] as List);
+      return <dynamic>[];
+    } catch (_) {
+      return <dynamic>[];
     }
   }
 
