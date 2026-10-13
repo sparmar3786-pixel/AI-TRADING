@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'api.dart';
 
+const _smcIndexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
+const _smcCommodities = ['CRUDEOIL','CRUDEOILM','NATURALGAS','NATGASMINI','GOLD','GOLDM','SILVER','SILVERM','COPPER','ZINC','ALUMINIUM','LEAD','NICKEL'];
+const _smcUnderlyings = [..._smcIndexes, ..._smcCommodities];
+
 /// Multi-timeframe SMC/ICT chart tab. Consumes the same backend market and
 /// signal snapshots as the rest of the app; no synthetic candle fallback.
 class SmcChartPage extends StatefulWidget {
@@ -77,7 +81,7 @@ class _SmcChartPageState extends State<SmcChartPage> {
     return ListView(padding:const EdgeInsets.all(12),children:[
       Row(children:[const Expanded(child:Text('SMC / ICT PRO CHART',style:TextStyle(fontWeight:FontWeight.w900,fontSize:18))),Chip(label:Text(live?'LIVE FEED':'WAITING FOR LIVE',style:const TextStyle(fontSize:10)),backgroundColor:live?Colors.green.withOpacity(.18):Colors.orange.withOpacity(.15))]),
       const SizedBox(height:8),
-      DropdownButtonFormField<String>(initialValue:widget.index,decoration:const InputDecoration(labelText:'Indian Index / MCX'),items:optionUnderlyings.map((s)=>DropdownMenuItem(value:s,child:Text(commodityOptionUnderlyings.contains(s)?'MCX • $s':s))).toList(),onChanged:(v){if(v!=null)widget.onIndexChanged(v);}),
+      DropdownButtonFormField<String>(initialValue:widget.index,decoration:const InputDecoration(labelText:'Indian Index / MCX'),items:_smcUnderlyings.map((s)=>DropdownMenuItem(value:s,child:Text(_smcCommodities.contains(s)?'MCX • $s':s))).toList(),onChanged:(v){if(v!=null)widget.onIndexChanged(v);}),
       const SizedBox(height:8),
       SegmentedButton<String>(segments:const [ButtonSegment(value:'5m',label:Text('5m')),ButtonSegment(value:'15m',label:Text('15m')),ButtonSegment(value:'1H',label:Text('1H')),ButtonSegment(value:'1D',label:Text('1D'))],selected:{tf},onSelectionChanged:(v)=>setState(()=>tf=v.first)),
       const SizedBox(height:8),
@@ -91,9 +95,7 @@ class _SmcChartPageState extends State<SmcChartPage> {
       Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
         const Text('DETERMINISTIC SMC ENGINE',style:TextStyle(fontWeight:FontWeight.w900,letterSpacing:1)),
         const SizedBox(height:8),
-        Row(children:[Expanded(child:Text('Bias
-${a['bias']}',style:const TextStyle(fontWeight:FontWeight.w800))),Expanded(child:Text('Setup
-${a['signal']}',style:TextStyle(fontWeight:FontWeight.w900,color:a['signal']=='NO TRADE'?Colors.orangeAccent:a['signal']=='LONG'?Colors.greenAccent:Colors.redAccent)))]),
+        Row(children:[Expanded(child:Text('Bias\n${a['bias']}',style:const TextStyle(fontWeight:FontWeight.w800))),Expanded(child:Text('Setup\n${a['signal']}',style:TextStyle(fontWeight:FontWeight.w900,color:a['signal']=='NO TRADE'?Colors.orangeAccent:a['signal']=='LONG'?Colors.greenAccent:Colors.redAccent)))]),
         const SizedBox(height:8),Text((a['reason']??'').toString()),
         const SizedBox(height:8),Text('BOS: ${a['bos']} • Liquidity tolerance: ${a['tol']??'waiting for candles'}'),
         if(a['poi'] is Map) Text('POI: ${(a['poi'] as Map)['bottom']} – ${(a['poi'] as Map)['top']}'),
