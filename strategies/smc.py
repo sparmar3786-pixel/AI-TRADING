@@ -99,10 +99,15 @@ def _structure(candles: list[dict[str, float]]) -> dict[str, Any]:
         return {"bias": "NO CLEAR BIAS", "bos": False, "choch": False, "swings": swings}
     last = cs[-1]
     previous_close = cs[-2]["close"] if len(cs) >= 2 else last["close"]
+    # Freeze the pivot set at the previous candle. If the current break candle
+    # is included in pivot detection, its wick can erase the very pivot it broke.
+    prior_swings = find_swings(cs[:-1])
+    prior_highs = [float(s["price"]) for s in prior_swings if s["type"] == "high"]
+    prior_lows = [float(s["price"]) for s in prior_swings if s["type"] == "low"]
     # BOS is a candle-close crossing event, not merely price remaining beyond
-    # a pivot. This prevents the same old break being reported on every bar.
-    bos_up = previous_close <= highs[-1] and last["close"] > highs[-1]
-    bos_down = previous_close >= lows[-1] and last["close"] < lows[-1]
+    # a pivot. This prevents both missed first breaks and repeated old breaks.
+    bos_up = bool(prior_highs and previous_close <= prior_highs[-1] and last["close"] > prior_highs[-1])
+    bos_down = bool(prior_lows and previous_close >= prior_lows[-1] and last["close"] < prior_lows[-1])
     # Conservative local shift: close breaks the latest opposing confirmed pivot.
     previous_bias = "BULLISH" if len(highs) >= 2 and len(lows) >= 2 and highs[-1] > highs[-2] and lows[-1] > lows[-2] else (
         "BEARISH" if len(highs) >= 2 and len(lows) >= 2 and highs[-1] < highs[-2] and lows[-1] < lows[-2] else "NO CLEAR BIAS")
