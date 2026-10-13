@@ -1200,6 +1200,12 @@ class ResearchEnginesPage extends StatelessWidget {
     }
     final m = commodity ?? Map<String, dynamic>.from(market[selectedIndex] as Map? ?? const {});
     final s = commodity ?? Map<String, dynamic>.from(signals[selectedIndex] as Map? ?? const {});
+    final strategySuite = Map<String, dynamic>.from(
+      s['strategy_suite'] as Map? ?? m['strategy_suite'] as Map? ?? const {},
+    );
+    final strategySignals = Map<String, dynamic>.from(strategySuite['strategies'] as Map? ?? const {});
+    final strategyVotes = Map<String, dynamic>.from(strategySuite['votes'] as Map? ?? const {});
+    final strategyLevels = Map<String, dynamic>.from(strategySuite['support_resistance'] as Map? ?? const {});
     final indicators = Map<String, dynamic>.from(s['indicators'] as Map? ?? const {});
     final chain = (m['option_chain'] as List?) ?? optionChains[selectedIndex] ?? const <dynamic>[];
     final chainRows = chain.whereType<Map>().map((row) => Map<String, dynamic>.from(row)).toList();
@@ -1271,6 +1277,26 @@ class ResearchEnginesPage extends StatelessWidget {
         for (final entry in checks.entries)
           if (entry.value is Map)
             InfoRow(entry.key.replaceAll('_', ' '), (entry.value as Map)['state']?.toString() ?? 'UNKNOWN'),
+        const Divider(height: 22),
+        const Text('UNIFIED STRATEGY SUITE', style: TextStyle(fontWeight: FontWeight.w900)),
+        InfoRow('Suite status', (strategySuite['status'] ?? 'NOT AVAILABLE').toString()),
+        InfoRow('Consensus signal', (strategySuite['signal'] ?? 'WAIT').toString()),
+        InfoRow('Market regime', (strategySuite['market_regime'] ?? 'UNKNOWN').toString()),
+        InfoRow('Long votes', (strategyVotes['LONG'] ?? '—').toString()),
+        InfoRow('Short votes', (strategyVotes['SHORT'] ?? '—').toString()),
+        InfoRow('OI build-up context', (strategySuite['oi_context'] ?? 'UNKNOWN').toString()),
+        InfoRow('ATR 14', _val(strategySuite['atr_14'])),
+        InfoRow('Support (20 bars)', _val(strategyLevels['support'])),
+        InfoRow('Resistance (20 bars)', _val(strategyLevels['resistance'])),
+        for (final entry in strategySignals.entries)
+          InfoRow(entry.key.replaceAll('_', ' ').toUpperCase(), (entry.value ?? 'WAIT').toString()),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+          child: Text(
+            'Strategy suite is research-only. Missing OI change stays UNKNOWN; the suite cannot override the five-layer risk gate or place orders.',
+            style: TextStyle(color: Colors.white70, fontSize: 11),
+          ),
+        ),
         const Divider(height: 22),
         const Text('SIGNAL & VALIDATION OUTPUT', style: TextStyle(fontWeight: FontWeight.w900)),
         InfoRow('Strategy candidate', (s['decision'] ?? 'NO DATA').toString()),
