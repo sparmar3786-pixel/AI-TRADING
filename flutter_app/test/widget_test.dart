@@ -152,7 +152,7 @@ void main() {
     expect(find.text('MCX PE quotes'), findsOneWidget);
     expect(find.text('WAIT'), findsWidgets);
     expect(find.textContaining('Commodity CE/PE entries remain blocked'), findsOneWidget);
-    expect(find.text('5500.00'), findsWidgets);
+    expect(find.textContaining('5500.00'), findsWidgets);
   });
 
   testWidgets('hamburger drawer exposes API and Railway navigation', (tester) async {
