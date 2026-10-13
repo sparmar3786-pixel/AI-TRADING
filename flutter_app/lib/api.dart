@@ -139,12 +139,18 @@ class FreshApi {
       if (rawDetail is String) {
         detail = rawDetail.replaceAll(RegExp(r'[\r\n]+'), ' ').trim();
       } else if (rawDetail is Map) {
-        // FastAPI diagnostics may provide structured message/reason/action fields.
-        detail = [
-          rawDetail['message'],
-          rawDetail['reason'],
-          rawDetail['action'],
-        ].whereType<String>().where((value) => value.trim().isNotEmpty).join(' ');
+        // Angel One login diagnostics are structured. Show actionable broker
+        // context while deliberately excluding credential/token-shaped fields.
+        final fields = <String>[
+          if (rawDetail['stage'] is String) 'Stage: ${rawDetail['stage']}',
+          if (rawDetail['error_code'] is String) 'Code: ${rawDetail['error_code']}',
+          if (rawDetail['message'] is String) rawDetail['message'] as String,
+          if (rawDetail['broker_message'] is String) 'Broker: ${rawDetail['broker_message']}',
+          if (rawDetail['next_step'] is String) 'Next: ${rawDetail['next_step']}',
+          if (rawDetail['reason'] is String) rawDetail['reason'] as String,
+          if (rawDetail['action'] is String) rawDetail['action'] as String,
+        ];
+        detail = fields.where((value) => value.trim().isNotEmpty).join(' ');
       } else if (rawDetail is List) {
         detail = rawDetail.whereType<String>().join(' ');
       }
