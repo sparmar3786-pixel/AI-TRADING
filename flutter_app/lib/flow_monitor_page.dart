@@ -17,10 +17,12 @@ class _FlowMonitorPageState extends State<FlowMonitorPage> {
   Timer? timer;
   bool loading = false, testing = false;
   Map<String, dynamic> diagnostics = const {};
+  Map<String, dynamic> signalsPayload = const {};
   Map<String, dynamic> providerResult = const {};
   String? error;
   final List<String> notifications = <String>[];
   String? lastRouteErrorSignature;
+  String? lastEngineSignature;
 
   String fmt(dynamic value, [String unit = '']) {
     if (value == null) return 'Not measured';
@@ -45,18 +47,37 @@ class _FlowMonitorPageState extends State<FlowMonitorPage> {
     if (loading) return;
     loading = true;
     try {
-      final next = await api.systemDiagnostics().timeout(const Duration(seconds: 12));
+      final responses = await Future.wait<Map<String, dynamic>>([
+        api.systemDiagnostics().timeout(const Duration(seconds: 12)),
+        api.signals().timeout(const Duration(seconds: 12)),
+      ]);
+      final next = responses[0];
+      final nextSignals = responses[1];
       if (!mounted) return;
       final routes = Map<String, dynamic>.from(next['api_performance'] as Map? ?? const {});
-      final bad = routes.entries.where((e) => e.value is Map && ((e.value as Map)['last_status'] is num && ((e.value as Map)['last_status'] as num) >= 400)).map((e) => '${e.key} ${(e.value as Map)['last_status']}').join(', ');
+      final bad = routes.entries.where((e) => e.value is Map && ((e.value as Map)['last_status'] is num && ((e.value as Map)['last_status'] as num) >= 400)).map((e) => '${e.key} ${(e.value as Map)['last_status']} errors=${(e.value as Map)['errors'] ?? 0}').join(', ');
+      final signalRows = Map<String, dynamic>.from(nextSignals['signals'] as Map? ?? const {});
+      final engineSignature = signalRows.entries.map((e) {
+        final row = Map<String, dynamic>.from(e.value as Map? ?? const {});
+        final perf = Map<String, dynamic>.from(row['performance'] as Map? ?? const {});
+        final layers = Map<String, dynamic>.from(row['five_layer_engine'] as Map? ?? row['quant_engine'] as Map? ?? const {});
+        final layerRows = Map<String, dynamic>.from(layers['layers'] as Map? ?? const {});
+        final passed = layerRows.values.whereType<Map>().where((x) => x['pass'] == true).length;
+        return '${e.key}:${row['decision'] ?? 'WAIT'}:$passed/${layerRows.length}:${perf['index_snapshot_ms'] ?? '-'}:${perf['five_layer_validation_ms'] ?? '-'}';
+      }).join('|');
       setState(() {
         diagnostics = next;
+        signalsPayload = nextSignals;
         error = null;
         if (bad.isNotEmpty && bad != lastRouteErrorSignature) {
           notifications.insert(0, '${DateTime.now().toLocal()} • API error • $bad');
-          if (notifications.length > 20) notifications.removeLast();
+        }
+        if (lastEngineSignature != null && engineSignature != lastEngineSignature) {
+          notifications.insert(0, '${DateTime.now().toLocal()} • Engine validation output changed • $engineSignature');
         }
         lastRouteErrorSignature = bad.isEmpty ? null : bad;
+        lastEngineSignature = engineSignature;
+        if (notifications.length > 20) notifications.removeRange(20, notifications.length);
       });
     } catch (e) {
       if (mounted) setState(() {
@@ -164,6 +185,25 @@ class _FlowMonitorPageState extends State<FlowMonitorPage> {
               title: Text(entry.key, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
               subtitle: Text('Last ${fmt(entry.value['last_ms'], ' ms')} • avg ${fmt(entry.value['average_ms'], ' ms')} • status ${entry.value['last_status'] ?? '—'}\nRequest ${fmt(entry.value['last_request_bytes'], ' B')} → response ${fmt(entry.value['last_response_bytes'], ' B')} • ${fmt(entry.value['last_client_throughput_bytes_per_second'], ' B/s')} • errors ${entry.value['errors'] ?? 0}', style: const TextStyle(fontSize: 10)),
             )),
+          const SizedBox(height: 8),
+          const Text('PER-INDEX ENGINE VALIDATION TIMINGS', style: TextStyle(fontWeight: FontWeight.w900)),
+          const SizedBox(height: 4),
+          for (final entry in (Map<String, dynamic>.from(signalsPayload['signals'] as Map? ?? const {})).entries)
+            Builder(builder: (context) {
+              final row = Map<String, dynamic>.from(entry.value as Map? ?? const {});
+              final perf = Map<String, dynamic>.from(row['performance'] as Map? ?? const {});
+              final engine = Map<String, dynamic>.from(row['five_layer_engine'] as Map? ?? row['quant_engine'] as Map? ?? const {});
+              final layers = Map<String, dynamic>.from(engine['layers'] as Map? ?? row['layers'] as Map? ?? const {});
+              final passed = layers.values.whereType<Map>().where((x) => x['pass'] == true).length;
+              final blocked = (row['reasons'] as List? ?? row['reason'] as List? ?? const []).map((x) => x.toString()).take(3).join(' • ');
+              return Card(child: ListTile(
+                dense: true,
+                leading: Icon((row['decision'] == 'CALL BUY' || row['decision'] == 'PUT BUY') ? Icons.check_circle : Icons.hourglass_empty,
+                    color: (row['decision'] == 'CALL BUY' || row['decision'] == 'PUT BUY') ? Colors.greenAccent : Colors.orangeAccent),
+                title: Text('${entry.key} • ${row['decision'] ?? 'WAIT'} • $passed/${layers.length} layers', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
+                subtitle: Text('Index snapshot ${fmt(perf['index_snapshot_ms'], ' ms')} • five-layer validation ${fmt(perf['five_layer_validation_ms'], ' ms')}${blocked.isEmpty ? '' : '\\nBlocked: $blocked'}', style: const TextStyle(fontSize: 10)),
+              ));
+            }),
           const SizedBox(height: 8),
           const Text('OPENAI + OPENROUTER DATA VALIDATION', style: TextStyle(fontWeight: FontWeight.w900)),
           const SizedBox(height: 4),
