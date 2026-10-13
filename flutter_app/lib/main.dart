@@ -560,7 +560,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         ChainPage(selected:selectedIndex,onChanged:(v)=>setState(()=>selectedIndex=v), market:_market(selectedIndex), error:optionChainError),
         OIPage(signals:signals, market:market),
         IndicatorsPage(selected:selectedIndex,signal:_signal(selectedIndex),fast:emaFast,slow:emaSlow,onChanged:(f,s){setState((){emaFast=f;emaSlow=s;});refresh();},onIndex:(v)=>setState(()=>selectedIndex=v)),
-        SignalPage(backendUrl:backendUrl,liveStatus:liveTrading,index:selectedIndex,signals:signals,ai:ai,tradePlans:tradePlans,market:market,onChanged:(v)=>setState(()=>selectedIndex=v)),
+        SignalPage(backendUrl:backendUrl,liveStatus:liveTrading,index:selectedIndex,signals:signals,ai:ai,aiProviders:aiProviderStatus,tradePlans:tradePlans,market:market,onChanged:(v)=>setState(()=>selectedIndex=v)),
         RiskPage(index:selectedIndex,signal:_signal(selectedIndex),plans:tradePlans),
         CommodityPage(items:commodities),
         BacktestingPage(backendUrl: backendUrl),
@@ -1634,12 +1634,13 @@ class _IndicatorsState extends State<IndicatorsPage>{
 }
 
 class SignalPage extends StatelessWidget {
-  const SignalPage({required this.backendUrl, required this.liveStatus, required this.index, required this.signals, required this.ai, required this.tradePlans, required this.market, required this.onChanged, super.key});
+  const SignalPage({required this.backendUrl, required this.liveStatus, required this.index, required this.signals, required this.ai, required this.aiProviders, required this.tradePlans, required this.market, required this.onChanged, super.key});
   final String backendUrl;
   final Map<String, dynamic> liveStatus;
   final String index;
   final Map<String, dynamic> signals;
   final Map<String, dynamic> ai;
+  final Map<String, dynamic> aiProviders;
   final List<dynamic> tradePlans;
   final Map<String, dynamic> market;
   final ValueChanged<String> onChanged;
@@ -1659,6 +1660,9 @@ class SignalPage extends StatelessWidget {
     final researchPack = Map<String, dynamic>.from(timeframeAnalysis['research_pack'] as Map? ?? const {});
     final researchChecks = Map<String, dynamic>.from(researchPack['checks'] as Map? ?? const {});
     final aiDecision = Map<String, dynamic>.from(ai[index] as Map? ?? const {});
+    final providerMap = Map<String, dynamic>.from(aiProviders['providers'] as Map? ?? const {});
+    final openaiProvider = Map<String, dynamic>.from(providerMap['openai'] as Map? ?? const {});
+    final openrouterProvider = Map<String, dynamic>.from(providerMap['openrouter'] as Map? ?? const {});
     final agentAnalysis = Map<String, dynamic>.from(aiDecision['agent_analysis'] as Map? ?? const {});
     final specialists = Map<String, dynamic>.from(agentAnalysis['specialists'] as Map? ?? const {});
     final decision = s['decision']?.toString() ?? '';
@@ -1740,6 +1744,10 @@ class SignalPage extends StatelessWidget {
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           InfoRow('AI mode', (agentAnalysis['mode'] ?? 'WAITING FOR OPENAI / OPENROUTER').toString()),
+          InfoRow('OpenAI provider', (openaiProvider['status'] ?? 'STATUS NOT CHECKED').toString()),
+          InfoRow('OpenAI model', (openaiProvider['model'] ?? '—').toString()),
+          InfoRow('OpenRouter provider', (openrouterProvider['status'] ?? 'STATUS NOT CHECKED').toString()),
+          InfoRow('OpenRouter model', (openrouterProvider['model'] ?? '—').toString()),
           InfoRow('Evidence supplied', (agentAnalysis['source_evidence_count'] ?? aiDecision['evidence_count'] ?? 0).toString()),
           ...specialists.entries.map((entry) {
             final report = Map<String, dynamic>.from(entry.value as Map? ?? const {});
