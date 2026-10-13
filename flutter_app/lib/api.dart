@@ -332,8 +332,8 @@ class FreshApi {
         'notes': notes,
       });
 
-  /// Gemini + configured cloud fallback can take longer than a normal JSON call.
-  /// Keep this separate from offline Qwen, which runs directly on the handset.
+  /// Gemini-only cloud chat can take longer than a normal JSON call.
+  /// OpenAI and OpenRouter are separately tested validation providers, not chat fallbacks.
   Future<Map<String, dynamic>> aiChat({
     required String index,
     required String question,
