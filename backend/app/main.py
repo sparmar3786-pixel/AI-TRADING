@@ -948,6 +948,7 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
     }
     # A source timestamp that is missing or older than the freshness gate will
     # make the quant engine return WAIT; do not substitute the local clock.
+    engine_started = time.perf_counter()
     result = evaluate_five_layer_signal(
         snapshot,
         confirmation_state=_confirmation_states.get(index),
@@ -955,6 +956,10 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
         confirmation_seconds=600,
         max_confirmation_gap_seconds=60,
     )
+    result["performance"] = {
+        **dict(result.get("performance") or {}),
+        "five_layer_validation_ms": round((time.perf_counter() - engine_started) * 1000, 2),
+    }
     # Publish one normalized engine contract consumed by Dashboard, Signals,
     # Risk, Trading Setup, the five-layer page and Quant Engine Lab.
     engine_layers = dict(result.get("layers") or {})
@@ -1644,8 +1649,12 @@ def _get_signals_uncached(force: bool = False) -> dict[str, Any]:
         signals: dict[str, Any] = {}
         market: dict[str, Any] = {}
         for index in INDEXES:
+            index_started = time.perf_counter()
             try:
                 result, quote = _index_snapshot(adapter, rows, index)
+                elapsed_index_ms = round((time.perf_counter() - index_started) * 1000, 2)
+                result["performance"] = {**dict(result.get("performance") or {}), "index_snapshot_ms": elapsed_index_ms}
+                quote["performance"] = {"index_snapshot_ms": elapsed_index_ms}
                 signals[index] = result
                 market[index] = quote
             except Exception as exc:
@@ -1654,9 +1663,12 @@ def _get_signals_uncached(force: bool = False) -> dict[str, Any]:
                 # option Greeks or option ATR). A signal failure must not blank
                 # the Market/Dashboard pages or silently become an actionable trade.
                 reason = str(exc)[:220]
+                elapsed_index_ms = round((time.perf_counter() - index_started) * 1000, 2)
                 signals[index] = _wait_signal(index, reason)
+                signals[index]["performance"] = {"index_snapshot_ms": elapsed_index_ms, "five_layer_validation_ms": None}
                 market_row: dict[str, Any] = {
                     "ltp": None, "age_seconds": None, "feed_mode": "DATA_ERROR",
+                    "performance": {"index_snapshot_ms": elapsed_index_ms},
                     "source": "angelone_smartapi", "live": False,
                     "error": reason, "signal_error": reason, "option_chain": [],
                 }
