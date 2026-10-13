@@ -604,7 +604,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         ),
         const ApiRailwayPage(),
         TradingSetupPage(backendUrl: backendUrl, apiOnline: apiOnline, signalsOnline: signalsEndpointOnline, angelOnline: angelOnline, market: market, signals: signals, ai: ai, liveStatus: liveTrading, lastFetch: lastFetch),
-        ResearchEnginesPage(market: market, signals: signals, ai: ai, lastFetch: lastFetch, selectedIndex: selectedIndex, onIndexChanged: (value) => setState(() => selectedIndex = value)),
+        ResearchEnginesPage(market: market, signals: signals, ai: ai, lastFetch: lastFetch, signalBackendUrl: signalBackendUrl, selectedIndex: selectedIndex, onIndexChanged: (value) => setState(() => selectedIndex = value)),
         TradeEnginePage(
           backendUrl: backendUrl,
           selectedIndex: selectedIndex,
@@ -1133,14 +1133,63 @@ class ResearchEnginesPage extends StatelessWidget {
     required this.signals,
     required this.ai,
     required this.lastFetch,
+    required this.signalBackendUrl,
     required this.selectedIndex,
     required this.onIndexChanged,
     super.key,
   });
   final Map<String, dynamic> market, signals, ai;
   final String? lastFetch;
+  final String signalBackendUrl;
   final String selectedIndex;
   final ValueChanged<String> onIndexChanged;
+
+  Future<void> _validateAIProviders(BuildContext context) async {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Running configured OpenAI and OpenRouter validation…')),
+    );
+    try {
+      final result = await FreshApi(signalBackendUrl).validateAI(selectedIndex);
+      final providers = Map<String, dynamic>.from(result['providers'] as Map? ?? const {});
+      Map<String, dynamic> provider(String name) =>
+          Map<String, dynamic>.from(providers[name] as Map? ?? const {});
+      final openai = provider('openai');
+      final router = provider('openrouter');
+      final summary = 'OpenAI: ${openai['status'] ?? 'unknown'} (${openai['duration_ms'] ?? '—'} ms) • '
+          'OpenRouter: ${router['status'] ?? 'unknown'} (${router['duration_ms'] ?? '—'} ms) • '
+          'Overall: ${result['overall_status'] ?? 'unknown'}';
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(summary), duration: const Duration(seconds: 6)),
+      );
+      String details(String name, Map<String, dynamic> value) =>
+          '$name — ${value['status'] ?? 'unknown'} • model: ${value['model'] ?? '—'} • '
+          '${value['duration_ms'] ?? '—'} ms\\n'
+          '${value['output'] ?? value['error'] ?? 'No output returned.'}';
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text('AI validation • $selectedIndex'),
+          content: SingleChildScrollView(
+            child: SelectableText(
+              '${details('OpenAI', openai)}\\n\\n${details('OpenRouter', router)}\\n\\n'
+              'Deterministic decision: ${result['deterministic_decision'] ?? 'WAIT'}\\n'
+              'Engine validation: ${result['validation_timing_ms'] ?? '—'} ms\\n'
+              '${result['safety'] ?? ''}',
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(dialogContext).pop(), child: const Text('Close')),
+          ],
+        ),
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('AI validation failed: ${error.toString().replaceFirst('Exception: ', '')}')),
+      );
+    }
+  }
 
   static const sources = <(String, String, String)>[
     ('Systematic Trading', 'https://github.com/paperswithbacktest/awesome-systematic-trading', 'Strategy research index; live evidence is computed by Fresh backend modules.'),
@@ -1207,6 +1256,14 @@ class ResearchEnginesPage extends StatelessWidget {
             InfoRow(entry.key.replaceAll('_', ' '), (entry.value as Map)['state']?.toString() ?? 'UNKNOWN'),
         const Divider(height: 22),
         const Text('SIGNAL & VALIDATION OUTPUT', style: TextStyle(fontWeight: FontWeight.w900)),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: () => _validateAIProviders(context),
+            icon: const Icon(Icons.fact_check_outlined),
+            label: const Text('RUN OPENAI + OPENROUTER VALIDATION'),
+          ),
+        ),
         InfoRow('Strategy candidate', (s['decision'] ?? 'NO DATA').toString()),
         InfoRow('Validated decision', (validation['decision'] ?? 'WAIT').toString()),
         InfoRow('Validation verdict', (validation['verdict'] ?? 'NOT VALIDATED').toString()),
