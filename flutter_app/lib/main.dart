@@ -9,15 +9,13 @@ import 'config.dart';
 import 'trade_engine_page.dart';
 import 'broker_home_prototype_page.dart';
 import 'pdf_report_solutions_page.dart';
-import 'quant_research_hub_page.dart';
-import 'quant_repositories_page.dart';
 import 'ai_chat_page.dart';
 import 'quant_engine_lab_page.dart';
 import 'order_flow_page.dart';
 import 'strategy_library_page.dart';
 import 'flow_monitor_page.dart';
 
-const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Repository Library','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','PDF Report & Repositories','Quant Research Hub','Quant & Trading Repositories','AI Chat','Order Flow','Quant Engine Lab','Strategy Library','Flow Monitor'];
+const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Engine Data','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','PDF Report & Fixes','AI Chat','Order Flow','Quant Engine Lab','Strategy Library','Flow Monitor'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
 
 void main() {
@@ -596,8 +594,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           onIndexSelected: (value) => setState(() => selectedIndex = value),
         ),
         const PdfReportSolutionsPage(),
-        const QuantResearchHubPage(),
-        const QuantRepositoriesPage(),
         AiChatPage(backendUrl: backendUrl, selectedIndex: selectedIndex),
         OrderFlowPage(signalBackendUrl: signalBackendUrl),
         Builder(
@@ -1043,7 +1039,7 @@ class RepositoryLibraryPage extends StatelessWidget {
   Widget build(BuildContext context) => ListView(
     padding: const EdgeInsets.all(12),
     children: [
-      const Text('INTEGRATED ENGINE OUTPUT • CURRENT BACKEND DATA', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
+      const Text('ENGINE DATA • CURRENT BACKEND SNAPSHOT', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
       const SizedBox(height: 8),
       Card(child: Column(children: [
         InfoRow('Latest fetch', lastFetch ?? 'No successful fetch recorded'),
@@ -1080,17 +1076,7 @@ class RepositoryLibraryPage extends StatelessWidget {
       const SizedBox(height: 6),
       const Text('These are Fresh-Apk modules, not proof that every external repository has been imported: Angel One SmartAPI/WebSocket, normalized market store, trend/technical indicators, OI classification, strategy ensemble/conflict checks, signal-quality gates, historical backtesting, risk gates and AI/search evidence integration.', style: TextStyle(color: Colors.white70)),
       const SizedBox(height: 14),
-      const Text('EXTERNAL REPOSITORIES • REFERENCE LINKS ONLY', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
-      const SizedBox(height: 8),
-      const Text('These links are not automatically cloned or integrated. Only their specific code is included if it has been separately ported, tested and licensed for this app. Tap to open the upstream repository.', style: TextStyle(color: Colors.white70)),
-      for (final item in links)
-        Card(child: ListTile(
-          leading: const Icon(Icons.code, color: Color(0xFF12D6FF)),
-          title: Text(item.$1),
-          subtitle: Text(item.$3),
-          trailing: const Icon(Icons.open_in_new),
-          onTap: () => _openExternal(context, item.$2),
-        )),
+      const Text('Runtime modules and status are shown above. External repository URLs are intentionally hidden from operational tabs.', style: TextStyle(color: Colors.white70, fontSize: 12)),
     ],
   );
 }
@@ -1110,8 +1096,6 @@ class ResearchEnginesPage extends StatelessWidget {
   final String selectedIndex;
   final ValueChanged<String> onIndexChanged;
 
-  static const sources = <(String, String, String)>[];
-
   @override
   Widget build(BuildContext context) {
     final m = Map<String, dynamic>.from(market[selectedIndex] as Map? ?? const {});
@@ -1129,7 +1113,7 @@ class ResearchEnginesPage extends StatelessWidget {
     return ListView(padding: const EdgeInsets.all(12), children: [
       const Text('RESEARCH ENGINES • LIVE BACKEND OUTPUT', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
       const SizedBox(height: 6),
-      const Text('Chart-only libraries are intentionally excluded here. This tab surfaces Fresh’s actual indicator, OI, confluence and validation outputs alongside the research repositories that inspired the workflow.', style: TextStyle(color: Colors.white70, fontSize: 12)),
+      const Text('This tab surfaces actual indicator, OI, confluence and validation outputs. Repository links are not displayed in operational pages.', style: TextStyle(color: Colors.white70, fontSize: 12)),
       const SizedBox(height: 10),
       IndexPicker(selected: selectedIndex, onChanged: onIndexChanged),
       Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1172,16 +1156,11 @@ class ResearchEnginesPage extends StatelessWidget {
         InfoRow('AI action', (aiRow['action'] ?? 'AI NOT READY').toString()),
         InfoRow('Blocked reasons', ((validation['blocks'] as List?) ?? const []).map((x) => x.toString()).join(', ').isEmpty ? 'None reported' : ((validation['blocks'] as List?) ?? const []).map((x) => x.toString()).join(', ')),
       ]))),
-      const Section('VALIDATION OUTPUT'),
-      for (final source in sources)
-        Card(child: ListTile(
-          leading: const Icon(Icons.auto_awesome, color: Color(0xFF12D6FF)),
-          title: Text(source.$1, style: const TextStyle(fontWeight: FontWeight.w800)),
-          subtitle: Text(source.$3),
-          trailing: const Icon(Icons.open_in_new),
-          onTap: () => _openExternal(context, source.$2),
-        )),
-      const Text('Important: these external repositories are research sources, not proof of installed code. Fresh’s own deterministic modules are what generate the values above; no third-party result is marked live unless the backend actually returns it.', style: TextStyle(fontSize: 11, color: Colors.white70)),
+      const Section('VALIDATION PERFORMANCE'),
+      InfoRow('Index snapshot compute time', '${(s['performance'] as Map?)?['index_snapshot_ms'] ?? '—'} ms'),
+      InfoRow('Five-layer validation time', '${(s['performance'] as Map?)?['five_layer_validation_ms'] ?? '—'} ms'),
+      InfoRow('Overall signal build time', '${(s['performance'] as Map?)?['signal_build_ms'] ?? '—'} ms'),
+      const Text('Timings are measured runtime values. A missing timing means the engine did not return a measurement.', style: TextStyle(fontSize: 11, color: Colors.white70)),
     ]);
   }
 
@@ -1296,7 +1275,7 @@ class TradingSetupPage extends StatelessWidget {
         ),
       const Card(child: Padding(
         padding: EdgeInsets.all(12),
-        child: Text('Important: GitHub links are references, not proof that third-party code is installed or compatible. Review licenses, security, API limits and Indian exchange/broker rules before integration. This app is for decision support. Review historical assumptions and validate the live feed before any live order; live endpoints remain gated and are not a promise of profit.', style: TextStyle(fontSize: 12, color: Colors.white70)),
+        child: Text('Decision support only. Validate fresh broker timestamps, provider output and deterministic risk gates before considering any trade; no signal guarantees profit.', style: TextStyle(fontSize: 12, color: Colors.white70)),
       )),
     ],
   );
