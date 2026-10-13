@@ -150,7 +150,8 @@ void main() {
     expect(find.text('OPTIONS / OPEN INTEREST ENGINE'), findsOneWidget);
     expect(find.text('MCX CE quotes'), findsOneWidget);
     expect(find.text('MCX PE quotes'), findsOneWidget);
-    expect(find.text('WAIT — Greeks/ATR required'), findsOneWidget);
+    expect(find.text('WAIT'), findsWidgets);
+    expect(find.textContaining('Commodity CE/PE entries remain blocked'), findsOneWidget);
     expect(find.text('5500.00'), findsWidgets);
   });
 
