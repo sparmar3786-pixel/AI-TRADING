@@ -39,6 +39,19 @@ class StrategySuiteApiTests(unittest.TestCase):
         self.assertFalse(trace["ai_consumed"])
         self.assertFalse(trace["research_engine_received"])
         self.assertFalse(trace["trading_setup_received"])
+        self.assertEqual(trace["downstream_status"], "NOT_CONNECTED")
+        strategy_trace = result["strategy_trace"]
+        self.assertEqual(len(strategy_trace), len(result["strategies"]))
+        for item in strategy_trace:
+            self.assertEqual(item["execution_id"], trace["execution_id"])
+            self.assertEqual(item["strategy_version"], trace["strategy_version"])
+            self.assertEqual(item["input_candle_count"], len(candles))
+            self.assertEqual(item["input_sha256"], trace["input_sha256"])
+            self.assertIn(item["signal"], ("LONG", "SHORT", "WAIT"))
+            self.assertIsNone(item["score"])
+            self.assertEqual(item["score_status"], "NOT_COMPUTED_BY_RULE")
+            self.assertFalse(item["ai_consumed"])
+            self.assertFalse(item["order_placement_enabled"])
 
     def test_evaluate_strategy_suite_rejects_empty_history(self):
         response = self.client.post(
