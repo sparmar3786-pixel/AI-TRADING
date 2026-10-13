@@ -49,8 +49,8 @@ class _GeminiSignalReviewState extends State<GeminiSignalReview> {
       final decision = (response['decision'] ?? 'WAIT').toString().toUpperCase();
       final reason = (response['reason'] ?? 'No review reason returned.').toString();
       final blocks = (response['blocks'] as List? ?? const []).map((item) => item.toString()).join(', ');
-      final answer = 'Gemini verdict: $verdict • Decision: $decision\\n$reason'
-          '${blocks.isEmpty ? '' : '\\nBlocking checks: $blocks'}';
+      final answer = 'Gemini verdict: $verdict • Decision: $decision\n$reason'
+          '${blocks.isEmpty ? '' : '\nBlocking checks: $blocks'}';
       if (!mounted) return;
       setState(() {
         _connected = used;
