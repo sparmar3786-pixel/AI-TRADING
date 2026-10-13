@@ -40,3 +40,13 @@ Preserve symbol selector; timeframes 1m, 3m, 5m, 15m, 30m, 1h; zoom; live contro
 
 ## Verification limits
 This is an evidence-based audit, not a claim that all tabs are now end-to-end verified. A green /health, successful APK build, or configured AI key does not prove fresh Angel One ticks or successful AI inference. Live order placement remains disabled while validation is incomplete.
+
+## Fixes applied during the follow-up audit — 13 Oct 2026
+
+- **Angel One environment bootstrap:** the signals backend now accepts either `ANGEL_CLIENT_CODE` or the already-configured Railway name `ANGEL_CLIENT_ID`. A regression test covers the alias. This removes a confirmed name mismatch; actual broker authentication still must be confirmed by a fresh device request and current SmartAPI response.
+- **SMC API contract:** Guardeer and Inner Circle wrappers now accept the API's optional `liquidity_tolerance` argument. The SMC panel displays the server-reported ICT killzone window and New York local time.
+- **SMC candle freshness:** live chart/analysis now requires a live backend marker plus a recent timestamped 15-minute candle. Empty, stale, or demo candles remain non-actionable.
+- **Signal request timeout:** Flutter's `/v1/signals` request timeout is 80 seconds to avoid converting a delayed response into a misleading timeout error. This is a resilience guard, not a replacement for reducing backend latency.
+- **Verification:** Python unit tests passed after the credential and SMC test fixes. Railway's `ai-trading-signals-api` deployment for the environment-variable fix completed successfully and its `/health` startup check returned HTTP 200. The APK workflow for the Flutter freshness/timeout changes is still running; no artifact is claimed from that run until upload completes.
+- **Still requires runtime confirmation:** a new authenticated device request must confirm Angel One login, fresh exchange timestamps, option-chain quotes, WebSocket tick freshness, and real OpenAI/OpenRouter/Gemini inference. A successful health check alone does not prove those paths.
+
