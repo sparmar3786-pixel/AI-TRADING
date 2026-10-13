@@ -171,6 +171,7 @@ def analyze_guardeer(
     mtf_candles: list[dict[str, Any]],
     ltf_candles: list[dict[str, Any]],
     *, instrument: str = "NIFTY", in_killzone: bool = True,
+    liquidity_tolerance: float | None = None,
 ) -> dict[str, Any]:
     """Guardeer 11-lecture SMC profile: fractal HTF/MTF/LTF, structure,
     inducement proxy, OB/FVG POI, liquidity and intermediate/short-term swings.
@@ -178,7 +179,8 @@ def analyze_guardeer(
     can be inferred from OHLC alone.
     """
     result = analyze_smc(htf_candles, mtf_candles, ltf_candles,
-                         instrument=instrument, in_killzone=in_killzone)
+                         instrument=instrument, in_killzone=in_killzone,
+                         liquidity_tolerance=liquidity_tolerance)
     htf_swings = find_swings(_valid(htf_candles))
     mtf_swings = find_swings(_valid(mtf_candles))
     ltf_swings = find_swings(_valid(ltf_candles))
@@ -204,11 +206,13 @@ def analyze_inner_circle(
     mtf_candles: list[dict[str, Any]],
     ltf_candles: list[dict[str, Any]],
     *, instrument: str = "NIFTY", in_killzone: bool = True,
+    liquidity_tolerance: float | None = None,
 ) -> dict[str, Any]:
     """Inner Circle ICT Core Course profile with bias, structure, liquidity,
     FVG/OB, OTE range, killzone and Power-of-3 evidence."""
     result = analyze_smc(htf_candles, mtf_candles, ltf_candles,
-                         instrument=instrument, in_killzone=in_killzone)
+                         instrument=instrument, in_killzone=in_killzone,
+                         liquidity_tolerance=liquidity_tolerance)
     htf = _valid(htf_candles)
     swing_high = max((c["high"] for c in htf), default=None)
     swing_low = min((c["low"] for c in htf), default=None)
