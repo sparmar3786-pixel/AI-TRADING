@@ -8,12 +8,14 @@ import 'api.dart';
 import 'config.dart';
 import 'trade_engine_page.dart';
 import 'broker_home_prototype_page.dart';
+import 'pdf_report_solutions_page.dart';
 import 'ai_chat_page.dart';
 import 'quant_engine_lab_page.dart';
 import 'order_flow_page.dart';
 import 'strategy_library_page.dart';
+import 'flow_monitor_page.dart';
 
-const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','AI Chat','Order Flow','Quant Engine Lab','Strategy Library'];
+const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Engine Data','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','PDF Report & Fixes','AI Chat','Order Flow','Quant Engine Lab','Strategy Library','Flow Monitor'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
 
 void main() {
@@ -63,7 +65,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
   bool apiOnline = false;
   bool signalsEndpointOnline = false;
   String? signalsFetchError;
-  String? _lastNotifiedSignalError;
   bool angelOnline = false;
   Map<String,dynamic> liveTrading = const {};
   Map<String,dynamic> ai = const {};
@@ -254,7 +255,13 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       // and paper-ledger routes are dispatched by FreshApi to AI-TRADING.
       final api = FreshApi(backendUrl);
       final signalApi = FreshApi(signalBackendUrl);
-      await api.health();
+      // The AI/chat backend is optional and independent of the Angel One
+      // market API. Its health failure must never mark market data offline.
+      try {
+        await api.health();
+      } catch (chatHealthError) {
+        debugPrint('AI_CHAT_BACKEND_HEALTH_FAILED: $chatHealthError');
+      }
       Map<String,dynamic> a = const {};
       String? angelStatusError;
       try {
@@ -280,9 +287,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           debugPrint('FRESH_SIGNALS_CACHE_WRITE_FAILED: $cacheError');
         }
       } catch (e) {
-        final message = e.toString().replaceFirst('Exception: ', '');
-        if (mounted) setState(() { signalsEndpointOnline = false; signalsFetchError = message; });
-        _notifySignalFailure(message);
+        if (mounted) setState(() { signalsEndpointOnline = false; signalsFetchError = e.toString().replaceFirst('Exception: ', ''); });
         s = _makeCachedSignalsNonActionable(await _loadCachedSignals());
       }
       // The signal endpoint deliberately fails closed when candles/Greeks are
@@ -390,46 +395,14 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     return minutes >= (9 * 60 + 15) && minutes <= (15 * 60 + 30);
   }
 
-  void _notifySignalFailure(String message) {
-    final normalized = message.trim().isEmpty ? 'Signal endpoint request failed.' : message.trim();
-    if (_lastNotifiedSignalError == normalized) return;
-    _lastNotifiedSignalError = normalized;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Signal API issue: $normalized'),
-          backgroundColor: Colors.deepOrange,
-          duration: const Duration(seconds: 5),
-        ),
-      );
-    });
-  }
-
-  String get _apiMetricTooltip {
-    final metrics = FreshApi.lastRequestMetrics;
-    if (metrics.isEmpty) return 'No completed API response measured yet.';
-    return 'Last API request: ${metrics['method']} ${metrics['path']}'
-        ' • HTTP ${metrics['status_code']}'
-        ' • ${metrics['duration_ms']} ms'
-        ' • ${metrics['response_bytes']} bytes received'
-        ' • ${metrics['bytes_per_second'] ?? 'n/a'} B/s'
-        ' • ${metrics['received_at']}';
-  }
-
   String get _appBarStatus {
     if (!apiOnline) return "API OFFLINE";
-    if (!signalsEndpointOnline) {
-      final error = (signalsFetchError ?? '').toLowerCase();
-      if (error.contains('timeout') || error.contains('timed out')) {
-        return "API UP • SIGNAL TIMEOUT";
-      }
-      return "API UP • SIGNAL ERROR";
-    }
+    if (!signalsEndpointOnline) return "API UP • DATA ERROR";
     if (!_marketOpenNow) return "API UP • MARKET CLOSED";
     if (status == "LIVE market feed connected.") return "API LIVE";
     if (status.startsWith("Backend online")) return "API UP • WAITING DATA";
-    return "API UP • WAITING / STALE DATA";
+    if (status.startsWith("LIVE unavailable") || status.startsWith("Signal API responded")) return "API UP • REFRESHING DATA";
+    return "API UP • DATA ERROR";
   }
 
   Color get _appBarStatusColor {
@@ -573,7 +546,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         ]),
         actions: [Padding(padding: const EdgeInsets.only(right:12), child: Row(children: [
           Icon(Icons.circle, size:10, color: _appBarStatusColor), SizedBox(width:5),
-          Tooltip(message: _apiMetricTooltip, child: Text(_appBarStatus, style: TextStyle(fontSize:11, color: _appBarStatusColor))),
+          Text(_appBarStatus, style: TextStyle(fontSize:11, color: _appBarStatusColor)),
         ]))],
         bottom: TabBar(isScrollable: true, tabAlignment: TabAlignment.start, tabs: tabs.map((t)=>Tab(text:t)).toList()),
       ),
@@ -603,8 +576,9 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           onRefresh: refresh,
         ),
         const ApiRailwayPage(),
+        RepositoryLibraryPage(market: market, signals: signals, feed: feed, diagnostics: storeDiagnostics, lastFetch: lastFetch),
         TradingSetupPage(backendUrl: backendUrl, apiOnline: apiOnline, signalsOnline: signalsEndpointOnline, angelOnline: angelOnline, market: market, signals: signals, ai: ai, liveStatus: liveTrading, lastFetch: lastFetch),
-        ResearchEnginesPage(market: market, signals: signals, ai: ai, lastFetch: lastFetch, signalBackendUrl: signalBackendUrl, selectedIndex: selectedIndex, onIndexChanged: (value) => setState(() => selectedIndex = value)),
+        ResearchEnginesPage(market: market, signals: signals, ai: ai, lastFetch: lastFetch, selectedIndex: selectedIndex, onIndexChanged: (value) => setState(() => selectedIndex = value)),
         TradeEnginePage(
           backendUrl: backendUrl,
           selectedIndex: selectedIndex,
@@ -625,6 +599,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           status: status,
           onIndexSelected: (value) => setState(() => selectedIndex = value),
         ),
+        const PdfReportSolutionsPage(),
         AiChatPage(backendUrl: backendUrl, selectedIndex: selectedIndex),
         OrderFlowPage(signalBackendUrl: signalBackendUrl),
         Builder(
@@ -637,6 +612,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           ),
         ),
         StrategyLibraryPage(market: market, signals: signals, selectedIndex: selectedIndex),
+        FlowMonitorPage(signalBackendUrl: signalBackendUrl),
       ]),
     ),
   );
@@ -662,11 +638,11 @@ IconData _tabIcon(int index) => switch (index) {
   16 => Icons.layers_outlined,
   17 => Icons.account_balance_wallet_outlined,
   18 => Icons.picture_as_pdf_outlined,
-  19 => Icons.science_outlined,
-  20 => Icons.library_books_outlined,
-  21 => Icons.chat_bubble_outline,
-  22 => Icons.show_chart,
-  23 => Icons.library_books_outlined,
+  19 => Icons.chat_bubble_outline,
+  20 => Icons.show_chart,
+  21 => Icons.library_books_outlined,
+  22 => Icons.layers_outlined,
+  23 => Icons.speed,
   _ => Icons.layers_outlined,
 };
 
@@ -739,6 +715,11 @@ class DataHealthPage extends StatelessWidget {
         if (_diagValue(diagnostics, 'ai', 'last_error', fallback: '') != '')
           ListTile(leading: const Icon(Icons.warning_amber), title: const Text('AI request error'), subtitle: Text(_diagValue(diagnostics, 'ai', 'last_error', fallback: ''))),
         ListTile(
+          leading: const Icon(Icons.speed),
+          title: const Text('Signal engine build timing'),
+          subtitle: Text('Last build: ${_diagValue(diagnostics, 'signal_build', 'last_duration_ms')} ms • Builds: ${_diagValue(diagnostics, 'signal_build', 'build_count')} • In flight: ${_diagValue(diagnostics, 'signal_build', 'in_flight')}'),
+        ),
+        ListTile(
           leading: Icon(diagnostics.isNotEmpty ? Icons.check_circle_outline : Icons.info_outline),
           title: const Text('Diagnostics endpoint'),
           subtitle: Text(diagnostics.isNotEmpty ? 'Connected • backend returned a diagnostic payload' : (diagnosticsError ?? 'Detailed diagnostics not received yet')),
@@ -792,18 +773,7 @@ String _diagValue(
 class ApiRailwayPage extends StatelessWidget {
   const ApiRailwayPage({super.key});
 
-  static const links = <(String, String, String)>[
-    ('Railway FastAPI starter', 'https://github.com/railwayapp-templates/fastapi', 'Official FastAPI backend starter'),
-    ('Railway templates', 'https://github.com/railwayapp-templates', 'Browse Railway-ready services and databases'),
-    ('Railway starters repository', 'https://github.com/railwayapp/templates', 'Official Railway starter templates'),
-    ('FastAPI full-stack Railway', 'https://github.com/lNamelessl/fastapi-fullstack-railway', 'Community full-stack FastAPI/Railway example'),
-    ('Railway deploy from GitHub', 'https://railway.com/new', 'Connect a repository and deploy a service'),
-    ('Railway dashboard', 'https://railway.com/dashboard', 'Manage services, deployments and variables'),
-    ('Railway documentation', 'https://docs.railway.com', 'Deployment, variables, domains and health checks'),
-    ('Railway CLI', 'https://docs.railway.com/guides/cli', 'CLI install and deploy instructions'),
-    ('FastAPI documentation', 'https://fastapi.tiangolo.com', 'API routes, validation and OpenAPI docs'),
-    ('GitHub repository: Fresh-Apk', 'https://github.com/sparmar3786-pixel/Fresh-Apk/tree/fresh-platform-v1', 'Current app and backend source branch'),
-  ];
+  static const links = <(String, String, String)>[];
 
   @override
   Widget build(BuildContext context) => ListView(
@@ -820,6 +790,17 @@ class ApiRailwayPage extends StatelessWidget {
         const Divider(height: 1),
         const ListTile(leading: Icon(Icons.vpn_key_outlined), title: Text('Secret handling'), subtitle: Text('Store credentials as Railway variables or encrypted server-side settings. Never commit .env files, API keys, Angel password, PIN, or TOTP seed.')),
       ])),
+      for (final item in links)
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.open_in_new, color: Color(0xFF12D6FF)),
+            title: Text(item.$1),
+            subtitle: Text(item.$3),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _openExternal(context, item.$2),
+          ),
+        ),
+      const Text('Use runtime diagnostics above to verify the actual backend, broker session and data freshness.', style: TextStyle(fontSize: 12, color: Colors.white70)),
     ],
   );
 }
@@ -1057,25 +1038,13 @@ class RepositoryLibraryPage extends StatelessWidget {
   final Map<String, dynamic> market, signals, feed, diagnostics;
   final String? lastFetch;
 
-  static const links = <(String, String, String)>[
-    ('Systematic trading strategies', 'https://github.com/paperswithbacktest/awesome-systematic-trading', 'Strategy research collection'),
-    ('Algorithmic trading collection', 'https://github.com/joelowj/awesome-algorithmic-trading', 'Algorithmic trading tools and references'),
-    ('Quant finance resources', 'https://github.com/wilsonfreitas/awesome-quant', 'Quantitative finance libraries and learning'),
-    ('Deep trading resources', 'https://github.com/cbailes/awesome-deep-trading', 'Deep learning and trading references'),
-    ('Trading strategy topic', 'https://github.com/topics/trading-strategies', 'Explore more strategy repositories'),
-    ('Plotly.js chart library', 'https://github.com/plotly/plotly.js', 'General charting reference; excluded from Research Engines tab'),
-    ('KLineChart', 'https://github.com/klinecharts/KLineChart', 'Candlestick chart library'),
-    ('TradingView Lightweight Charts', 'https://github.com/tradingview/lightweight-charts', 'Lightweight interactive charts'),
-    ('Indian stock dashboard example', 'https://github.com/vikram-2101/Stock-Market-Dashboard', 'Indian market dashboard reference'),
-    ('Stock dashboard example', 'https://github.com/SujaySingh-0403/stock-dashboard', 'Dashboard UI reference'),
-    ('Market dashboard example', 'https://github.com/DevMLAI01/stock-market-dashboard', 'Market data dashboard reference'),
-  ];
+  static const links = <(String, String, String)>[];
 
   @override
   Widget build(BuildContext context) => ListView(
     padding: const EdgeInsets.all(12),
     children: [
-      const Text('INTEGRATED ENGINE OUTPUT • CURRENT BACKEND DATA', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
+      const Text('ENGINE DATA • CURRENT BACKEND SNAPSHOT', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
       const SizedBox(height: 8),
       Card(child: Column(children: [
         InfoRow('Latest fetch', lastFetch ?? 'No successful fetch recorded'),
@@ -1112,17 +1081,7 @@ class RepositoryLibraryPage extends StatelessWidget {
       const SizedBox(height: 6),
       const Text('These are Fresh-Apk modules, not proof that every external repository has been imported: Angel One SmartAPI/WebSocket, normalized market store, trend/technical indicators, OI classification, strategy ensemble/conflict checks, signal-quality gates, historical backtesting, risk gates and AI/search evidence integration.', style: TextStyle(color: Colors.white70)),
       const SizedBox(height: 14),
-      const Text('EXTERNAL REPOSITORIES • REFERENCE LINKS ONLY', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
-      const SizedBox(height: 8),
-      const Text('These links are not automatically cloned or integrated. Only their specific code is included if it has been separately ported, tested and licensed for this app. Tap to open the upstream repository.', style: TextStyle(color: Colors.white70)),
-      for (final item in links)
-        Card(child: ListTile(
-          leading: const Icon(Icons.code, color: Color(0xFF12D6FF)),
-          title: Text(item.$1),
-          subtitle: Text(item.$3),
-          trailing: const Icon(Icons.open_in_new),
-          onTap: () => _openExternal(context, item.$2),
-        )),
+      const Text('Runtime modules and status are shown above. External repository URLs are intentionally hidden from operational tabs.', style: TextStyle(color: Colors.white70, fontSize: 12)),
     ],
   );
 }
@@ -1133,74 +1092,14 @@ class ResearchEnginesPage extends StatelessWidget {
     required this.signals,
     required this.ai,
     required this.lastFetch,
-    required this.signalBackendUrl,
     required this.selectedIndex,
     required this.onIndexChanged,
     super.key,
   });
   final Map<String, dynamic> market, signals, ai;
   final String? lastFetch;
-  final String signalBackendUrl;
   final String selectedIndex;
   final ValueChanged<String> onIndexChanged;
-
-  Future<void> _validateAIProviders(BuildContext context) async {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Running configured OpenAI and OpenRouter validation…')),
-    );
-    try {
-      final result = await FreshApi(signalBackendUrl).validateAI(selectedIndex);
-      final providers = Map<String, dynamic>.from(result['providers'] as Map? ?? const {});
-      Map<String, dynamic> provider(String name) =>
-          Map<String, dynamic>.from(providers[name] as Map? ?? const {});
-      final openai = provider('openai');
-      final router = provider('openrouter');
-      final summary = 'OpenAI: ${openai['status'] ?? 'unknown'} (${openai['duration_ms'] ?? '—'} ms) • '
-          'OpenRouter: ${router['status'] ?? 'unknown'} (${router['duration_ms'] ?? '—'} ms) • '
-          'Overall: ${result['overall_status'] ?? 'unknown'}';
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(summary), duration: const Duration(seconds: 6)),
-      );
-      String details(String name, Map<String, dynamic> value) =>
-          '$name — ${value['status'] ?? 'unknown'} • model: ${value['model'] ?? '—'} • '
-          '${value['duration_ms'] ?? '—'} ms\n'
-          '${value['output'] ?? value['error'] ?? 'No output returned.'}';
-      await showDialog<void>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: Text('AI validation • $selectedIndex'),
-          content: SingleChildScrollView(
-            child: SelectableText(
-              '${details('OpenAI', openai)}\n\n${details('OpenRouter', router)}\n\n'
-              'Deterministic decision: ${result['deterministic_decision'] ?? 'WAIT'}\n'
-              'Engine validation: ${result['validation_timing_ms'] ?? '—'} ms\n'
-              '${result['safety'] ?? ''}',
-            ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(dialogContext).pop(), child: const Text('Close')),
-          ],
-        ),
-      );
-    } catch (error) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('AI validation failed: ${error.toString().replaceFirst('Exception: ', '')}')),
-      );
-    }
-  }
-
-  static const sources = <(String, String, String)>[
-    ('Systematic Trading', 'https://github.com/paperswithbacktest/awesome-systematic-trading', 'Strategy research index; live evidence is computed by Fresh backend modules.'),
-    ('Algorithmic Trading', 'https://github.com/joelowj/awesome-algorithmic-trading', 'Algorithm and framework catalogue; not imported wholesale.'),
-    ('Quant Finance', 'https://github.com/wilsonfreitas/awesome-quant', 'Quantitative research references.'),
-    ('Deep Trading / ML', 'https://github.com/cbailes/awesome-deep-trading', 'Machine-learning research references; not treated as an entry signal by itself.'),
-    ('Trading Strategy Topic', 'https://github.com/topics/trading-strategies', 'Additional open-source strategies for audit and comparison.'),
-    ('Indian Stock Market Dashboard', 'https://github.com/vikram-2101/Stock-Market-Dashboard', 'Indian market dashboard reference.'),
-    ('Indian Stock Dashboard', 'https://github.com/SujaySingh-0403/stock-dashboard', 'Indian index dashboard reference.'),
-    ('AI Stock Screener UI', 'https://github.com/DevMLAI01/stock-market-dashboard', 'Dashboard reference; current calculations remain backend-owned.'),
-  ];
 
   @override
   Widget build(BuildContext context) {
@@ -1219,7 +1118,7 @@ class ResearchEnginesPage extends StatelessWidget {
     return ListView(padding: const EdgeInsets.all(12), children: [
       const Text('RESEARCH ENGINES • LIVE BACKEND OUTPUT', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
       const SizedBox(height: 6),
-      const Text('Chart-only libraries are intentionally excluded here. This tab surfaces Fresh’s actual indicator, OI, confluence and validation outputs alongside the research repositories that inspired the workflow.', style: TextStyle(color: Colors.white70, fontSize: 12)),
+      const Text('This tab surfaces actual indicator, OI, confluence and validation outputs. Repository links are not displayed in operational pages.', style: TextStyle(color: Colors.white70, fontSize: 12)),
       const SizedBox(height: 10),
       IndexPicker(selected: selectedIndex, onChanged: onIndexChanged),
       Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1256,23 +1155,17 @@ class ResearchEnginesPage extends StatelessWidget {
             InfoRow(entry.key.replaceAll('_', ' '), (entry.value as Map)['state']?.toString() ?? 'UNKNOWN'),
         const Divider(height: 22),
         const Text('SIGNAL & VALIDATION OUTPUT', style: TextStyle(fontWeight: FontWeight.w900)),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            onPressed: () => _validateAIProviders(context),
-            icon: const Icon(Icons.fact_check_outlined),
-            label: const Text('RUN OPENAI + OPENROUTER VALIDATION'),
-          ),
-        ),
         InfoRow('Strategy candidate', (s['decision'] ?? 'NO DATA').toString()),
         InfoRow('Validated decision', (validation['decision'] ?? 'WAIT').toString()),
         InfoRow('Validation verdict', (validation['verdict'] ?? 'NOT VALIDATED').toString()),
-        InfoRow('Engine validation time', validation['validation_timing_ms'] == null ? 'n/a' : '${validation['validation_timing_ms']} ms'),
-        InfoRow('AI provider status', (aiRow['status'] ?? ai['status'] ?? 'NOT CONFIGURED').toString()),
         InfoRow('AI action', (aiRow['action'] ?? 'AI NOT READY').toString()),
         InfoRow('Blocked reasons', ((validation['blocks'] as List?) ?? const []).map((x) => x.toString()).join(', ').isEmpty ? 'None reported' : ((validation['blocks'] as List?) ?? const []).map((x) => x.toString()).join(', ')),
       ]))),
-      const Text('Research results above come from the selected index snapshot and deterministic backend modules. External repository links are hidden from this operational view.', style: TextStyle(fontSize: 11, color: Colors.white70)),
+      const Section('VALIDATION PERFORMANCE'),
+      InfoRow('Index snapshot compute time', '${(s['performance'] as Map?)?['index_snapshot_ms'] ?? '—'} ms'),
+      InfoRow('Five-layer validation time', '${(s['performance'] as Map?)?['five_layer_validation_ms'] ?? '—'} ms'),
+      InfoRow('Overall signal build time', '${(s['performance'] as Map?)?['signal_build_ms'] ?? '—'} ms'),
+      const Text('Timings are measured runtime values. A missing timing means the engine did not return a measurement.', style: TextStyle(fontSize: 11, color: Colors.white70)),
     ]);
   }
 
@@ -1301,65 +1194,7 @@ class TradingSetupPage extends StatelessWidget {
   final Map<String, dynamic> market, signals, ai, liveStatus;
   final String? lastFetch;
 
-  static const sections = <(String, String, List<(String, String, String)>)>[
-    ('1 • Broker & Market Data', 'Angel One SmartAPI is the broker integration for this app; Zerodha/Kite is not used. Live ticks, historical candles, instruments, option-chain/OI fields and feed freshness must be verified independently.', [
-      ('Angel One SmartAPI Python SDK', 'https://github.com/angel-one/smartapi-python', 'Primary Angel One REST/WebSocket SDK'),
-      ('SmartWebSocketV2 source', 'https://github.com/angel-one/smartapi-python/blob/main/SmartApi/smartWebSocketV2.py', 'Actual streaming client used by the backend'),
-      ('Angel One order-update WebSocket SDK', 'https://github.com/angel-one/smartapi-python', 'Order status updates; inspect SmartWebSocketOrderUpdate in the official SDK'),
-      ('Angel One JavaScript SDK', 'https://github.com/angel-one/smartapi-javascript', 'Official JavaScript SDK reference; not the Android backend runtime'),
-      ('Angel One SmartAPI documentation', 'https://smartapi.angelone.in/docs', 'Login, market data, WebSocket and order API reference'),
-      ('Angel One SmartAPI guide', 'https://www.angelone.in/knowledge-center/smartapi/making-sense-of-the-smartapi-documentation', 'WebSocket and strategy integration guide'),
-      ('Quote API examples and limits', 'https://github.com/marketcalls/angelone-api-docs', 'Community reference; verify current limits against official docs'),
-      ('FastAPI trading dashboard reference', 'https://github.com/dngr2/fastapi-trading-dashboard', 'Backend-to-dashboard WebSocket example; reference only'),
-      ('Historical candle API reference', 'https://smartapi.angelone.in/docs', 'Historical candle request contract for deterministic backtesting'),
-      ('NSE library (supplementary/reference)', 'https://github.com/RuchiTanmay/nselib', 'Useful research/data utilities; not a substitute for authenticated real-time broker feed'),
-    ]),
-    ('2 • Strategy & Signal Engine', 'Run deterministic indicators and OI classification first; use AI only as an evidence-based interpretation layer. Missing/stale/conflicting data must result in WAIT/NO TRADE.', [
-      ('Systematic trading strategies', 'https://github.com/paperswithbacktest/awesome-systematic-trading', 'Strategy research collection'),
-      ('Algorithmic trading resources', 'https://github.com/joelowj/awesome-algorithmic-trading', 'Algorithms and tooling'),
-      ('Quantitative finance resources', 'https://github.com/wilsonfreitas/awesome-quant', 'Quant research and libraries'),
-      ('Deep trading resources', 'https://github.com/cbailes/awesome-deep-trading', 'ML/deep-learning references'),
-      ('Intelligent trading bot', 'https://github.com/asavinov/intelligent-trading-bot', 'ML-oriented research reference'),
-      ('FinRL', 'https://github.com/AI4Finance-Foundation/FinRL', 'Reinforcement-learning research; requires adaptation and validation'),
-    ]),
-    ('3 • Signal Quality & Evidence Filter', 'Score independent evidence, reject stale quotes, require a minimum data-quality gate and avoid treating an LLM confidence statement as a probability of profit.', [
-      ('Trading strategy topic', 'https://github.com/topics/trading-strategies', 'Explore strategy implementations'),
-      ('Awesome trading bots', 'https://github.com/Viprasol-Tech/awesome-trading-bots', 'Bot/risk tooling references'),
-    ]),
-    ('4 • Backtesting & Walk-Forward Validation', 'Use out-of-sample periods, walk-forward testing, slippage, brokerage, taxes/fees, option expiry and realistic fill assumptions. Avoid look-ahead bias and overfitting.', [
-      ('VectorBT', 'https://github.com/polakowo/vectorbt', 'Vectorized strategy research and backtests'),
-      ('Quant backtesting', 'https://github.com/QuantTradingWithLi/quant_backtesting', 'Modular backtesting reference'),
-      ('Machine Learning for Trading', 'https://github.com/stefan-jansen/machine-learning-for-trading', 'Data, ML and backtesting educational code'),
-    ]),
-    ('5 • Risk & Trade Management', 'Require per-trade risk caps, max daily loss, max drawdown, max open positions, lot-size validation, spread/liquidity checks, kill switch and explicit handling of partial fills and rejected orders.', [
-      ('Order lifecycle and risk reference', 'https://github.com/JasonTeixeira/trade-engine', 'Order state and risk checks; review before adapting'),
-      ('OpenAlgo', 'https://github.com/marketcalls/openalgo', 'India-focused broker gateway reference; verify current Angel One adapter support and security before adoption'),
-    ]),
-    ('6 • Order Execution & Trade Lifecycle', 'Fresh-Apk has an Angel One execution boundary, but real orders are deliberately gated. Confirm authentication, contract mapping, quote freshness, order book state, partial fills and exit handling before enabling live orders.', [
-      ('OpenAlgo source', 'https://github.com/marketcalls/openalgo', 'Optional execution-gateway comparison; not automatically integrated'),
-      ('Angel One SDK', 'https://github.com/angel-one/smartapi-python', 'Use for direct Angel One broker operations'),
-      ('Fresh-Apk live execution rules', 'https://github.com/sparmar3786-pixel/Fresh-Apk/blob/fresh-platform-v1/LIVE_EXECUTION.md', 'Current safeguards and limitations'),
-    ]),
-    ('7 • Monitoring, Alerts & Audit', 'Track WebSocket disconnects, stale data, API failures, rejected orders, latency, daily P&L, exposure and audit events. Alerts should never silently imply that an order filled.', [
-      ('Trading bot monitoring reference', 'https://github.com/Astolfu/trading-bot', 'Dashboard/trade history example'),
-      ('Alert bot reference', 'https://github.com/Rox-bot/crypto-alert-bot', 'Notification-channel reference; crypto scope means adapt carefully'),
-    ]),
-    ('8 • Dashboard, Charts & Mobile UX', 'Keep compact F&O-first screens, clear data timestamps, candle timeframe controls, option-chain/strike view, signal explanation, risk card, execution mode and connection health.', [
-      ('TradingView Lightweight Charts', 'https://github.com/tradingview/lightweight-charts', 'Lightweight interactive chart library'),
-      ('KLineChart', 'https://github.com/klinecharts/KLineChart', 'Candlestick chart library'),
-      ('Plotly.js chart library', 'https://github.com/plotly/plotly.js', 'General charting reference'),
-      ('Indian market dashboard', 'https://github.com/vikram-2101/Stock-Market-Dashboard', 'Indian-market UI reference'),
-      ('Stock dashboard example', 'https://github.com/SujaySingh-0403/stock-dashboard', 'Dashboard UI reference'),
-    ]),
-    ('9 • Backend, Secrets & Deployment', 'Android → HTTPS Railway backend → Angel One REST/WebSocket → normalized store → strategy/risk gates → signal/monitoring APIs. Keep API keys, PIN and TOTP secrets off-device and out of Git.', [
-      ('Fresh-Apk backend source', 'https://github.com/sparmar3786-pixel/Fresh-Apk/tree/fresh-platform-v1/backend', 'Current FastAPI backend'),
-      ('Railway FastAPI starter', 'https://github.com/railwayapp-templates/fastapi', 'Deployment template'),
-      ('Railway templates', 'https://github.com/railwayapp-templates', 'Official template collection'),
-      ('FastAPI full-stack Railway', 'https://github.com/lNamelessl/fastapi-fullstack-railway', 'Community full-stack reference'),
-      ('FastAPI documentation', 'https://fastapi.tiangolo.com', 'API/schema/testing docs'),
-      ('Railway documentation', 'https://docs.railway.com', 'Deployments, variables, domains and health checks'),
-    ]),
-  ];
+  static const sections = <(String, String, List<(String, String, String)>)>[];
 
   @override
   Widget build(BuildContext context) => ListView(
@@ -1432,9 +1267,21 @@ class TradingSetupPage extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
                 child: Text(section.$2),
               ),
+              for (final link in section.$3)
+                ListTile(
+                  dense: true,
+                  leading: const Icon(Icons.open_in_new, size: 18),
+                  title: Text(link.$1),
+                  subtitle: Text(link.$3),
+                  onTap: () => _openExternal(context, link.$2),
+                ),
             ],
           ),
         ),
+      const Card(child: Padding(
+        padding: EdgeInsets.all(12),
+        child: Text('Decision support only. Validate fresh broker timestamps, provider output and deterministic risk gates before considering any trade; no signal guarantees profit.', style: TextStyle(fontSize: 12, color: Colors.white70)),
+      )),
     ],
   );
 }
@@ -1771,19 +1618,6 @@ class _IndicatorsState extends State<IndicatorsPage>{
     InfoRow('Support 20',_val(i['support20'])),InfoRow('Resistance 20',_val(i['resistance20'])),
     InfoRow('Z-score 20',_val(i['zscore20'])),InfoRow('Realized Volatility 20',_val(i['realized_vol20'])),
     const Text('Advanced indicators require sufficient normalized OHLC history. N/A means the required history is not available; no values are fabricated.', style: TextStyle(fontSize: 11, color: Colors.white70)),
-    const Section('Strategy Library • research links'),
-    const Text('Use these repositories as research references. Fresh uses its own Indian F&O strategy gates; importing code requires license and risk review.',style:TextStyle(fontSize:12)),
-    const StrategyLink(title:'Awesome Systematic Trading',detail:'Backtesting, systematic strategies and research tools',url:'https://github.com/paperswithbacktest/awesome-systematic-trading'),
-    const StrategyLink(title:'Awesome Algorithmic Trading',detail:'Algo-trading frameworks and implementations',url:'https://github.com/joelowj/awesome-algorithmic-trading'),
-    const StrategyLink(title:'Awesome Quant',detail:'Quantitative finance libraries and methods',url:'https://github.com/wilsonfreitas/awesome-quant'),
-    const StrategyLink(title:'Deep Trading / ML',detail:'Machine learning and deep-learning trading resources',url:'https://github.com/cbailes/awesome-deep-trading'),
-    const StrategyLink(title:'Trading strategies topic',detail:'Discover maintained strategy repositories',url:'https://github.com/topics/trading-strategies'),
-    const StrategyLink(title:'Indian Stock Market Dashboard',detail:'Indian index dashboard UI reference',url:'https://github.com/vikram-2101/Stock-Market-Dashboard'),
-    const StrategyLink(title:'Indian Stock Dashboard',detail:'NIFTY, BANKNIFTY, SENSEX and indicator UI reference',url:'https://github.com/SujaySingh-0403/stock-dashboard'),
-    const StrategyLink(title:'AI Stock Screener UI',detail:'AI-powered market dashboard UI reference',url:'https://github.com/DevMLAI01/stock-market-dashboard'),
-    const StrategyLink(title:'Trading Chart Pro',detail:'KLineChart-based financial chart reference',url:'https://github.com/rudra-sah00/trading-chart'),
-    const StrategyLink(title:'KLineChart',detail:'Professional candlestick chart library',url:'https://github.com/klinecharts/KLineChart'),
-    const StrategyLink(title:'TradingView Lightweight Charts',detail:'Lightweight open-source financial charting',url:'https://github.com/tradingview/lightweight-charts'),
   ]);}
 }
 
@@ -2153,7 +1987,7 @@ class _AiAccessState extends State<AiAccessPage>{
   }
   Future<void> test() async{
     setState(()=>working=true);
-    try{final r=await FreshApi(widget.backendUrl.trim()).testAIProviders();final checks=(r['checks'] as List? ?? const[]);final details=checks.whereType<Map>().map((x)=>(x['provider']??'provider').toString()+': '+(x['ok']==true?'OK':'FAILED')).join(' • ');if(mounted)setState(()=>message=(r['ok']==true?'Cloud AI connected. ':'Cloud AI validation failed. ')+details);}
+    try{final r=await FreshApi(widget.backendUrl.trim()).testAIProviders();final checks=(r['checks'] as List? ?? const[]);final details=checks.whereType<Map>().map((x)=>(x['provider']??'provider').toString()+': '+(x['ok']==true?'OK':'NOT VERIFIED')).join(' • ');final notice=(r['message']??details).toString();if(mounted){setState(()=>message=notice+' • '+details);ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(notice+' • '+details),duration:const Duration(seconds:6)));}}
     catch(e){if(mounted)setState(()=>message='Cloud AI test failed: '+e.toString().replaceFirst('Exception: ',''));}
     finally{if(mounted)setState(()=>working=false);}
   }
