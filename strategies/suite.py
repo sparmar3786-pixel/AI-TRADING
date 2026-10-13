@@ -105,6 +105,14 @@ def classify_oi_change(price_change: Any, oi_change: Any) -> str:
     return "LONG_UNWINDING"
 
 
+def _invalid_data_result(reason_code: str, reason: str) -> dict[str, Any]:
+    return {
+        "status": "invalid_data", "reason_code": reason_code, "reason": reason,
+        "signal": "WAIT", "strategies": {}, "votes": {"LONG": 0, "SHORT": 0},
+        "risk_levels": None,
+    }
+
+
 def evaluate_strategy_suite(
     candles: list[dict[str, Any]],
     *,
@@ -128,15 +136,15 @@ def evaluate_strategy_suite(
     normalized: list[dict[str, float]] = []
     for row in candles:
         if not isinstance(row, dict):
-            return {"status": "invalid_data", "signal": "WAIT", "strategies": {}, "votes": {"LONG": 0, "SHORT": 0}, "risk_levels": None}
+            return _invalid_data_result("INVALID_CANDLE_ROW", "Candle row must be an object with high, low and close values")
         vals = {key: _number(row.get(key)) for key in ("high", "low", "close", "volume")}
         if any(vals[k] is None for k in ("high", "low", "close")):
-            return {"status": "invalid_data", "signal": "WAIT", "strategies": {}, "votes": {"LONG": 0, "SHORT": 0}, "risk_levels": None}
+            return _invalid_data_result("MISSING_OR_NON_NUMERIC_OHLC", "Required high/low/close field is missing or not numeric")
         high, low, close = vals["high"], vals["low"], vals["close"]
         if high is None or low is None or close is None or high < low or close <= 0:
-            return {"status": "invalid_data", "signal": "WAIT", "strategies": {}, "votes": {"LONG": 0, "SHORT": 0}, "risk_levels": None}
+            return _invalid_data_result("INVALID_OHLC_RANGE", "Candle high must be >= low and close must be positive")
         if vals["volume"] is not None and vals["volume"] < 0:
-            return {"status": "invalid_data", "signal": "WAIT", "strategies": {}, "votes": {"LONG": 0, "SHORT": 0}, "risk_levels": None}
+            return _invalid_data_result("NEGATIVE_VOLUME", "Candle volume cannot be negative")
         normalized.append({k: v for k, v in vals.items() if v is not None})
 
     highs = [x["high"] for x in normalized]
