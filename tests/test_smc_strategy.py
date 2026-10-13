@@ -1,5 +1,5 @@
 import unittest
-from strategies.smc import analyze_smc, detect_fvg, detect_order_blocks
+from strategies.smc import analyze_smc, analyze_guardeer, analyze_inner_circle, detect_fvg, detect_order_blocks
 
 
 def bars(values):
@@ -24,6 +24,19 @@ class SmcTests(unittest.TestCase):
     def test_index_and_mcx_instrument_labels_preserved(self):
         for symbol in ("NIFTY", "BANKNIFTY", "CRUDEOIL", "GOLDM"):
             self.assertEqual(analyze_smc([], [], [], instrument=symbol)["instrument"], symbol)
+
+    def test_guardeer_profile_is_labeled_and_never_trades_without_candles(self):
+        result = analyze_guardeer([], [], [])
+        self.assertEqual(result['strategy_format'], 'Guardeer')
+        self.assertIn('lecture_11_true_ict', result['format_modules'])
+        self.assertEqual(result['signal'], 'NO TRADE')
+
+    def test_inner_circle_profile_exposes_ict_core_modules(self):
+        result = analyze_inner_circle([], [], [], in_killzone=False)
+        self.assertEqual(result['strategy_format'], 'Inner Circle')
+        self.assertIn('power_of_3', result['format_modules'])
+        self.assertFalse(result['format_modules']['killzone_filter'])
+        self.assertEqual(result['signal'], 'NO TRADE')
 
     def test_liquidity_tolerance_is_configurable(self):
         a = analyze_smc([], [], [], instrument="NIFTY", liquidity_tolerance=1.25)
