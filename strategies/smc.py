@@ -95,7 +95,7 @@ def _structure(candles: list[dict[str, float]]) -> dict[str, Any]:
     swings = find_swings(cs)
     highs = [float(s["price"]) for s in swings if s["type"] == "high"]
     lows = [float(s["price"]) for s in swings if s["type"] == "low"]
-    if len(cs) < 3 or not highs or not lows:
+    if len(cs) < 3:
         return {"bias": "NO CLEAR BIAS", "bos": False, "choch": False, "swings": swings}
     last = cs[-1]
     previous_close = cs[-2]["close"] if len(cs) >= 2 else last["close"]
@@ -108,6 +108,17 @@ def _structure(candles: list[dict[str, float]]) -> dict[str, Any]:
     # a pivot. This prevents both missed first breaks and repeated old breaks.
     bos_up = bool(prior_highs and previous_close <= prior_highs[-1] and last["close"] > prior_highs[-1])
     bos_down = bool(prior_lows and previous_close >= prior_lows[-1] and last["close"] < prior_lows[-1])
+    if not highs or not lows:
+        if bos_up or bos_down:
+            return {
+                "bias": "BULLISH" if bos_up else "BEARISH",
+                "bos": True,
+                "choch": False,
+                "swings": swings,
+                "swing_high": prior_highs[-1] if prior_highs else None,
+                "swing_low": prior_lows[-1] if prior_lows else None,
+            }
+        return {"bias": "NO CLEAR BIAS", "bos": False, "choch": False, "swings": swings}
     # Conservative local shift: close breaks the latest opposing confirmed pivot.
     previous_bias = "BULLISH" if len(highs) >= 2 and len(lows) >= 2 and highs[-1] > highs[-2] and lows[-1] > lows[-2] else (
         "BEARISH" if len(highs) >= 2 and len(lows) >= 2 and highs[-1] < highs[-2] and lows[-1] < lows[-2] else "NO CLEAR BIAS")
