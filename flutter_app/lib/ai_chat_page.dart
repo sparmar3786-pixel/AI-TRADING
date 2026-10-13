@@ -198,10 +198,10 @@ class _AiChatPageState extends State<AiChatPage> {
                 const SizedBox(height: 12),
                 const Text('Ask Fresh AI', textAlign: TextAlign.center, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
                 const SizedBox(height: 6),
-                const Text('Cloud AI + optional local offline Qwen • Market Q&A', textAlign: TextAlign.center, style: TextStyle(color: Color(0xFF32D583), fontWeight: FontWeight.w700, fontSize: 12)),
+                const Text('GEMINI CLOUD CHAT • MARKET Q&A', textAlign: TextAlign.center, style: TextStyle(color: Color(0xFF32D583), fontWeight: FontWeight.w700, fontSize: 12)),
                 const SizedBox(height: 8),
                 const Text(
-                  'Load a local GGUF model for offline inference. When the backend is reachable, local Qwen receives the selected index snapshot, deterministic strategy, cloud AI status and search evidence. Without backend access it must report that live context is unavailable.',
+                  'This chat uses Gemini only. OpenAI and OpenRouter are tested separately for provider/validation status and are not silent chat fallbacks. Missing or stale market evidence remains unavailable.',
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 20),
