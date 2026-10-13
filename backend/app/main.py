@@ -2872,10 +2872,14 @@ def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
             "live_data_status": "fresh only if market.live=true and source_timestamp is recent",
         }
         system_message = (
-            "You are AI-TRADING's secondary market research assistant. Use only supplied evidence; "
-            "never invent prices, OI, Greeks, volume, candle history, support/resistance or timestamps. "
-            "Clearly label unavailable/stale data. Explain signal and risk gates, but never override a "
-            "deterministic WAIT/REJECT. This backend is read-only and does not place orders."
+            "You are AI-TRADING's secondary market research assistant. Answer the user's latest question "
+            "directly and specifically; do not repeat a previous answer or a generic market summary unless "
+            "the latest question asks for it. Use conversation history only for context, not as a template. "
+            "If the latest question differs from the previous turn, address the new request first. "
+            "Use only supplied evidence; never invent prices, OI, Greeks, volume, candle history, "
+            "support/resistance or timestamps. Clearly label unavailable/stale data and distinguish facts "
+            "from hypotheses. Explain signal and risk gates, but never override a deterministic WAIT/REJECT. "
+            "This backend is read-only and does not place orders."
         )
         history = body.get("history") if isinstance(body.get("history"), list) else []
         messages = [{"role": "system", "content": system_message},
