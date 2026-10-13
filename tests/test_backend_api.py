@@ -153,6 +153,20 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(data["providers"]["openrouter"]["status"], "not_configured")
         self.assertEqual(data["deterministic_decision"], "WAIT")
 
+    def test_openai_environment_key_is_ignored_by_ai_status(self):
+        with patch.dict(os.environ, {
+            "GEMINI_API_KEY": "", "GOOGLE_API_KEY": "",
+            "OPENROUTER_API_KEY": "", "OPEN_ROUTER_API_KEY": "",
+            "OPENAI_API_KEY": "legacy-key-must-be-ignored",
+            "OPENAI_MODEL": "legacy-model-must-be-ignored",
+        }, clear=False):
+            response = self.client.get("/v1/ai/status", headers=self.device_headers)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertNotIn("openai", data["providers"])
+        self.assertFalse(data["llm_configured"])
+        self.assertEqual(data["provider"], "deterministic_fallback")
+
     def test_metadata_requires_valid_device_id_and_disables_orders(self):
         self.assertEqual(self.client.get("/v1/metadata").status_code, 401)
         response = self.client.get("/v1/metadata", headers=self.device_headers)
