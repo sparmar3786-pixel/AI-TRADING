@@ -368,7 +368,13 @@ class BackendApiTests(unittest.TestCase):
         self.assertIn("missing option evidence", body["answer"])
 
     def test_ai_chat_uses_openrouter_when_gemini_is_unconfigured(self):
-        payload = {"market": {"NIFTY": {"ltp": 25000.0, "age_seconds": 3, "live": True}},
+        payload = {"market": {"NIFTY": {
+                       "ltp": 25000.0, "age_seconds": 3, "live": True,
+                       "strategy_suite": {"signal": "WAIT", "trace": {
+                           "execution_id": "strategy-test", "strategy_version": "strategy-suite-v1",
+                           "input_candle_count": 35, "input_sha256": "a" * 64,
+                       }},
+                   }},
                    "signals": {"NIFTY": {"decision": "WAIT", "reasons": ["risk gate wait"]}}}
         with patch.object(api, "_get_signals", return_value=payload), \
              patch.dict(os.environ, {"GEMINI_API_KEY": "", "GOOGLE_API_KEY": "",
@@ -384,7 +390,32 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(body["provider"], "openrouter")
         self.assertTrue(body["llm_used"])
         self.assertEqual(body["answer"], "Distinct test response")
+        self.assertTrue(body["strategy_consumption_trace"]["ai_context_sent"])
+        self.assertEqual(body["strategy_consumption_trace"]["execution_id"], "strategy-test")
+        self.assertEqual(body["strategy_consumption_trace"]["ai_provider"], "openrouter")
+        self.assertFalse(body["strategy_consumption_trace"]["ai_semantic_use_verifiable"])
         completion.assert_called_once()
+
+    def test_ai_chat_falls_back_to_openrouter_when_gemini_fails(self):
+        payload = {"market": {"NIFTY": {"ltp": 25000.0, "age_seconds": 3, "live": True}},
+                   "signals": {"NIFTY": {"decision": "WAIT", "reasons": ["risk gate wait"]}}}
+        with patch.object(api, "_get_signals", return_value=payload), \
+             patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-test-key", "GOOGLE_API_KEY": "",
+                                      "OPENROUTER_API_KEY": "router-test-key", "OPENROUTER_MODEL": "router-test"}, clear=False), \
+             patch.object(api, "_run_gemini_completion", side_effect=RuntimeError("gemini_http_503")) as gemini, \
+             patch.object(api, "_run_openai_compatible_completion", return_value={
+                 "answer": "Router fallback response", "provider": "openrouter", "model": "router-test",
+                 "llm_used": True, "ok": True, "status": "connected", "latency_ms": 15.0,
+             }) as router:
+            response = self.client.post("/v1/ai/chat", headers=self.device_headers,
+                                        json={"index": "NIFTY", "question": "Explain the current wait", "history": []})
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["provider"], "openrouter")
+        self.assertEqual(body["answer"], "Router fallback response")
+        self.assertEqual(body["provider_failures"][0]["status"], "gemini_http_503")
+        gemini.assert_called_once()
+        router.assert_called_once()
 
     def test_ai_chat_can_read_mcX_commodity_snapshot(self):
         payload = {
