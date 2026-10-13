@@ -24,12 +24,15 @@ class FreshApi {
     required http.Response response,
   }) {
     stopwatch.stop();
+    final responseBytes = utf8.encode(response.body).length;
+    final elapsedMs = stopwatch.elapsedMilliseconds;
     lastRequestMetrics = <String, dynamic>{
       'method': method,
       'path': uri.path,
       'status_code': response.statusCode,
-      'duration_ms': stopwatch.elapsedMilliseconds,
-      'response_bytes': utf8.encode(response.body).length,
+      'duration_ms': elapsedMs,
+      'response_bytes': responseBytes,
+      'bytes_per_second': elapsedMs > 0 ? (responseBytes * 1000 / elapsedMs).round() : null,
       'received_at': DateTime.now().toUtc().toIso8601String(),
     };
   }
