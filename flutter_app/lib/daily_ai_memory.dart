@@ -88,6 +88,7 @@ class DailyAiMemory {
     required Map<String, dynamic> signals,
     required List<dynamic> commodities,
     required Map<String, List<dynamic>> optionChains,
+    Map<String, dynamic> footprint = const <String, dynamic>{},
   }) async {
     final now = DateTime.now();
     final minuteKey = _minuteKey(now);
@@ -146,6 +147,38 @@ class DailyAiMemory {
         };
       }
 
+      final footprintCandle = _map(footprint['candle']);
+      final footprintSymbol = (footprint['symbol'] ?? '').toString();
+      final candlesByTime = <int, Map<String, dynamic>>{};
+      if (footprintSymbol.isNotEmpty) {
+        for (final snapshot in snapshots) {
+          final oldFootprint = _map(_map(snapshot)['footprint']);
+          if ((oldFootprint['symbol'] ?? '').toString() != footprintSymbol) continue;
+          final oldCandle = _map(oldFootprint['candle']);
+          final t = _num(oldCandle['t']);
+          if (t != null) candlesByTime[t.toInt()] = oldCandle;
+        }
+        final currentTime = _num(footprintCandle['t']);
+        if (currentTime != null) candlesByTime[currentTime.toInt()] = footprintCandle;
+      }
+      final orderedCandles = candlesByTime.values.toList()
+        ..sort((a, b) => (_num(a['t']) ?? 0).compareTo(_num(b['t']) ?? 0));
+      final recentCandles = orderedCandles.length > 20
+          ? orderedCandles.sublist(orderedCandles.length - 20)
+          : orderedCandles;
+      final lows = recentCandles.map((row) => _num(row['l'])).whereType<double>().toList();
+      final highs = recentCandles.map((row) => _num(row['h'])).whereType<double>().toList();
+      final footprintAnalysis = <String, dynamic>{
+        'symbol': footprintSymbol.isEmpty ? null : footprintSymbol,
+        'timeframe': footprint['history_interval'],
+        'source_timestamp': footprint['source_timestamp'] ?? footprintCandle['source_timestamp'],
+        'live': footprint['live'] == true,
+        'candle_count_in_rolling_window': recentCandles.length,
+        'support_from_observed_candle_lows': lows.isEmpty ? null : lows.reduce((a, b) => a < b ? a : b),
+        'resistance_from_observed_candle_highs': highs.isEmpty ? null : highs.reduce((a, b) => a > b ? a : b),
+        'window': 'last 20 distinct observed candles; not a forecast',
+      };
+
       snapshots.add({
         'saved_at': now.toIso8601String(),
         'minute_key': minuteKey,
@@ -155,6 +188,8 @@ class DailyAiMemory {
         'commodities': commodities,
         'option_chains': chainPayload,
         'oi_analysis': chainAnalysis,
+        'footprint': footprint,
+        'footprint_analysis': footprintAnalysis,
       });
       if (snapshots.length > 6000) snapshots = snapshots.sublist(snapshots.length - 6000);
       final document = {
