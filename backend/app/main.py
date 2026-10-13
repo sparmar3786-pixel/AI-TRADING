@@ -1203,6 +1203,7 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
     future: dict[str, str] | None = None
     rows: list[dict[str, Any]] = []
     history_loaded = False
+    daily_history_sent = False
     try:
         while True:
             try:
@@ -1323,7 +1324,14 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
                         _footprint_history[symbol] = [dict(item) for item in candles[-max_candles:]]
                         _footprint_history_interval[symbol] = history_mode
                 mode = "live" if live else ("closed" if candles else "wait")
-                await websocket.send_json({
+                snapshot_message = (
+                    f"Daily chart requested 1825 days; broker returned {len(candles)} candle(s). "
+                    "Coverage depends on the selected instrument's historical retention; no synthetic bars are created. "
+                    "MCX current-contract history may not span five years."
+                    if daily_mode else
+                    "Live requires a fresh exchange timestamp. Footprint cells show broker best-five bid/ask depth, not classified trade prints."
+                )
+                snapshot_payload = {
                     "type": "snap", "symbol": symbol, "candles": candles, "step": _footprint_chart_step(symbol),
                     "mode": mode, "live": live, "ltp": ltp if live else None,
                     "source_timestamp": source_timestamp, "tick_age_ms": int(age * 1000) if age is not None else None,
@@ -1334,15 +1342,19 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
                     "history_bars_returned": len(candles),
                     "history_first_timestamp": candles[0].get("source_timestamp") if candles else None,
                     "history_last_timestamp": candles[-1].get("source_timestamp") if candles else None,
-                    "message": (
-                        f"Daily chart requested 1825 days; broker returned {len(candles)} candle(s). "
-                        "Coverage depends on the selected instrument's historical retention; no synthetic bars are created. "
-                        "MCX current-contract history may not span five years."
-                        if daily_mode else
-                        "Live requires a fresh exchange timestamp. Footprint cells show broker best-five bid/ask depth, not classified trade prints."
-                    ),
+                    "message": snapshot_message,
                     "signal_only": True, "order_placement_enabled": False,
-                })
+                }
+                # A five-year daily payload is sent once. Subsequent five-second
+                # WebSocket updates carry only the latest daily candle to avoid
+                # repeatedly transferring thousands of unchanged bars.
+                if daily_mode and daily_history_sent:
+                    snapshot_payload["type"] = "candle"
+                    snapshot_payload["candle"] = dict(candles[-1]) if candles else None
+                    snapshot_payload.pop("candles", None)
+                elif daily_mode:
+                    daily_history_sent = True
+                await websocket.send_json(snapshot_payload)
             except HTTPException as exc:
                 await websocket.send_json({"type": "status", "mode": "wait", "message": str(exc.detail)[:180], "candles": candles})
             except Exception:
