@@ -217,7 +217,7 @@ class _FlowMonitorPageState extends State<FlowMonitorPage> {
                 leading: Icon((row['decision'] == 'CALL BUY' || row['decision'] == 'PUT BUY') ? Icons.check_circle : Icons.hourglass_empty,
                     color: (row['decision'] == 'CALL BUY' || row['decision'] == 'PUT BUY') ? Colors.greenAccent : Colors.orangeAccent),
                 title: Text('${entry.key} • ${row['decision'] ?? 'WAIT'} • $passed/${layers.length} layers', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
-                subtitle: Text('Index snapshot ${fmt(perf['index_snapshot_ms'], ' ms')} • five-layer validation ${fmt(perf['five_layer_validation_ms'], ' ms')}${blocked.isEmpty ? '' : '\\nBlocked: $blocked'}', style: const TextStyle(fontSize: 10)),
+                subtitle: Text('Index snapshot ${fmt(perf['index_snapshot_ms'], ' ms')} • five-layer validation ${fmt(perf['five_layer_validation_ms'], ' ms')}${blocked.isEmpty ? '' : '\nBlocked: $blocked'}', style: const TextStyle(fontSize: 10)),
               ));
             }),
           const SizedBox(height: 8),
