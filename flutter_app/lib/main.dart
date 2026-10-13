@@ -18,8 +18,9 @@ import 'gemini_signal_review.dart';
 import 'background_monitor.dart';
 import 'daily_ai_memory.dart';
 import 'daily_ai_memory_page.dart';
+import 'smc_chart_page.dart';
 
-const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Market Diagnostics','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','AI Chat','Order Flow','Quant Engine Lab','Strategy Library','Flow Monitor','AI Memory'];
+const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Market Diagnostics','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','AI Chat','Order Flow','Quant Engine Lab','Strategy Library','Flow Monitor','AI Memory','SMC Pro Chart'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
 const commodityOptionUnderlyings = ['CRUDEOIL','CRUDEOILM','NATURALGAS','NATGASMINI','GOLD','GOLDM','SILVER','SILVERM','COPPER','ZINC','ALUMINIUM','LEAD','NICKEL'];
 const optionUnderlyings = [...indexes, ...commodityOptionUnderlyings];
@@ -696,6 +697,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         StrategyLibraryPage(market: market, signals: signals, selectedIndex: selectedIndex),
         FlowMonitorPage(signalBackendUrl: signalBackendUrl),
         const DailyAiMemoryPage(),
+        Builder(builder: (tabContext) => SmcChartPage(index: selectedIndex, market: _market(selectedIndex), signal: _signal(selectedIndex), ai: ai, onIndexChanged: (value) => setState(() => selectedIndex = value), onOpenAiChat: () => DefaultTabController.of(tabContext).animateTo(tabs.indexOf('AI Chat')))),
       ]),
     ),
   );
@@ -726,6 +728,7 @@ IconData _tabIcon(int index) => switch (index) {
   21 => Icons.library_books_outlined,
   22 => Icons.layers_outlined,
   23 => Icons.speed,
+  24 => Icons.candlestick_chart,
   _ => Icons.layers_outlined,
 };
 
