@@ -456,6 +456,8 @@ class BackendApiTests(unittest.TestCase):
             api._paper_trades_memory.clear()
 
     def test_index_quote_survives_signal_pipeline_failure(self):
+        # The test verifies fallback quote preservation, not the host runner's
+        # wall-clock market session. Freeze the session as open for determinism.
         quote = {
             "ltp": 25000.0,
             "exchange_timestamp": api._utc_now().isoformat(),
@@ -464,22 +466,24 @@ class BackendApiTests(unittest.TestCase):
                 "sell": [{"price": 25000.5, "quantity": 12}],
             },
         }
-        with patch.object(api, "_signal_cache", None), \
-             patch.object(api, "_signal_cache_at", 0), \
-             patch.object(api, "_require_adapter", return_value=object()), \
-             patch.object(api, "_load_master", return_value=[]), \
-             patch.object(api, "_start_stream"), \
-             patch.object(api, "_schedule_news_refresh"), \
-             patch.object(api, "_index_snapshot", side_effect=RuntimeError("insufficient candle history")), \
-             patch.object(api, "_quotes", side_effect=lambda adapter, exchange, tokens: {tokens[0]: quote}), \
-             patch.object(api, "_commodity_snapshot", return_value=[]), \
-             patch.object(api, "_stream", None):
+        with (
+            patch.object(api, "_signal_cache", None),
+            patch.object(api, "_signal_cache_at", 0),
+            patch.object(api, "_require_adapter", return_value=object()),
+            patch.object(api, "_load_master", return_value=[]),
+            patch.object(api, "_start_stream"),
+            patch.object(api, "_schedule_news_refresh"),
+            patch.object(api, "_index_snapshot", side_effect=RuntimeError("insufficient candle history")),
+            patch.object(api, "_quotes", side_effect=lambda adapter, exchange, tokens: {tokens[0]: quote}),
+            patch.object(api, "_commodity_snapshot", return_value=[]),
+            patch.object(api, "_stream", None),
+            patch.object(api, "_is_market_session_open", return_value=True),
+        ):
             result = api._get_signals_uncached(force=True)
         self.assertEqual(result["market"]["NIFTY"]["ltp"], 25000.0)
-        self.assertEqual(result["signals"]["NIFTY"]["decision"], "WAIT")
+        self.assertTrue(result["market"]["NIFTY"]["live"])
         self.assertEqual(result["signals"]["NIFTY"]["decision"], "WAIT")
         self.assertIn("insufficient candle history", result["market"]["NIFTY"]["signal_error"])
-
 
     def test_cold_signal_request_returns_wait_while_refresh_runs_in_background(self):
         metrics = {"last_duration_ms": None, "build_count": 0, "in_flight": False, "last_error": None}
