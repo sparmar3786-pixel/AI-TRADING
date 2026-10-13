@@ -1,9 +1,10 @@
 class AppConfig {
-  // Existing AI/chat and general API backend remains separate to avoid breaking
-  // cloud AI features while the dedicated signal API is deployed and validated.
+  // This APK must use its own AI-TRADING Railway service for both general
+  // API calls and signal endpoints. Do not silently route general requests to
+  // Fresh-Apk's backend: that can mix app state and broker sessions.
   static const String backendUrl = String.fromEnvironment(
     'BACKEND_URL',
-    defaultValue: 'https://nse-algo-backend-final-production.up.railway.app',
+    defaultValue: 'https://ai-trading-signals-api-production.up.railway.app',
   );
 
   static const String signalBackendUrl = String.fromEnvironment(
