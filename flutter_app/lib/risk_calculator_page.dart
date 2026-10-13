@@ -136,8 +136,8 @@ class _RiskCalculatorState extends State<RiskCalculator> {
     final stopPoints = entry != null && stop != null ? (entry - stop) * (isBuy ? 1 : -1) : null;
     final targetValid = targetPoints != null && targetPoints > 0;
     final stopValid = stopPoints != null && stopPoints > 0;
-    final targetPnl = targetValid && qty != null ? targetPoints! * qty : null;
-    final stopPnl = stopValid && qty != null ? -stopPoints! * qty : null;
+    final targetPnl = targetValid && qty != null ? targetPoints * qty : null;
+    final stopPnl = stopValid && qty != null ? -stopPoints * qty : null;
     final livePnl = ltp != null && entry != null && qty != null
         ? (ltp - entry) * qty * (isBuy ? 1 : -1) : null;
     final currency = (double? value) => value == null
@@ -181,7 +181,7 @@ class _RiskCalculatorState extends State<RiskCalculator> {
           const SizedBox(height: 8),
           Row(children: [
             Expanded(child: Text('LTP: ${ltp == null ? 'NO LIVE QUOTE' : '₹${ltp.toStringAsFixed(2)}'}',
-                style: TextStyle(fontWeight: FontWeight.w800, color: fresh && ltp != null ? Colors.greenAccent : Colors.redAccent))),
+                style: TextStyle(fontWeight: FontWeight.w800, color: fresh ? Colors.greenAccent : Colors.redAccent))),
             Text(fresh ? 'FRESH' : 'NOT VERIFIED LIVE',
                 style: TextStyle(fontSize: 10, color: fresh ? Colors.greenAccent : Colors.orangeAccent)),
           ]),
