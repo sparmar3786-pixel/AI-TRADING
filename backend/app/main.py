@@ -339,13 +339,18 @@ def _forget_credentials() -> None:
 
 
 def _credentials_from_env() -> dict[str, str]:
-    mapping = {
-        "angel_api_key": "ANGEL_API_KEY",
-        "angel_client_code": "ANGEL_CLIENT_CODE",
-        "angel_pin": "ANGEL_PIN",
-        "angel_totp_secret": "ANGEL_TOTP_SECRET",
+    # Railway deployments have historically used ANGEL_CLIENT_ID while older
+    # setups used ANGEL_CLIENT_CODE. Accept both names without exposing values.
+    values = {
+        "angel_api_key": os.getenv("ANGEL_API_KEY", "").strip(),
+        "angel_client_code": (
+            os.getenv("ANGEL_CLIENT_CODE", "").strip()
+            or os.getenv("ANGEL_CLIENT_ID", "").strip()
+        ),
+        "angel_pin": os.getenv("ANGEL_PIN", "").strip(),
+        "angel_totp_secret": os.getenv("ANGEL_TOTP_SECRET", "").strip(),
     }
-    return {key: os.getenv(env, "").strip() for key, env in mapping.items() if os.getenv(env, "").strip()}
+    return {key: value for key, value in values.items() if value}
 
 
 def _current_adapter(attempt_env_login: bool = False) -> AngelOneReadOnly | None:
