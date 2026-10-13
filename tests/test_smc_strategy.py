@@ -1,5 +1,6 @@
 import unittest
-from strategies.smc import analyze_smc, analyze_guardeer, analyze_inner_circle, detect_fvg, detect_order_blocks
+from datetime import datetime, timezone
+from strategies.smc import analyze_smc, analyze_guardeer, analyze_inner_circle, detect_fvg, detect_order_blocks, ict_killzone_status
 
 
 def bars(values):
@@ -37,6 +38,20 @@ class SmcTests(unittest.TestCase):
         self.assertIn('power_of_3', result['format_modules'])
         self.assertFalse(result['format_modules']['killzone_filter'])
         self.assertEqual(result['signal'], 'NO TRADE')
+
+    def test_ict_killzones_use_dst_aware_new_york_time(self):
+        london = ict_killzone_status(datetime(2026, 10, 13, 6, 30, tzinfo=timezone.utc))
+        self.assertTrue(london["active"])
+        self.assertEqual(london["window"], "LONDON")
+        ny_am = ict_killzone_status(datetime(2026, 10, 13, 12, 0, tzinfo=timezone.utc))
+        self.assertTrue(ny_am["active"])
+        self.assertEqual(ny_am["window"], "NEW_YORK_AM")
+        asia = ict_killzone_status(datetime(2026, 10, 14, 0, 30, tzinfo=timezone.utc))
+        self.assertTrue(asia["active"])
+        self.assertEqual(asia["window"], "ASIA")
+        inactive = ict_killzone_status(datetime(2026, 10, 13, 18, 0, tzinfo=timezone.utc))
+        self.assertFalse(inactive["active"])
+        self.assertIsNone(inactive["window"])
 
     def test_liquidity_tolerance_is_configurable(self):
         a = analyze_smc([], [], [], instrument="NIFTY", liquidity_tolerance=1.25)

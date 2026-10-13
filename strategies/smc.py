@@ -5,9 +5,38 @@ multi-timeframe candles provide a valid bias, POI, structure confirmation and
 liquidity context. It never submits orders and never fabricates candles.
 """
 from __future__ import annotations
+from datetime import datetime, time, timezone
 from typing import Any, Iterable
+from zoneinfo import ZoneInfo
 
 OHLC = ("open", "high", "low", "close")
+
+
+def ict_killzone_status(now_utc: datetime | None = None) -> dict[str, Any]:
+    """Return the active standard ICT killzone using DST-aware New York time."""
+    now = now_utc or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    local = now.astimezone(ZoneInfo("America/New_York"))
+    clock = local.time().replace(tzinfo=None)
+    windows = (
+        ("ASIA", time(20, 0), None),
+        ("LONDON", time(2, 0), time(5, 0)),
+        ("NEW_YORK_AM", time(7, 0), time(10, 0)),
+        ("LONDON_CLOSE", time(10, 0), time(12, 0)),
+    )
+    active_window = None
+    for name, start, end in windows:
+        active = clock >= start if end is None else start <= clock < end
+        if active:
+            active_window = name
+            break
+    return {
+        "active": active_window is not None,
+        "window": active_window,
+        "timezone": "America/New_York",
+        "local_time": local.isoformat(),
+    }
 
 
 def _valid(candles: Iterable[dict[str, Any]]) -> list[dict[str, float]]:
@@ -156,7 +185,7 @@ def analyze_guardeer(
     result["strategy_format"] = "Guardeer"
     result["format_modules"] = {
         "lecture_1": "Smart Money Concept",
-        "lecture_2_fractal": {"htf": "4H", "mtf": "1H", "ltf": "15m", "available": bool(htf_swings and mtf_swings and ltf_swings)},
+        "lecture_2_fractal": {"htf": "1D", "mtf": "1H", "ltf": "15m", "available": bool(htf_swings and mtf_swings and ltf_swings)},
         "lecture_3_structure": {"bos": result["mtf"].get("bos", False), "choch": result["mtf"].get("choch", False), "inducement_proxy": mtf_swings[-2] if len(mtf_swings) >= 2 else None},
         "lecture_4_blocks_fvg": {"order_blocks": result["ltf"]["order_blocks"], "fvgs": result["ltf"]["fvgs"]},
         "lecture_5_liquidity": {"bsl": result["ltf"]["bsl"], "ssl": result["ltf"]["ssl"]},

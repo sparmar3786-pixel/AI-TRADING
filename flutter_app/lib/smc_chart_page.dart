@@ -30,7 +30,9 @@ class _SmcChartPageState extends State<SmcChartPage> {
   String? _engineError;
   bool get _liveFeed => widget.market['live']==true || widget.market['feed_mode']=='LIVE';
   Future<void> _runEngine() async {
-    final htf = _bars('1D'), mtf = _bars('1H'), ltf = _bars('15m');
+    final htf = _bars(strategyFormat == 'Inner Circle' ? '1W' : '1D');
+    final mtf = _bars(strategyFormat == 'Inner Circle' ? '1D' : '1H');
+    final ltf = _bars('15m');
     if (!_liveFeed) {
       setState(() { _engineError='Live backend feed is not confirmed. Demo/synthetic data is disabled.'; _engineResult=const {}; });
       return;
@@ -46,7 +48,6 @@ class _SmcChartPageState extends State<SmcChartPage> {
         'htf_candles':htf,
         'mtf_candles':mtf,
         'ltf_candles':ltf,
-        'in_killzone':true,
         'strategy_format':strategyFormat,
       }, timeout:const Duration(seconds:20));
       if(mounted)setState(()=>_engineResult=response);

@@ -942,6 +942,61 @@ def _live_validation_contract(
         "order_placement_enabled": False,
     }
 
+def _aggregate_hourly_chart_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Aggregate complete same-session 5-minute bars; never bridge overnight gaps."""
+    buckets: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    for row in rows:
+        try:
+            parsed = datetime.fromisoformat(str(row.get("timestamp", "")))
+            local = parsed.astimezone(IST)
+            session_minute = local.hour * 60 + local.minute - (9 * 60 + 15)
+            if session_minute < 0 or session_minute >= 375:
+                continue
+            key = (local.date().isoformat(), session_minute // 60)
+            buckets.setdefault(key, []).append(row)
+        except (TypeError, ValueError):
+            continue
+    result: list[dict[str, Any]] = []
+    for key in sorted(buckets):
+        group = sorted(buckets[key], key=lambda item: int(item.get("t") or 0))
+        # Require all twelve 5-minute bars so partial hours never masquerade as 1H.
+        if len(group) != 12:
+            continue
+        volumes = [_number(item.get("volume")) for item in group]
+        result.append({
+            "t": group[-1]["t"], "timestamp": group[-1]["timestamp"],
+            "open": group[0]["open"], "high": max(item["high"] for item in group),
+            "low": min(item["low"] for item in group), "close": group[-1]["close"],
+            "volume": sum(value for value in volumes if value is not None) if any(value is not None for value in volumes) else None,
+        })
+    return result
+
+
+def _aggregate_weekly_chart_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Aggregate real daily bars into ISO-week OHLCV; no synthetic weekly candles."""
+    buckets: dict[tuple[int, int], list[dict[str, Any]]] = {}
+    for row in rows:
+        try:
+            parsed = datetime.fromisoformat(str(row.get("timestamp", ""))).astimezone(IST)
+            iso = parsed.isocalendar()
+            buckets.setdefault((iso.year, iso.week), []).append(row)
+        except (TypeError, ValueError):
+            continue
+    result: list[dict[str, Any]] = []
+    for key in sorted(buckets):
+        group = sorted(buckets[key], key=lambda item: int(item.get("t") or 0))
+        if not group:
+            continue
+        volumes = [_number(item.get("volume")) for item in group]
+        result.append({
+            "t": group[-1]["t"], "timestamp": group[-1]["timestamp"],
+            "open": group[0]["open"], "high": max(item["high"] for item in group),
+            "low": min(item["low"] for item in group), "close": group[-1]["close"],
+            "volume": sum(value for value in volumes if value is not None) if any(value is not None for value in volumes) else None,
+        })
+    return result
+
+
 def _index_snapshot(
     adapter: AngelOneReadOnly,
     rows: list[dict[str, Any]],
@@ -1242,18 +1297,7 @@ def _index_snapshot(
             "volume": _number(candle[5]),
         })
     chart_5m = chart_5m[-250:]
-    chart_1h: list[dict[str, Any]] = []
-    for offset in range(0, len(chart_5m) - 11, 12):
-        group = chart_5m[offset:offset + 12]
-        if len(group) != 12:
-            continue
-        volumes = [_number(row.get("volume")) for row in group]
-        chart_1h.append({
-            "t": group[-1]["t"], "timestamp": group[-1]["timestamp"],
-            "open": group[0]["open"], "high": max(row["high"] for row in group),
-            "low": min(row["low"] for row in group), "close": group[-1]["close"],
-            "volume": sum(value for value in volumes if value is not None) if any(value is not None for value in volumes) else None,
-        })
+    chart_1h = _aggregate_hourly_chart_rows(chart_5m)
     chart_1d: list[dict[str, Any]] = []
     for candle in daily_candle_rows:
         if not isinstance(candle, (list, tuple)) or len(candle) < 6:
@@ -1269,6 +1313,7 @@ def _index_snapshot(
             "volume": _number(candle[5]),
         })
     chart_1d = chart_1d[-45:]
+    chart_1w = _aggregate_weekly_chart_rows(chart_1d)
     chart_15m: list[dict[str, Any]] = []
     for offset in range(0, len(chart_5m) - 2, 3):
         group = chart_5m[offset:offset + 3]
@@ -1310,7 +1355,7 @@ def _index_snapshot(
             "semantics": "bid_ask_depth_not_classified_trade_volume",
         },
         "indicators": indicators,
-        "timeframes": {"1m": [], "5m": chart_5m, "15m": chart_15m, "1H": chart_1h, "1D": chart_1d},
+        "timeframes": {"1m": [], "5m": chart_5m, "15m": chart_15m, "1H": chart_1h, "1D": chart_1d, "1W": chart_1w},
         "option_chain": chain_payload,
         "strategy_suite": result["strategy_suite"],
     }
@@ -2097,17 +2142,7 @@ def _get_signals_uncached(force: bool = False) -> dict[str, Any]:
                                 chart_highs.append(high)
                                 chart_lows.append(low)
                             chart_rows = chart_rows[-250:]
-                            chart_1h_rows: list[dict[str, Any]] = []
-                            for offset in range(0, len(chart_rows) - 11, 12):
-                                group = chart_rows[offset:offset + 12]
-                                if len(group) == 12:
-                                    volumes = [_number(row.get("volume")) for row in group]
-                                    chart_1h_rows.append({
-                                        "t": group[-1]["t"], "timestamp": group[-1]["timestamp"],
-                                        "open": group[0]["open"], "high": max(row["high"] for row in group),
-                                        "low": min(row["low"] for row in group), "close": group[-1]["close"],
-                                        "volume": sum(value for value in volumes if value is not None) if any(value is not None for value in volumes) else None,
-                                    })
+                            chart_1h_rows = _aggregate_hourly_chart_rows(chart_rows)
                             chart_1d_rows: list[dict[str, Any]] = []
                             try:
                                 daily_end_dt = datetime.now(IST)
@@ -2134,6 +2169,7 @@ def _get_signals_uncached(force: bool = False) -> dict[str, Any]:
                                 # Missing daily history is a visible empty timeframe, never fabricated.
                                 chart_1d_rows = []
                             chart_1d_rows = chart_1d_rows[-45:]
+                            chart_1w_rows = _aggregate_weekly_chart_rows(chart_1d_rows)
                             chart_15m_rows: list[dict[str, Any]] = []
                             for offset in range(0, len(chart_rows) - 2, 3):
                                 group = chart_rows[offset:offset + 3]
@@ -2145,7 +2181,7 @@ def _get_signals_uncached(force: bool = False) -> dict[str, Any]:
                                         "low": min(row["low"] for row in group), "close": group[-1]["close"],
                                         "volume": sum(value for value in volumes if value is not None) if any(value is not None for value in volumes) else None,
                                     })
-                            market_row["timeframes"] = {"1m": [], "5m": chart_rows, "15m": chart_15m_rows, "1H": chart_1h_rows, "1D": chart_1d_rows}
+                            market_row["timeframes"] = {"1m": [], "5m": chart_rows, "15m": chart_15m_rows, "1H": chart_1h_rows, "1D": chart_1d_rows, "1W": chart_1w_rows}
                             if len(chart_closes) >= 30:
                                 market_row["indicators"] = _indicator_snapshot(chart_closes, candle_payload.get("candles") or [], [])
                         except Exception:

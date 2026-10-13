@@ -12,9 +12,9 @@
 2. flutter_app/lib/api.dart: normal GET timeout defaults to 30 seconds.
 3. backend/app/main.py: _get_signals() uses a single background refresh guarded by _signal_build_metrics['in_flight'] and serves explicitly stale cached snapshots while refreshing. This should reduce duplicate broker fan-out; verify under concurrent app + WebSocket load because earlier logs showed HTTP 499s.
 4. _index_snapshot() performs spot quote, historical candles, option quote batch, Greeks and selected-option ATR work per index; six indices plus commodity snapshots can still make refreshes slow. The SMC chart now includes real daily candles and hourly aggregates of real 5-minute candles in both normal and signal-fallback paths; live latency and broker history availability still require verification.
-5. /ws sends sampled OHLC snapshots and aggregate top-five bid/ask depth only. It does not send the lv price-level map or step required by the uploaded HTML footprint chart.
-6. Prior flutter_app/lib/order_flow_page.dart rendered simple OHLC candles and had no timeframe dropdown, POC/imbalance cells or HTML chart controls.
-7. Backend AI diagnostics state that configured OpenAI/OpenRouter credentials do not mean a provider test succeeded; authenticated inference must be implemented and verified before ok=true.
+5. /ws now sends broker-derived best-five price-level buckets (`lv`) and the instrument tick step to the bundled footprint chart. These values are bid/ask depth, not exchange-classified trade prints; the UI must preserve that distinction.
+6. `flutter_app/lib/order_flow_page.dart` loads the bundled original footprint HTML and records WebSocket telemetry. Real-device WebView rendering and live depth availability still need on-device verification.
+7. Backend `/v1/ai/status` reports key/configuration state, while `_run_ai_validation_probe()` performs a real authenticated provider request for a validation probe. Production credentials, provider quota, response parsing and successful inference must still be verified from live logs.
 
 ## Page communication contract
 Angel One REST/WebSocket → exchange-timestamped market snapshot → shared market[index] and option-chain cache → indicators/OI → five-layer quant engine → risk/strategy gates → provider evidence validation → notifications and screens.
@@ -30,8 +30,8 @@ Angel One REST/WebSocket → exchange-timestamped market snapshot → shared mar
 1. Confirm the existing single-background-refresh guard prevents duplicate broker fan-out under concurrent clients; add a load test if 499s recur.
 2. Instrument stage durations (market snapshot, option quotes, Greeks, ATR, commodities, total build) and expose them in diagnostics.
 3. Reduce duplicate polling and have WebSocket consumers use the shared cached snapshot; verify no repeated 499s under concurrent app + WS clients.
-4. Implement actual OpenAI and OpenRouter authenticated inference/test calls server-side; show output, model, latency and validation verdict only after a real response.
-5. Add real price-level bid/ask depth to /ws from broker data before rendering Sell × Buy / POC / imbalance. If depth is absent, show an explicit unavailable state rather than fabricated cells.
+4. Verify OpenAI and OpenRouter authenticated probes against production credentials; keep configured-but-untested separate from successful inference and preserve secret-free error messages.
+5. Verify real broker best-five levels reach the footprint HTML and show explicit unavailable states when depth is absent; never label depth-derived buckets as classified trade prints.
 6. Remove repository/reference cards from operational tabs; retain only app workflows and optionally a single dedicated reference library.
 7. Verify Flutter analysis/tests, Python tests, CI APK artifact, and live Angel One timestamps separately. The Android build workflow's service manifest setting must match the plugin's exported=true declaration to avoid manifest-merger failure.
 
