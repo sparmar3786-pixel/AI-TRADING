@@ -1699,7 +1699,10 @@ def _get_signals_uncached(force: bool = False) -> dict[str, Any]:
                 }
                 try:
                     index_config = INDEXES[index]
-                    spot_fallback = _quotes(adapter, index_config["exchange"], [index_config["token"]]).get(index_config["token"])
+                    fallback_quotes = _quotes(adapter, index_config["exchange"], [str(index_config["token"])])
+                    spot_fallback = fallback_quotes.get(str(index_config["token"]))
+                    if spot_fallback is None:
+                        spot_fallback = next((value for key, value in fallback_quotes.items() if str(key) == str(index_config["token"])), None)
                     if spot_fallback:
                         spot_ltp = _number(spot_fallback.get("ltp"))
                         spot_timestamp = _quote_timestamp(spot_fallback)
