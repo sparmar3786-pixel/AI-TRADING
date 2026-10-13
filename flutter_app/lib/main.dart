@@ -1510,6 +1510,7 @@ class DashboardPage extends StatelessWidget {
     final s=Map<String,dynamic>.from(signals[index] as Map? ?? const{}),m=Map<String,dynamic>.from(market[index] as Map? ?? const{});
     final f=Map<String,dynamic>.from(s['order_flow'] as Map? ?? m['order_flow'] as Map? ?? const{}),i=Map<String,dynamic>.from(s['indicators'] as Map? ?? const{}),v=Map<String,dynamic>.from(s['live_validation'] as Map? ?? const{}),g=(s['guards'] as List? ?? const[]);
     final providers=Map<String,dynamic>.from(aiProviders['providers'] as Map? ?? const{});
+    final gemini=Map<String,dynamic>.from(providers['gemini'] as Map? ?? const{});
     final openrouter=Map<String,dynamic>.from(providers['openrouter'] as Map? ?? const{});
     final d=(s['decision']??'WAIT').toString().toUpperCase(),fresh=s['data_fresh']==true&&connected,buy=_n(f['buy_volume']),sell=_n(f['sell_volume']),total=buy+sell;
     final layers=<List<dynamic>>[
@@ -1544,7 +1545,7 @@ class DashboardPage extends StatelessWidget {
       const SizedBox(height:10),_status('Market feed',fresh?'LIVE VERIFIED':'NOT VERIFIED',fresh),
       const Section('AI PROVIDERS • GEMINI + OPENROUTER'),
       Card(child: Column(children: [
-        ListTile(leading: Icon(Icons.circle, color: aiProviders['provider'] == 'gemini' ? Colors.greenAccent : Colors.redAccent, size: 12), title: const Text('Gemini'), subtitle: Text((aiProviders['status'] ?? 'STATUS NOT CHECKED').toString()), trailing: Text((aiProviders['model'] ?? '—').toString(), style: const TextStyle(fontSize: 10))),
+        ListTile(leading: Icon(Icons.circle, color: gemini['ok'] == true ? Colors.greenAccent : Colors.redAccent, size: 12), title: const Text('Gemini'), subtitle: Text((gemini['status'] ?? 'STATUS NOT CHECKED').toString()), trailing: Text((aiProviders['model'] ?? '—').toString(), style: const TextStyle(fontSize: 10))),
         ListTile(leading: Icon(Icons.circle, color: openrouter['ok'] == true ? Colors.greenAccent : Colors.redAccent, size: 12), title: const Text('OpenRouter'), subtitle: Text((openrouter['status'] ?? 'STATUS NOT CHECKED').toString()), trailing: Text((openrouter['model'] ?? '—').toString(), style: const TextStyle(fontSize: 10))),
       ])),
       const SizedBox(height:18),const Text('ORDER FLOW',style:TextStyle(fontSize:15,fontWeight:FontWeight.w900,letterSpacing:1)),
