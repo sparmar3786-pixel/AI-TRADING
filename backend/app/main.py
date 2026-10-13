@@ -408,6 +408,64 @@ def _book(quote: dict[str, Any]) -> tuple[float | None, float | None, float, flo
     sell_volume = sum(_number(x.get("quantity")) or 0 for x in sell)
     return bid, ask, buy_volume, sell_volume
 
+def _book_sides(quote: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return only broker-reported best-five bid/ask levels; never synthesize levels."""
+    raw = quote.get("best5Data") or quote.get("depth") or {}
+    if isinstance(raw, list):
+        buy = [x for x in raw if isinstance(x, dict) and str(x.get("side", "")).lower() in ("buy", "b")]
+        sell = [x for x in raw if isinstance(x, dict) and str(x.get("side", "")).lower() in ("sell", "s")]
+    elif isinstance(raw, dict):
+        buy = raw.get("buy") or raw.get("bids") or []
+        sell = raw.get("sell") or raw.get("asks") or []
+    else:
+        buy, sell = [], []
+    return ([x for x in buy if isinstance(x, dict)], [x for x in sell if isinstance(x, dict)])
+
+
+def _footprint_levels(quote: dict[str, Any], step: float = 5.0) -> tuple[dict[str, list[float]], int, int]:
+    """Bucket real best-five book quantities into the original chart's price rows.
+
+    Values are [sell-side ask depth, buy-side bid depth], not exchange-classified
+    trade prints. Missing broker levels produce an empty map rather than fake cells.
+    """
+    buy, sell = _book_sides(quote)
+    levels: dict[str, list[float]] = {}
+    def bucket(price: float) -> str:
+        value = round(price / step) * step if step > 0 else price
+        return f"{value:.2f}"
+    for rows, side_index in ((sell, 0), (buy, 1)):
+        for row in rows:
+            price = _number(row.get("price"))
+            quantity = _number(row.get("quantity"))
+            if price is None or price <= 0 or quantity is None or quantity < 0:
+                continue
+            key = bucket(price)
+            pair = levels.setdefault(key, [0.0, 0.0])
+            pair[side_index] += quantity
+    buy_orders = sum(int(_number(row.get("orders") or row.get("orderCount") or row.get("numberOfOrders")) or 0) for row in buy)
+    sell_orders = sum(int(_number(row.get("orders") or row.get("orderCount") or row.get("numberOfOrders")) or 0) for row in sell)
+    return levels, buy_orders, sell_orders
+
+
+def _find_nearest_future(rows: list[dict[str, Any]], index: str) -> dict[str, str] | None:
+    """Find the nearest unexpired index future for footprint snapshots."""
+    segment = "BFO" if index in {"SENSEX", "BANKEX"} else "NFO"
+    today = datetime.now(IST).date()
+    contracts = [
+        row for row in rows
+        if str(row.get("exch_seg", "")).upper() == segment
+        and str(row.get("name", "")).upper().replace(" ", "") == index
+        and str(row.get("instrumenttype", "")).upper() == "FUTIDX"
+        and row.get("token")
+        and _expiry_date(row.get("expiry")) is not None
+        and _expiry_date(row.get("expiry")) >= today
+    ]
+    contracts.sort(key=lambda row: _expiry_date(row.get("expiry")) or date.max)
+    if not contracts:
+        return None
+    row = contracts[0]
+    return {"exchange": segment, "token": str(row["token"]), "symbol": str(row.get("symbol") or index), "expiry": str(row.get("expiry") or "")}
+
 
 def _quote_timestamp(quote: dict[str, Any]) -> str | None:
     for key in ("exchFeedTime", "exchTradeTime", "exchange_timestamp", "exch_feed_time", "timestamp"):
@@ -1012,55 +1070,96 @@ def _empty_payload(reason: str) -> dict[str, Any]:
 
 @app.websocket("/ws")
 async def market_snapshot_stream(websocket: WebSocket) -> None:
-    """Stream only broker-sourced spot snapshots; never fabricate market ticks.
-
-    The Flutter footprint view receives sampled quotes, not exchange trade prints.
-    Depth-derived delta is explicitly labelled as bid/ask depth, not aggressor volume.
-    """
+    """Stream broker-only nearest-future snapshots without running the slow signal fan-out."""
     await websocket.accept()
     symbol = (websocket.query_params.get("symbol") or "NIFTY").strip().upper()
     if symbol not in INDEXES:
-        await websocket.send_json({"type": "status", "mode": "WAIT", "message": "Unsupported index symbol"})
+        await websocket.send_json({"type": "status", "mode": "wait", "message": "Unsupported index symbol"})
         await websocket.close(code=1008)
         return
     candles: list[dict[str, Any]] = []
+    last_trade_volume: float | None = None
     last_source_timestamp: str | None = None
+    future: dict[str, str] | None = None
+    rows: list[dict[str, Any]] = []
     try:
         while True:
             try:
-                payload = await asyncio.to_thread(_get_signals, False)
-                market_row = dict((payload.get("market") or {}).get(symbol) or {})
-                ltp = _number(market_row.get("ltp"))
-                source_timestamp = _iso(market_row.get("source_timestamp") or market_row.get("timestamp"))
+                adapter = _current_adapter()
+                if not adapter or adapter.status().get("authenticated") is not True:
+                    await websocket.send_json({
+                        "type": "snap", "symbol": symbol, "candles": candles, "step": 5,
+                        "mode": "wait", "live": False, "source_timestamp": None,
+                        "message": "Angel One is not authenticated. Connect the broker to receive footprint data.",
+                        "level_semantics": "broker_best5_bid_ask_depth_not_trade_prints",
+                    })
+                    await asyncio.sleep(5)
+                    continue
+                if not rows:
+                    rows = _load_master()
+                if future is None:
+                    future = _find_nearest_future(rows, symbol)
+                if future is None:
+                    await websocket.send_json({
+                        "type": "snap", "symbol": symbol, "candles": candles, "step": 5,
+                        "mode": "wait", "live": False, "source_timestamp": None,
+                        "message": "No unexpired index-futures contract found in the Angel One instrument master.",
+                        "level_semantics": "broker_best5_bid_ask_depth_not_trade_prints",
+                    })
+                    await asyncio.sleep(5)
+                    continue
+                quote = _quotes(adapter, future["exchange"], [future["token"]]).get(future["token"])
+                ltp = _number(quote.get("ltp")) if quote else None
+                source_timestamp = _quote_timestamp(quote or {})
                 parsed = datetime.fromisoformat(source_timestamp) if source_timestamp else None
                 age = (_utc_now() - parsed).total_seconds() if parsed else None
-                live = ltp is not None and ltp > 0 and age is not None and 0 <= age <= 60 and market_row.get("live") is True
-                if live and source_timestamp and source_timestamp != last_source_timestamp:
-                    flow = dict(market_row.get("order_flow") or {})
-                    bid_depth = _number(flow.get("buy_volume")) or 0.0
-                    ask_depth = _number(flow.get("sell_volume")) or 0.0
-                    epoch = int(parsed.timestamp()) if parsed else 0
-                    candles.append({
-                        "t": epoch, "o": ltp, "h": ltp, "l": ltp, "c": ltp,
-                        "v": bid_depth + ask_depth, "d": bid_depth - ask_depth,
-                        "source_timestamp": source_timestamp,
-                        "volume_semantics": "bid_ask_depth_not_trade_volume",
-                    })
+                live = ltp is not None and ltp > 0 and age is not None and 0 <= age <= 60
+                if live and parsed and source_timestamp:
+                    epoch = int(parsed.timestamp())
+                    minute = epoch - epoch % 60
+                    levels, buy_orders, sell_orders = _footprint_levels(quote or {}, step=5.0)
+                    _, _, buy_depth, sell_depth = _book(quote or {})
+                    total_volume = _number((quote or {}).get("tradeVolume") or (quote or {}).get("volume"))
+                    delta_volume = max(0.0, total_volume - last_trade_volume) if total_volume is not None and last_trade_volume is not None else 0.0
+                    if total_volume is not None:
+                        last_trade_volume = total_volume
+                    existing = next((item for item in reversed(candles) if int(item.get("t") or 0) == minute), None)
+                    if existing is None:
+                        existing = {
+                            "t": minute, "o": ltp, "h": ltp, "l": ltp, "c": ltp,
+                            "v": delta_volume, "d": buy_depth - sell_depth,
+                            "bo": buy_orders, "so": sell_orders, "lv": levels,
+                            "source_timestamp": source_timestamp,
+                            "volume_semantics": "incremental_broker_trade_volume",
+                            "level_semantics": "broker_best5_bid_ask_depth_not_trade_prints",
+                        }
+                        candles.append(existing)
+                    else:
+                        existing["h"] = max(float(existing["h"]), ltp)
+                        existing["l"] = min(float(existing["l"]), ltp)
+                        existing["c"] = ltp
+                        existing["v"] = float(existing.get("v") or 0) + delta_volume
+                        existing["d"] = buy_depth - sell_depth
+                        existing["bo"] = buy_orders
+                        existing["so"] = sell_orders
+                        existing["lv"] = levels
+                        existing["source_timestamp"] = source_timestamp
                     candles = candles[-250:]
                     last_source_timestamp = source_timestamp
+                mode = "live" if live else ("closed" if candles else "wait")
                 await websocket.send_json({
-                    "type": "snap", "symbol": symbol, "candles": candles,
-                    "mode": "LIVE" if live else "WAIT",
-                    "live": live, "ltp": ltp if live else None,
-                    "source_timestamp": source_timestamp,
-                    "tick_age_ms": int(age * 1000) if age is not None else None,
-                    "message": "Broker timestamped snapshots; delta is bid/ask depth, not classified trade prints.",
+                    "type": "snap", "symbol": symbol, "candles": candles, "step": 5,
+                    "mode": mode, "live": live, "ltp": ltp if live else None,
+                    "source_timestamp": source_timestamp, "tick_age_ms": int(age * 1000) if age is not None else None,
+                    "future_symbol": future["symbol"], "future_expiry": future["expiry"],
+                    "level_semantics": "broker_best5_bid_ask_depth_not_trade_prints",
+                    "message": "Live requires a fresh exchange timestamp. Footprint cells show broker best-five bid/ask depth, not classified trade prints.",
                     "signal_only": True, "order_placement_enabled": False,
                 })
             except HTTPException as exc:
-                await websocket.send_json({"type": "status", "mode": "WAIT", "message": str(exc.detail)[:180], "candles": candles})
+                await websocket.send_json({"type": "status", "mode": "wait", "message": str(exc.detail)[:180], "candles": candles})
             except Exception:
-                await websocket.send_json({"type": "status", "mode": "WAIT", "message": "Broker snapshot unavailable; waiting for a fresh timestamped quote.", "candles": candles})
+                await websocket.send_json({"type": "status", "mode": "wait", "message": "Broker futures snapshot unavailable; waiting for a fresh timestamped quote.", "candles": candles})
             await asyncio.sleep(5)
     except WebSocketDisconnect:
         return
