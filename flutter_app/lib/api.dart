@@ -19,6 +19,37 @@ class FreshApi {
   // shared top-level client so periodic refreshes do not leak client instances.
   final http.Client? _testClient;
 
+  /// Client-side request telemetry shared across tabs in this app process.
+  /// Stores only route names, timings, byte counts and status codes.
+  static final Map<String, Map<String, dynamic>> requestMetrics = <String, Map<String, dynamic>>{};
+
+  static void _recordMetric(String path, Stopwatch watch, {http.Response? response, int? requestBytes, String? error}) {
+    watch.stop();
+    final ms = watch.elapsedMicroseconds / 1000.0;
+    final bytes = response?.bodyBytes.length;
+    final old = requestMetrics[path] ?? <String, dynamic>{'count': 0, 'errors': 0, 'total_ms': 0.0};
+    final count = (old['count'] as int? ?? 0) + 1;
+    final failed = error != null || (response?.statusCode ?? 0) >= 400;
+    final total = (old['total_ms'] as num? ?? 0).toDouble() + ms;
+    requestMetrics[path] = <String, dynamic>{
+      'path': path,
+      'count': count,
+      'errors': (old['errors'] as int? ?? 0) + (failed ? 1 : 0),
+      'last_ms': double.parse(ms.toStringAsFixed(1)),
+      'average_ms': double.parse((total / count).toStringAsFixed(1)),
+      'last_status': response?.statusCode ?? (error == null ? null : 'NETWORK_ERROR'),
+      'last_request_bytes': requestBytes,
+      'last_response_bytes': bytes,
+      'last_client_throughput_bytes_per_second': bytes != null && ms > 0 ? double.parse((bytes * 1000 / ms).toStringAsFixed(1)) : null,
+      'last_error': error,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    };
+    if (requestMetrics.length > 60) {
+      final oldest = requestMetrics.keys.firstWhere((key) => key != path, orElse: () => path);
+      requestMetrics.remove(oldest);
+    }
+  }
+
   static const Set<String> _signalRoutes = <String>{
     '/v1/system/diagnostics',
     '/v1/metadata',
@@ -104,11 +135,18 @@ class FreshApi {
   }) async {
     final uri = _uri(path);
     final headers = await _headers();
-    final response = await (_testClient == null
-            ? http.get(uri, headers: headers)
-            : _testClient.get(uri, headers: headers))
-        .timeout(timeout);
-    return _decode(response);
+    final watch = Stopwatch()..start();
+    try {
+      final response = await (_testClient == null
+              ? http.get(uri, headers: headers)
+              : _testClient.get(uri, headers: headers))
+          .timeout(timeout);
+      _recordMetric(path, watch, response: response);
+      return _decode(response);
+    } catch (error) {
+      if (watch.isRunning) _recordMetric(path, watch, error: error.runtimeType.toString());
+      rethrow;
+    }
   }
 
   Future<Map<String, dynamic>> postJson(
@@ -119,11 +157,18 @@ class FreshApi {
     final uri = _uri(path);
     final headers = await _headers();
     final encodedBody = jsonEncode(body);
-    final response = await (_testClient == null
-            ? http.post(uri, headers: headers, body: encodedBody)
-            : _testClient.post(uri, headers: headers, body: encodedBody))
-        .timeout(timeout);
-    return _decode(response);
+    final watch = Stopwatch()..start();
+    try {
+      final response = await (_testClient == null
+              ? http.post(uri, headers: headers, body: encodedBody)
+              : _testClient.post(uri, headers: headers, body: encodedBody))
+          .timeout(timeout);
+      _recordMetric(path, watch, response: response, requestBytes: utf8.encode(encodedBody).length);
+      return _decode(response);
+    } catch (error) {
+      if (watch.isRunning) _recordMetric(path, watch, requestBytes: utf8.encode(encodedBody).length, error: error.runtimeType.toString());
+      rethrow;
+    }
   }
 
   Map<String, dynamic> _decode(http.Response response) {
