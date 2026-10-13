@@ -161,6 +161,14 @@ class DailyAiMemory {
           final t = _num(oldCandle['t']);
           if (t != null) candlesByTime[t.toInt()] = oldCandle;
         }
+        final recent = footprint['recent_candles'];
+        if (recent is List) {
+          for (final row in recent) {
+            final candle = _map(row);
+            final t = _num(candle['t']);
+            if (t != null) candlesByTime[t.toInt()] = candle;
+          }
+        }
         final currentTime = _num(footprintCandle['t']);
         if (currentTime != null) candlesByTime[currentTime.toInt()] = footprintCandle;
       }
