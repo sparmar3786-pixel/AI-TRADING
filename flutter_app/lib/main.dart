@@ -2106,17 +2106,6 @@ class _AiAccessState extends State<AiAccessPage>{
   ]);
 }
 
-class StrategyLink extends StatelessWidget {
-  const StrategyLink({required this.title,required this.detail,required this.url,super.key});
-  final String title,detail,url;
-  Future<void> _open(BuildContext context) async {
-    final uri=Uri.parse(url);
-    try { if(!await launchUrl(uri,mode:LaunchMode.externalApplication) && context.mounted){ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Could not open $url')));} }
-    catch(_){if(context.mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Could not open $url')));}
-  }
-  @override Widget build(BuildContext context)=>Card(child:ListTile(leading:const Icon(Icons.open_in_new,color:Colors.cyan),title:Text(title,style:const TextStyle(fontWeight:FontWeight.w800)),subtitle:Text(detail),trailing:const Icon(Icons.chevron_right),onTap:()=>_open(context)));
-}
-
 class ProCandlestickChart extends StatefulWidget {
   const ProCandlestickChart({required this.index,required this.market,required this.signal,super.key});
   final String index;
