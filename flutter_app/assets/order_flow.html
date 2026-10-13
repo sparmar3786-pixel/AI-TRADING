@@ -26,7 +26,7 @@ main{flex:1;min-height:0;position:relative}canvas{width:100%;height:100%;display
 </style></head><body>
 <header>
  <select id="sym"><optgroup label="Indian Indices"><option>NIFTY</option><option>BANKNIFTY</option><option>FINNIFTY</option><option>MIDCPNIFTY</option><option>SENSEX</option><option>BANKEX</option></optgroup><optgroup label="MCX Commodity Futures"><option>CRUDEOIL</option><option>CRUDEOILM</option><option>NATURALGAS</option><option>NATGASMINI</option><option>GOLD</option><option>GOLDM</option><option>SILVER</option><option>SILVERM</option><option>COPPER</option><option>ZINC</option><option>ALUMINIUM</option><option>LEAD</option><option>NICKEL</option><option>MENTHAOIL</option><option>CASTORSEED</option><option>COTTON</option><option>RUBBER</option></optgroup></select>
- <select id="tf"><option value="1">1m</option><option value="3">3m</option><option value="5">5m</option><option value="15">15m</option><option value="30">30m</option><option value="60">1h</option></select>
+ <select id="tf"><option value="1">1m</option><option value="3">3m</option><option value="5">5m</option><option value="15">15m</option><option value="30">30m</option><option value="60">1h</option><option value="1440">1D · 5Y</option></select>
  <button id="zo">−</button><button id="zi">+</button><button id="lt">Live ⇥</button><button id="hp">? Manual</button>
  <span id="st">...</span>
 </header>
@@ -47,7 +47,7 @@ main{flex:1;min-height:0;position:relative}canvas{width:100%;height:100%;display
 <script>
 const $=i=>document.getElementById(i),cv=$('c'),ctx=cv.getContext('2d');
 const FOOTPRINT_WS_URL = '__FOOTPRINT_WS_URL__';
-let sym='NIFTY',tf=1,step=5,raw=[],mode='',colW=100,off=0,ws,dirty=1,retry=0;
+let sym='NIFTY',tf=1,step=5,raw=[],mode='',colW=100,off=0,ws,dirty=1,retry=0,historyBars=0;
 const COMMODITY_STEPS={CRUDEOIL:1,CRUDEOILM:1,NATURALGAS:0.5,NATGASMINI:0.5,GOLD:100,GOLDM:10,SILVER:100,SILVERM:10,COPPER:1,ZINC:0.5,ALUMINIUM:0.5,LEAD:0.5,NICKEL:1,MENTHAOIL:1,CASTORSEED:10,COTTON:10,RUBBER:1};
 const isCommodity=s=>Object.prototype.hasOwnProperty.call(COMMODITY_STEPS,s);
 const priceStep=s=>COMMODITY_STEPS[s]||(({SENSEX:20,BANKEX:20,BANKNIFTY:10})[s]||5);
@@ -60,18 +60,27 @@ function connect(){
  if(ws){ws.onclose=null;ws.close()}
  raw=[];off=0;
  const endpoint=FOOTPRINT_WS_URL==='__FOOTPRINT_WS_URL__' ? ((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws') : FOOTPRINT_WS_URL;
- ws=new WebSocket(endpoint+'?symbol='+encodeURIComponent(sym));
+ ws=new WebSocket(endpoint+'?symbol='+encodeURIComponent(sym)+'&tf='+encodeURIComponent(String(tf)));
  ws.onopen=()=>{retry=0};
  ws.onmessage=e=>{const m=JSON.parse(e.data);mode=String(m.mode||'').toLowerCase();
-  if(m.type==='snap'){raw=Array.isArray(m.candles)?m.candles:[];step=Number(m.step)||priceStep(sym)}
+  if(m.type==='snap'){raw=Array.isArray(m.candles)?m.candles:[];step=Number(m.step)||priceStep(sym);historyBars=Number(m.history_bars_returned)||raw.length}
   else if(m.candle&&typeof m.candle==='object'){const c=m.candle,l=raw[raw.length-1];if(l&&l.t===c.t)raw[raw.length-1]=c;else if(!l||c.t>l.t)raw.push(c);else{const i=raw.findIndex(x=>x.t===c.t);if(i>=0)raw[i]=c}}
   else if(Array.isArray(m.candles)){raw=m.candles}
+  const latestCandle=(m.candle&&typeof m.candle==='object')?m.candle:raw[raw.length-1];
+  if(window.Telemetry&&typeof window.Telemetry.postMessage==='function'){
+   window.Telemetry.postMessage(JSON.stringify({
+    symbol:m.symbol||sym,mode:m.mode||mode,live:m.live===true,
+    source_timestamp:m.source_timestamp||latestCandle?.source_timestamp||null,
+    history_interval:m.history_interval||null,history_bars_returned:m.history_bars_returned||historyBars,
+    candle:latestCandle||null,level_semantics:m.level_semantics||'unknown'
+   }));
+  }
   status();dirty=1};
  ws.onclose=()=>{$('st').className='';$('st').textContent='Reconnecting...';setTimeout(connect,Math.min(1000*++retry,8000))};
 }
 function status(){const s=$('st'),l=raw[raw.length-1],hasLevels=raw.some(c=>c.lv&&Object.keys(c.lv).length>0);
  s.className=mode==='live'?'live':(mode==='wait'||mode==='closed'||mode==='after_market')?'closed':'';
- s.textContent=mode==='live'?(hasLevels?'● LIVE':'● LIVE · DEPTH UNAVAILABLE'):mode==='wait'?'● CLOSED / WAITING FOR BROKER DATA':'● CLOSED · LAST DATA '+(l?dm(l.t)+' '+hm(l.t):'—')}
+ s.textContent=tf===1440?(mode==='live'?'● LIVE · ':'● DAILY · ')+historyBars+' bars'+(hasLevels?' · DEPTH':' · DEPTH UNAVAILABLE'):mode==='live'?(hasLevels?'● LIVE':'● LIVE · DEPTH UNAVAILABLE'):mode==='wait'?'● CLOSED / WAITING FOR BROKER DATA':'● CLOSED · LAST DATA '+(l?dm(l.t)+' '+hm(l.t):'—')}
 
 function agg(){const m=new Map();
  for(const c of raw){const k=Math.floor(c.t/(tf*60))*tf*60;let a=m.get(k);
@@ -140,7 +149,7 @@ $('zi').onclick=()=>{colW=Math.min(180,colW+12);dirty=1};
 $('zo').onclick=()=>{colW=Math.max(64,colW-12);dirty=1};
 $('lt').onclick=()=>{off=0;dirty=1};
 $('sym').onchange=e=>{sym=e.target.value;step=priceStep(sym);connect()};
-$('tf').onchange=e=>{tf=+e.target.value;off=0;dirty=1};
+$('tf').onchange=e=>{tf=+e.target.value;off=0;dirty=1;connect()};
 $('hp').onclick=()=>$('man').hidden=false;$('mx').onclick=()=>$('man').hidden=true;
 addEventListener('keydown',e=>{if(e.key==='Escape')$('man').hidden=true});
 connect();
