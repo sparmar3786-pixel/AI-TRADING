@@ -7,14 +7,12 @@ class RiskCalculator extends StatefulWidget {
     required this.selectedIndex,
     required this.marketByIndex,
     required this.commodities,
-    required this.signalsByIndex,
     super.key,
   });
 
   final String selectedIndex;
   final Map<String, dynamic> marketByIndex;
   final List<dynamic> commodities;
-  final Map<String, dynamic> signalsByIndex;
 
   @override
   State<RiskCalculator> createState() => _RiskCalculatorState();
@@ -47,21 +45,17 @@ class _RiskCalculatorState extends State<RiskCalculator> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.selectedIndex != widget.selectedIndex && _indices.contains(widget.selectedIndex)) {
       _symbol = widget.selectedIndex;
+      _entry.clear();
+      _stop.clear();
+      _target.clear();
+      _lotSize.clear();
       _seedFromQuote();
     }
   }
 
   Map<String, dynamic> _row(String symbol) {
     final indexRow = widget.marketByIndex[symbol];
-    if (indexRow is Map) {
-      final row = Map<String, dynamic>.from(indexRow);
-      final signal = widget.signalsByIndex[symbol];
-      if (signal is Map) {
-        final plan = signal['trade_plan'];
-        if (plan is Map && row['lot_size'] == null) row['lot_size'] = plan['lot_size'];
-      }
-      return row;
-    }
+    if (indexRow is Map) return Map<String, dynamic>.from(indexRow);
     for (final item in widget.commodities) {
       if (item is! Map) continue;
       final row = Map<String, dynamic>.from(item);
@@ -89,7 +83,7 @@ class _RiskCalculatorState extends State<RiskCalculator> {
   void _seedFromQuote() {
     final row = _row(_symbol);
     final ltp = _firstNum(row, ['ltp', 'last_price', 'lastPrice', 'close']);
-    if (ltp != null) {
+    if (ltp != null && !_indices.contains(_symbol)) {
       _entry.text = ltp.toStringAsFixed(2);
     }
     final size = _firstNum(row, [
@@ -164,7 +158,7 @@ class _RiskCalculatorState extends State<RiskCalculator> {
           const Text('LIVE INDEX + MCX RISK CALCULATOR',
               style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: .5)),
           const SizedBox(height: 4),
-          const Text('Calculations use price points × lots × contract quantity. Lot size is never guessed.',
+          const Text('Calculations use price points × lots × contract quantity. Index spot is reference-only; enter the traded contract price and verified lot size. Lot size is never guessed.',
               style: TextStyle(fontSize: 11, color: Colors.white70)),
           const SizedBox(height: 10),
           DropdownButtonFormField<String>(
@@ -174,7 +168,14 @@ class _RiskCalculatorState extends State<RiskCalculator> {
             items: symbols.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
             onChanged: (value) {
               if (value == null) return;
-              setState(() { _symbol = value; _seedFromQuote(); });
+              setState(() {
+                _symbol = value;
+                _entry.clear();
+                _stop.clear();
+                _target.clear();
+                _lotSize.clear();
+                _seedFromQuote();
+              });
             },
           ),
           const SizedBox(height: 8),
@@ -198,7 +199,7 @@ class _RiskCalculatorState extends State<RiskCalculator> {
           ),
           const SizedBox(height: 8),
           Wrap(spacing: 10, runSpacing: 8, children: [
-            _field('Entry / option LTP', _entry, hint: 'Entry price'),
+            _field('Entry / traded contract LTP', _entry, hint: 'Actual contract price'),
             _field('Stop loss LTP', _stop, hint: 'SL price'),
             _field('Target LTP', _target, hint: 'Target price'),
             _field('Lots', _lots, hint: '1'),
