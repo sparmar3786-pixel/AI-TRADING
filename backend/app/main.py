@@ -573,6 +573,10 @@ def _wait_signal(index: str, reason: str) -> dict[str, Any]:
 
 
 def _greeks_map(adapter: AngelOneReadOnly, name: str, expiry: str) -> dict[tuple[float, str], dict[str, float | None]]:
+    # SmartAPI optionGreek is an NSE endpoint; BSE indices (SENSEX/BANKEX)
+    # routinely return AB9019 "No Data Available". Do not call it for BSE.
+    if name.strip().upper() in {"SENSEX", "BANKEX"}:
+        return {}
     try:
         data = adapter.option_greeks(name, expiry).get("data") or []
     except Exception:
