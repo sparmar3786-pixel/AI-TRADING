@@ -15,8 +15,9 @@ import 'ai_chat_page.dart';
 import 'quant_engine_lab_page.dart';
 import 'order_flow_page.dart';
 import 'strategy_library_page.dart';
+import 'flow_monitor_page.dart';
 
-const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Repository Library','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','PDF Report & Repositories','Quant Research Hub','Quant & Trading Repositories','AI Chat','Order Flow','Quant Engine Lab','Strategy Library'];
+const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Repository Library','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','PDF Report & Repositories','Quant Research Hub','Quant & Trading Repositories','AI Chat','Order Flow','Quant Engine Lab','Strategy Library','Flow Monitor'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
 
 void main() {
@@ -396,6 +397,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     if (!_marketOpenNow) return "API UP • MARKET CLOSED";
     if (status == "LIVE market feed connected.") return "API LIVE";
     if (status.startsWith("Backend online")) return "API UP • WAITING DATA";
+    if (status.startsWith("LIVE unavailable") || status.startsWith("Signal API responded")) return "API UP • REFRESHING DATA";
     return "API UP • DATA ERROR";
   }
 
@@ -608,6 +610,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           ),
         ),
         StrategyLibraryPage(market: market, signals: signals, selectedIndex: selectedIndex),
+        FlowMonitorPage(signalBackendUrl: signalBackendUrl),
       ]),
     ),
   );
@@ -638,6 +641,7 @@ IconData _tabIcon(int index) => switch (index) {
   21 => Icons.chat_bubble_outline,
   22 => Icons.show_chart,
   23 => Icons.library_books_outlined,
+  25 => Icons.speed,
   _ => Icons.layers_outlined,
 };
 
