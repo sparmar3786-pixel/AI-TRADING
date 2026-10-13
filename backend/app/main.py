@@ -2534,8 +2534,7 @@ def _run_ai_validation_probe(provider: str, api_key: str, model: str, endpoint: 
         headers["X-Title"] = "AI-TRADING Data Validator"
     request = urllib.request.Request(endpoint, data=body, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(request, timeout=8) as response:
-            data = json.loads(response.read().decode("utf-8"))
+        data = _provider_json_with_retry(request, timeout=8, provider="openrouter")
         choices = data.get("choices") or []
         output = str(((choices[0].get("message") or {}).get("content") if choices else "") or "").strip()
         # Parse the model's verdict if possible; malformed output is WAIT, never PASS.
