@@ -7,12 +7,14 @@ class RiskCalculator extends StatefulWidget {
     required this.selectedIndex,
     required this.marketByIndex,
     required this.commodities,
+    required this.signalsByIndex,
     super.key,
   });
 
   final String selectedIndex;
   final Map<String, dynamic> marketByIndex;
   final List<dynamic> commodities;
+  final Map<String, dynamic> signalsByIndex;
 
   @override
   State<RiskCalculator> createState() => _RiskCalculatorState();
@@ -51,7 +53,15 @@ class _RiskCalculatorState extends State<RiskCalculator> {
 
   Map<String, dynamic> _row(String symbol) {
     final indexRow = widget.marketByIndex[symbol];
-    if (indexRow is Map) return Map<String, dynamic>.from(indexRow);
+    if (indexRow is Map) {
+      final row = Map<String, dynamic>.from(indexRow);
+      final signal = widget.signalsByIndex[symbol];
+      if (signal is Map) {
+        final plan = signal['trade_plan'];
+        if (plan is Map && row['lot_size'] == null) row['lot_size'] = plan['lot_size'];
+      }
+      return row;
+    }
     for (final item in widget.commodities) {
       if (item is! Map) continue;
       final row = Map<String, dynamic>.from(item);
