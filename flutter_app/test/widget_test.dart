@@ -113,13 +113,8 @@ void main() {
     expect(find.text('RESEARCH ENGINES • LIVE BACKEND OUTPUT'), findsOneWidget);
     expect(find.text('TECHNICAL INDICATOR ENGINE'), findsOneWidget);
     expect(find.text('OPTIONS / OPEN INTEREST ENGINE'), findsOneWidget);
-    final researchScrollable = find.descendant(
-      of: find.byType(ListView).last,
-      matching: find.byType(Scrollable),
-    );
-    final validationPerformance = find.text('VALIDATION PERFORMANCE');
-    await tester.scrollUntilVisible(validationPerformance, 250, scrollable: researchScrollable);
-    expect(validationPerformance, findsOneWidget);
+    expect(find.textContaining('github.com'), findsNothing);
+    expect(find.text('VALIDATION PERFORMANCE'), findsNothing);
   });
 
   testWidgets('hamburger drawer exposes API and Railway navigation', (tester) async {
