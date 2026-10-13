@@ -252,8 +252,9 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     Map<String, dynamic> latestSystemDiagnostics = const {};
     String? latestSystemDiagnosticsError;
     try {
-      // Keep the existing AI/chat backend intact while live market data and
-      // Angel One authentication use the dedicated AI-TRADING signal service.
+      // Both configured URLs should resolve to the same AI-TRADING service.
+      // Keep separate clients for general page requests and signal/feed routes,
+      // but never split the workspace across Fresh-Apk and AI-TRADING backends.
       final api = FreshApi(backendUrl);
       final signalApi = FreshApi(signalBackendUrl);
       await api.health();
