@@ -42,7 +42,7 @@ class _GeminiSignalReviewState extends State<GeminiSignalReview> {
       _error = null;
     });
     try {
-      final response = await FreshApi(widget.backendUrl).aiChat(
+      final response = await FreshApi(widget.backendUrl).geminiChat(
         index: widget.selectedIndex,
         question: 'Review the current ${widget.selectedIndex} signal using only the supplied live market snapshot, deterministic five-layer checks, option quote timestamps, entry, stop loss and target. Return a concise risk review with: data freshness, any conflicting direction, missing/invalid SL or target, risk-gate status, and reasons to WAIT. Do not invent prices. Do not turn WAIT into PASS. AI confidence is not a probability of profit.',
       );
