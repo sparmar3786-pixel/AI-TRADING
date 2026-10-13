@@ -2939,8 +2939,8 @@ def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
         failures: list[dict[str, str]] = []
         providers = [
             ("gemini", (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()),
-            ("openai", (os.getenv("OPENAI_API_KEY") or "").strip()),
-            ("openrouter", (os.getenv("OPENROUTER_API_KEY") or "").strip()),
+            ("openai", (os.getenv("OPENAI_API_KEY") or os.getenv("OPEN_AI_API_KEY") or os.getenv("OPENAI_KEY") or "").strip()),
+            ("openrouter", (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPEN_ROUTER_API_KEY") or "").strip()),
         ]
         for provider, api_key in providers:
             if not api_key:
@@ -2959,7 +2959,7 @@ def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
                     )
                 else:
                     result = _run_openai_compatible_completion(
-                        api_key, os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini").strip(), messages,
+                        api_key, os.getenv("OPENROUTER_MODEL", "openrouter/free").strip(), messages,
                         provider="openrouter",
                         endpoint=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1/chat/completions").strip(),
                     )
