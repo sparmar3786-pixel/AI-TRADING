@@ -1411,7 +1411,7 @@ class DashboardPage extends StatelessWidget {
       ['Order flow','Buy/sell volume evidence',f.isNotEmpty],
       ['Options analytics','Strike and side',_has(s['strike'])&&_has(s['option_side'])],
       ['Strategy consensus','Backend decision',_has(s['decision'])],
-      ['Quant scoring','Quant evidence',_has(s['quant_score'])||_has(s['quant'])],
+      ['Quant scoring','Quant evidence',_n(s['quant_score']) > 0 || _has(s['quant'])],
       ['Risk management','Entry, stop, target',_has(s['entry'])&&_has(s['stop_loss'])&&_has(s['target'])&&g.isEmpty],
     ];
     final stable=Map<String,dynamic>.from(s['signal_stability'] as Map? ?? const{})['state']=='CONFIRMED';
@@ -1429,7 +1429,7 @@ class DashboardPage extends StatelessWidget {
       Container(padding:const EdgeInsets.all(16),decoration:BoxDecoration(gradient:const LinearGradient(colors:[Color(0xFF142536),Color(0xFF101722)]),borderRadius:BorderRadius.circular(20),border:Border.all(color:const Color(0xFF294052))),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
         Row(children:[Expanded(child:DropdownButtonFormField<String>(value:index,decoration:const InputDecoration(labelText:'Market',border:InputBorder.none),items:indexes.map((x)=>DropdownMenuItem(value:x,child:Text(x))).toList(),onChanged:(x){if(x!=null)onSelected(x);})),Container(padding:const EdgeInsets.all(8),decoration:BoxDecoration(color:c.withOpacity(.12),borderRadius:BorderRadius.circular(8)),child:Text(d,style:TextStyle(color:c,fontWeight:FontWeight.w900,fontSize:11)))]),
         Text('₹ '+(_has(m['ltp'])?_n(m['ltp']).toStringAsFixed(2):'—'),style:const TextStyle(fontSize:34,fontWeight:FontWeight.w900)),
-        const SizedBox(height:12),Row(children:[Expanded(child:_metric('CONFIDENCE',(s['confidence']??0).toString()+'%')),Expanded(child:_metric('REGIME',(s['regime']??'—').toString())),Expanded(child:_metric('QUALIFIED',qualifiedCount.toString()+' / 5'))]),
+        const SizedBox(height:12),Row(children:[Expanded(child:_metric('CONFIDENCE',s['confidence']==null?'—':s['confidence'].toString()+'%')),Expanded(child:_metric('REGIME',(s['regime']??'—').toString())),Expanded(child:_metric('QUALIFIED',qualifiedCount.toString()+' / 5'))]),
       ])),
       const SizedBox(height:10),_status('Market feed',fresh?'LIVE VERIFIED':'NOT VERIFIED',fresh),
       const SizedBox(height:18),const Text('ORDER FLOW',style:TextStyle(fontSize:15,fontWeight:FontWeight.w900,letterSpacing:1)),
