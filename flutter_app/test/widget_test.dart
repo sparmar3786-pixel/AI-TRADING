@@ -14,14 +14,6 @@ void main() {
   });
 
 
-  testWidgets('Repository browsing tabs are removed from operational navigation', (tester) async {
-    await tester.pumpWidget(const FreshApp());
-    expect(tabs, isNot(contains('Repository Library')));
-    expect(tabs, isNot(contains('PDF Report & Repositories')));
-    expect(tabs, isNot(contains('Quant Research Hub')));
-    expect(tabs, isNot(contains('Quant & Trading Repositories')));
-  });
-
   testWidgets('Broker Home uses Angel One-backed market data', (tester) async {
     await tester.pumpWidget(const FreshApp());
     final tabBarContext = tester.element(find.byType(TabBar).first);
@@ -30,6 +22,31 @@ void main() {
     expect(find.text('Invest'), findsOneWidget);
     expect(find.text('INDIAN MARKET WATCH'), findsOneWidget);
     expect(find.text('Markets, watchlist & account overview'), findsOneWidget);
+  });
+
+  testWidgets('PDF report tab includes all report pages and screenshot index', (tester) async {
+    await tester.pumpWidget(const FreshApp());
+    final tabBarContext = tester.element(find.byType(TabBar).first);
+    DefaultTabController.of(tabBarContext).animateTo(tabs.indexOf('PDF Report & Fixes'));
+    await tester.pumpAndSettle();
+    expect(find.text('PDF REPORT • PAGE-BY-PAGE ERROR & FIX CHECKLIST'), findsOneWidget);
+    expect(find.textContaining('PDF Page 1'), findsOneWidget);
+    final reportScrollable = find.descendant(
+      of: find.byType(ListView).last,
+      matching: find.byType(Scrollable),
+    );
+    final pageTen = find.textContaining('PDF Page 10');
+    await tester.scrollUntilVisible(pageTen, 300, scrollable: reportScrollable);
+    expect(pageTen, findsOneWidget);
+    final screenshotIndex = find.text('ALL 15 SCREENSHOT INDEX');
+    await tester.scrollUntilVisible(screenshotIndex, 300, scrollable: reportScrollable);
+    expect(screenshotIndex, findsOneWidget);
+    final repositoryLinks = find.text('REPOSITORY & DOCUMENTATION LINKS');
+    expect(repositoryLinks, findsNothing);
+    final priorityRootCause = find.text('PRIORITY ROOT CAUSE');
+    await tester.drag(reportScrollable, const Offset(0, 3000));
+    await tester.pumpAndSettle();
+    expect(priorityRootCause, findsOneWidget);
   });
 
   testWidgets('pro option chain renders quote table controls', (tester) async {
@@ -88,7 +105,7 @@ void main() {
     expect(find.text('PAPER TRADING'), findsNothing);
   });
 
-  testWidgets('Research Engines shows live data without repository link clutter', (tester) async {
+  testWidgets('Research Engines shows live validation outputs without repository links', (tester) async {
     await tester.pumpWidget(const FreshApp());
     final tabBarContext = tester.element(find.byType(TabBar).first);
     DefaultTabController.of(tabBarContext).animateTo(tabs.indexOf('Research Engines'));
@@ -96,17 +113,11 @@ void main() {
     expect(find.text('RESEARCH ENGINES • LIVE BACKEND OUTPUT'), findsOneWidget);
     expect(find.text('TECHNICAL INDICATOR ENGINE'), findsOneWidget);
     expect(find.text('OPTIONS / OPEN INTEREST ENGINE'), findsOneWidget);
-    final researchScrollable = find.descendant(
-      of: find.byType(ListView).last,
-      matching: find.byType(Scrollable),
-    );
-    final hiddenLinksNote = find.text('Research results above come from the selected index snapshot and deterministic backend modules. External repository links are hidden from this operational view.');
-    await tester.scrollUntilVisible(hiddenLinksNote, 250, scrollable: researchScrollable);
-    expect(hiddenLinksNote, findsOneWidget);
-    expect(find.text('RESEARCH SOURCES • NON-CHART REPOSITORIES'), findsNothing);
+    expect(find.textContaining('github.com'), findsNothing);
+    expect(find.text('VALIDATION PERFORMANCE'), findsNothing);
   });
 
-  testWidgets('hamburger drawer exposes API and Railway navigation without repository tabs', (tester) async {
+  testWidgets('hamburger drawer exposes API and Railway navigation', (tester) async {
     await tester.pumpWidget(const FreshApp());
     await tester.tap(find.byKey(const ValueKey('open-navigation-menu')));
     await tester.pumpAndSettle();
@@ -121,15 +132,15 @@ void main() {
     final dataHealth = find.byKey(const ValueKey('drawer-tab-Data Health'));
     await tester.scrollUntilVisible(dataHealth, 250, scrollable: drawerScrollable);
     expect(dataHealth, findsOneWidget);
-    expect(find.byKey(const ValueKey('drawer-tab-Repository Library')), findsNothing);
-    expect(find.byKey(const ValueKey('drawer-tab-PDF Report & Repositories')), findsNothing);
-    expect(find.byKey(const ValueKey('drawer-tab-Quant & Trading Repositories')), findsNothing);
+    final repositoryLibrary = find.byKey(const ValueKey('drawer-tab-Engine Data'));
+    await tester.scrollUntilVisible(repositoryLibrary, 250, scrollable: drawerScrollable);
+    expect(repositoryLibrary, findsOneWidget);
     await tester.scrollUntilVisible(apiRailway, 250, scrollable: drawerScrollable);
     await tester.tap(apiRailway);
     await tester.pumpAndSettle();
     expect(find.text('ADVANCED API + RAILWAY CONNECTION'), findsOneWidget);
-    expect(find.text('Railway FastAPI starter'), findsNothing);
-    expect(find.text('GitHub repository: Fresh-Apk'), findsNothing);
+    expect(find.text('Secret handling'), findsOneWidget);
+    expect(find.textContaining('github.com'), findsNothing);
   });
 
   testWidgets('Trading Setup shows Angel One architecture without repository links', (tester) async {
@@ -156,6 +167,7 @@ void main() {
     final systemFlow = find.text('SYSTEM FLOW');
     await tester.scrollUntilVisible(systemFlow, 250, scrollable: setupScrollable);
     expect(systemFlow, findsOneWidget);
+    expect(find.textContaining('github.com'), findsNothing);
   });
 
   testWidgets('5-Layer Quant Signal Engine shows signal, validation and monitoring layers', (tester) async {
@@ -189,6 +201,17 @@ void main() {
     final orderBookButton = find.text('LOAD / REFRESH ANGEL ONE ORDER BOOK');
     await tester.scrollUntilVisible(orderBookButton, 250, scrollable: engineScrollable);
     expect(orderBookButton, findsOneWidget);
+  });
+
+  testWidgets('Flow Monitor exposes measured API and provider validation telemetry', (tester) async {
+    await tester.pumpWidget(const FreshApp());
+    final tabBarContext = tester.element(find.byType(TabBar).first);
+    DefaultTabController.of(tabBarContext).animateTo(tabs.indexOf('Flow Monitor'));
+    await tester.pumpAndSettle();
+    expect(find.text('FLOW MONITOR • API SPEED • ENGINE VALIDATION'), findsOneWidget);
+    expect(find.text('SERVER API ROUTE METRICS'), findsOneWidget);
+    expect(find.text('OPENAI + OPENROUTER DATA VALIDATION'), findsOneWidget);
+    expect(find.text('TEST OPENAI + OPENROUTER'), findsOneWidget);
   });
 
   testWidgets('Pro chart clearly reports missing candles instead of fabricating data', (tester) async {
