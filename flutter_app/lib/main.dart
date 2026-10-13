@@ -1630,19 +1630,6 @@ class _IndicatorsState extends State<IndicatorsPage>{
     InfoRow('Support 20',_val(i['support20'])),InfoRow('Resistance 20',_val(i['resistance20'])),
     InfoRow('Z-score 20',_val(i['zscore20'])),InfoRow('Realized Volatility 20',_val(i['realized_vol20'])),
     const Text('Advanced indicators require sufficient normalized OHLC history. N/A means the required history is not available; no values are fabricated.', style: TextStyle(fontSize: 11, color: Colors.white70)),
-    const Section('Strategy Library • research links'),
-    const Text('Use these repositories as research references. Fresh uses its own Indian F&O strategy gates; importing code requires license and risk review.',style:TextStyle(fontSize:12)),
-    const StrategyLink(title:'Awesome Systematic Trading',detail:'Backtesting, systematic strategies and research tools',url:'https://github.com/paperswithbacktest/awesome-systematic-trading'),
-    const StrategyLink(title:'Awesome Algorithmic Trading',detail:'Algo-trading frameworks and implementations',url:'https://github.com/joelowj/awesome-algorithmic-trading'),
-    const StrategyLink(title:'Awesome Quant',detail:'Quantitative finance libraries and methods',url:'https://github.com/wilsonfreitas/awesome-quant'),
-    const StrategyLink(title:'Deep Trading / ML',detail:'Machine learning and deep-learning trading resources',url:'https://github.com/cbailes/awesome-deep-trading'),
-    const StrategyLink(title:'Trading strategies topic',detail:'Discover maintained strategy repositories',url:'https://github.com/topics/trading-strategies'),
-    const StrategyLink(title:'Indian Stock Market Dashboard',detail:'Indian index dashboard UI reference',url:'https://github.com/vikram-2101/Stock-Market-Dashboard'),
-    const StrategyLink(title:'Indian Stock Dashboard',detail:'NIFTY, BANKNIFTY, SENSEX and indicator UI reference',url:'https://github.com/SujaySingh-0403/stock-dashboard'),
-    const StrategyLink(title:'AI Stock Screener UI',detail:'AI-powered market dashboard UI reference',url:'https://github.com/DevMLAI01/stock-market-dashboard'),
-    const StrategyLink(title:'Trading Chart Pro',detail:'KLineChart-based financial chart reference',url:'https://github.com/rudra-sah00/trading-chart'),
-    const StrategyLink(title:'KLineChart',detail:'Professional candlestick chart library',url:'https://github.com/klinecharts/KLineChart'),
-    const StrategyLink(title:'TradingView Lightweight Charts',detail:'Lightweight open-source financial charting',url:'https://github.com/tradingview/lightweight-charts'),
   ]);}
 }
 
