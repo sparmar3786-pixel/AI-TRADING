@@ -1104,7 +1104,7 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
 def _empty_payload(reason: str) -> dict[str, Any]:
     now = _utc_now().isoformat()
     return {
-        "live": False, "last_fetch": None,
+        "live": False, "last_fetch": None, "message": reason,
         "feed": {"authenticated": False, "connected": False, "mode": "REST_FULL_DEPTH", "message": reason, "stream_started": False, "stream_open": False, "tick_count": 0, "unique_tokens_seen": 0, "last_tick_age_seconds": None, "last_error": reason},
         "store": {"source": "angelone_smartapi", "fresh": False, "message": reason, "update_count": 0, "last_update_age_seconds": None, "unique_tokens": 0},
         "ai": {"status": "not_configured", "message": "AI validation is not used to fabricate market data."},
@@ -1779,9 +1779,10 @@ def _get_signals_uncached(force: bool = False) -> dict[str, Any]:
                         except Exception:
                             # Missing history remains missing; the valid spot quote is retained.
                             pass
-                except Exception:
-                    # Preserve the primary failure; never substitute server time or sample prices.
-                    pass
+                except Exception as fallback_exc:
+                    # Preserve a specific diagnostic instead of hiding why the
+                    # independently fetched spot quote could not be retained.
+                    market_row["fallback_error"] = f"{type(fallback_exc).__name__}: {str(fallback_exc)[:180]}"
                 market[index] = market_row
         commodities = _commodity_snapshot(adapter, rows)
         confirmed = []
@@ -2009,6 +2010,8 @@ def _provider_key_present(*names: str) -> bool:
     return any(os.getenv(name, "").strip() for name in names)
 
 
+@app.get("/v1/ai/validation")
+@app.get("/v1/ai/validation/status")
 @app.get("/v1/ai/status")
 def ai_status(_: str = Depends(_device)) -> dict[str, Any]:
     providers = [
