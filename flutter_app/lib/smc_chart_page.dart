@@ -135,6 +135,7 @@ class _SmcChartPageState extends State<SmcChartPage> {
         FilledButton.icon(onPressed:_engineBusy?null:_runEngine,icon:Icon(_engineBusy?Icons.hourglass_top:Icons.hub),label:Text(_engineBusy?'ANALYZING…':'RUN MULTI-TIMEFRAME SMC ENGINE')),
         if(_engineResult.isNotEmpty) ...[
           Text('Format: ${_engineResult['strategy_format']??strategyFormat} • Server decision: ${_engineResult['signal']??'NO TRADE'} • Bias: ${_engineResult['bias']??'UNKNOWN'}',style:const TextStyle(fontWeight:FontWeight.w900)),
+          if(_engineResult['killzone_status'] is Map) Text("ICT killzone: ${(_engineResult['killzone_status'] as Map)['window'] ?? 'inactive'} • NY time ${(_engineResult['killzone_status'] as Map)['local_time'] ?? 'unknown'}"),
           if(_engineResult['format_modules'] is Map) Text('Format evidence: ${(_engineResult['format_modules'] as Map).keys.join(' • ')}'),
           Text('Reason: ${(_engineResult['reasons'] as List? ?? const[]).join(' • ')}'),
           Text('Execution allowed: ${_engineResult['execution_allowed']??false}'),
