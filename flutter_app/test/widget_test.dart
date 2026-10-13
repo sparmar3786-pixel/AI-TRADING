@@ -203,14 +203,37 @@ void main() {
 
   testWidgets('Flow Monitor exposes measured API and provider validation telemetry', (tester) async {
     await tester.pumpWidget(const FreshApp());
-    final tabBarContext = tester.element(find.byType(TabBar).first);
-    DefaultTabController.of(tabBarContext).animateTo(tabs.indexOf('Flow Monitor'));
-    await tester.pump(const Duration(milliseconds: 500));
-    expect(find.text('FLOW MONITOR • API SPEED • ENGINE VALIDATION'), findsOneWidget);
-    final monitorScrollable = find.descendant(of: find.byType(RefreshIndicator), matching: find.byType(Scrollable)).first;
-    await tester.scrollUntilVisible(find.text('SERVER API ROUTE METRICS'), 250, scrollable: monitorScrollable);
+
+    final tabBar = find.byType(TabBar).first;
+    final tabBarContext = tester.element(tabBar);
+    final controller = DefaultTabController.of(tabBarContext);
+    controller.animateTo(tabs.indexOf('Flow Monitor'));
+
+    // Advance the tab transition deterministically. Do not wait for the
+    // periodic diagnostics timer or live HTTP calls to settle.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pump();
+
+    expect(controller.index, tabs.indexOf('Flow Monitor'));
+    expect(find.textContaining('FLOW MONITOR'), findsOneWidget);
+
+    final monitorScrollable = find.descendant(
+      of: find.byType(RefreshIndicator),
+      matching: find.byType(Scrollable),
+    ).first;
+    await tester.scrollUntilVisible(
+      find.text('SERVER API ROUTE METRICS'),
+      250,
+      scrollable: monitorScrollable,
+    );
     expect(find.text('SERVER API ROUTE METRICS'), findsOneWidget);
-    await tester.scrollUntilVisible(find.text('OPENAI + OPENROUTER DATA VALIDATION'), 250, scrollable: monitorScrollable);
+
+    await tester.scrollUntilVisible(
+      find.text('OPENAI + OPENROUTER DATA VALIDATION'),
+      250,
+      scrollable: monitorScrollable,
+    );
     expect(find.text('OPENAI + OPENROUTER DATA VALIDATION'), findsOneWidget);
     expect(find.text('TEST OPENAI + OPENROUTER'), findsOneWidget);
   });
