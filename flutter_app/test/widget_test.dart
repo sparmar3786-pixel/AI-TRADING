@@ -24,6 +24,7 @@ void main() {
     expect(find.text('Markets, watchlist & account overview'), findsOneWidget);
   });
 
+  // Keep this regression guard: selecting a removed tab caused TabController.index < 0 in CI.
   testWidgets('non-functional PDF report tab is removed until real export exists', (tester) async {
     await tester.pumpWidget(const FreshApp());
     expect(tabs.contains('PDF Report & Fixes'), isFalse);
