@@ -222,6 +222,25 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       }
     }
     result['signals'] = rawSignals;
+    // Cached snapshots can be shown for continuity, but their old server-side
+    // "live" flags must never survive an offline refresh.
+    final cachedMarket = Map<String, dynamic>.from(result['market'] as Map? ?? const {});
+    for (final entry in cachedMarket.entries) {
+      final row = Map<String, dynamic>.from(entry.value as Map? ?? const {});
+      row['live'] = false;
+      row['feed_mode'] = 'CACHED_OFFLINE';
+      row['cached'] = true;
+      final chain = (row['option_chain'] as List?) ?? const <dynamic>[];
+      row['option_chain'] = chain.whereType<Map>().map((raw) {
+        final option = Map<String, dynamic>.from(raw);
+        option['live'] = false;
+        return option;
+      }).toList();
+      cachedMarket[entry.key] = row;
+    }
+    result['market'] = cachedMarket;
+    result['live'] = false;
+    result['feed'] = <String, dynamic>{...(result['feed'] as Map? ?? const {}), 'connected': false, 'mode': 'CACHED_OFFLINE'};
     result['trade_plans'] = <dynamic>[];
     result['qualified_trade_count'] = 0;
     return result;
