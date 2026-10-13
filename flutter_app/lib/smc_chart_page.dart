@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'api.dart';
 
 /// Multi-timeframe SMC/ICT chart tab. Consumes the same backend market and
 /// signal snapshots as the rest of the app; no synthetic candle fallback.
@@ -12,7 +13,7 @@ class SmcChartPage extends StatefulWidget {
 }
 class _SmcChartPageState extends State<SmcChartPage> {
   String tf='15m';
-  bool showOb=true, showFvg=true, showLiquidity=true;
+  bool showOb=true, showFvg=true, showLiquidity=true, _engineBusy=false;\n  Map<String,dynamic> _engineResult=const {};\n  String? _engineError;\n  Future<void> _runEngine() async {\n    setState((){_engineBusy=true;_engineError=null;});\n    try {\n      final response=await FreshApi().postJson('/v1/smc/analyze', {\n        'instrument':widget.index,\n        'htf_candles':_bars('1D'),\n        'mtf_candles':_bars('1H'),\n        'ltf_candles':_bars('15m'),\n        'in_killzone':true,\n      }, timeout:const Duration(seconds:20));\n      if(mounted)setState(()=>_engineResult=response);\n    } catch(e) { if(mounted)setState(()=>_engineError=e.toString()); }\n    finally { if(mounted)setState(()=>_engineBusy=false); }\n  }
   List<Map<String,dynamic>> _bars(String timeframe) {
     final all=Map<String,dynamic>.from(widget.market['timeframes'] as Map? ?? const{});
     return (all[timeframe] as List? ?? const[]).whereType<Map>().map((x)=>Map<String,dynamic>.from(x)).where((x)=>['open','high','low','close'].every((k)=>x[k] is num)).toList();
@@ -79,6 +80,18 @@ class _SmcChartPageState extends State<SmcChartPage> {
         const SizedBox(height:8),Text('BOS: ${a['bos']} • Liquidity tolerance: ${a['tol']??'waiting for candles'}'),
         if(a['poi'] is Map) Text('POI: ${(a['poi'] as Map)['bottom']} – ${(a['poi'] as Map)['top']}'),
         const Text('Order placement remains disabled from this page. Confirmed live data, risk limits and the central engine must approve independently.',style:TextStyle(fontSize:11,color:Colors.white60)),
+      ]))),
+      Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+        const Text('BACKEND SMC ENGINE • LIVE DATA ONLY',style:TextStyle(fontWeight:FontWeight.w900)),
+        const SizedBox(height:8),
+        FilledButton.icon(onPressed:_engineBusy?null:_runEngine,icon:Icon(_engineBusy?Icons.hourglass_top:Icons.hub),label:Text(_engineBusy?'ANALYZING…':'RUN MULTI-TIMEFRAME SMC ENGINE')),
+        if(_engineResult.isNotEmpty) ...[
+          Text('Server decision: ${_engineResult['signal']??'NO TRADE'} • Bias: ${_engineResult['bias']??'UNKNOWN'}',style:const TextStyle(fontWeight:FontWeight.w900)),
+          Text('Reason: ${(_engineResult['reasons'] as List? ?? const[]).join(' • ')}'),
+          Text('Execution allowed: ${_engineResult['execution_allowed']??false}'),
+        ],
+        if(_engineError!=null) Text('Backend analysis error: $_engineError',style:const TextStyle(color:Colors.redAccent)),
+        const Text('The server result is separate from the visual overlay. Missing timeframes, stale/missing candles or unconfirmed structure must remain NO TRADE.',style:TextStyle(fontSize:11,color:Colors.white60)),
       ]))),
       Card(child:ListTile(leading:const Icon(Icons.psychology_alt),title:const Text('AI validation context'),subtitle:Text(aiText,maxLines:4,overflow:TextOverflow.ellipsis),trailing:const Icon(Icons.open_in_new),onTap:widget.onOpenAiChat)),
       if(showLiquidity) Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
