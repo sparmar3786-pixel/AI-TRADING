@@ -72,7 +72,7 @@ function connect(){
     symbol:m.symbol||sym,mode:m.mode||mode,live:m.live===true,
     source_timestamp:m.source_timestamp||latestCandle?.source_timestamp||null,
     history_interval:m.history_interval||null,history_bars_returned:m.history_bars_returned||historyBars,
-    candle:latestCandle||null,level_semantics:m.level_semantics||'unknown'
+    candle:latestCandle||null,recent_candles:raw.slice(-20),level_semantics:m.level_semantics||'unknown'
    }));
   }
   status();dirty=1};
