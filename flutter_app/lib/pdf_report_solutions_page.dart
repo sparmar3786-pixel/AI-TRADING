@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 /// In-app, page-by-page companion to Fresh_Algo_Signal_Screenshots_Error_Report.pdf.
 /// Keeps the existing trading UI untouched and adds the report as a separate tab.
@@ -86,26 +85,12 @@ class PdfReportSolutionsPage extends StatelessWidget {
     '15. 3-Layer Trade Engine — Risk & Validation FAIL / WAIT',
   ];
 
-  static const repositories = <(String, String, String)>[
-    ('Fresh-Apk • current app/backend repository', 'https://github.com/sparmar3786-pixel/Fresh-Apk/tree/fresh-platform-v1', 'Current target branch; contains the app, API client and backend integration.'),
-    ('Angel One SmartAPI Python SDK', 'https://github.com/angel-one/smartapi-python', 'Broker API reference; use backend-side credentials only.'),
-    ('Systematic trading strategies', 'https://github.com/paperswithbacktest/awesome-systematic-trading', 'Strategy research collection.'),
-    ('Algorithmic trading collection', 'https://github.com/joelowj/awesome-algorithmic-trading', 'Algorithmic trading tools and references.'),
-    ('Quant finance resources', 'https://github.com/wilsonfreitas/awesome-quant', 'Quantitative finance libraries and learning.'),
-    ('Deep trading research', 'https://github.com/cbailes/awesome-deep-trading', 'Deep-learning and trading references.'),
-    ('Trading strategy topic', 'https://github.com/topics/trading-strategies', 'Additional strategy repositories.'),
-    ('KLineChart', 'https://github.com/klinecharts/KLineChart', 'Candlestick chart library reference.'),
-    ('TradingView Lightweight Charts', 'https://github.com/tradingview/lightweight-charts', 'Lightweight charting library reference.'),
-    ('Railway FastAPI templates', 'https://github.com/railwayapp-templates/fastapi', 'Deployment template reference.'),
-    ('Railway dashboard', 'https://railway.com/dashboard', 'Inspect deployment status, variables and logs.'),
-    ('FastAPI documentation', 'https://fastapi.tiangolo.com', 'API routing and OpenAPI documentation.'),
-  ];
 
   @override
   Widget build(BuildContext context) => ListView(
     padding: const EdgeInsets.all(12),
     children: [
-      const Text('PDF REPORT • ALL 10 PAGES & FIX CHECKLIST',
+      const Text('PDF REPORT • PAGE-BY-PAGE ERROR & FIX CHECKLIST',
           style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
       const SizedBox(height: 6),
       const Text(
@@ -155,21 +140,6 @@ class PdfReportSolutionsPage extends StatelessWidget {
           ),
       ])),
       const SizedBox(height: 8),
-      const Text('REPOSITORY & DOCUMENTATION LINKS', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
-      const SizedBox(height: 6),
-      const Text('Links open externally. They are reference repositories unless their code has been separately ported, tested and licensed; adding a link does not mean its code was copied into the APK.',
-          style: TextStyle(color: Colors.white70, fontSize: 12)),
-      for (final item in repositories)
-        Card(child: ListTile(
-          leading: const Icon(Icons.code, color: Color(0xFF12D6FF)),
-          title: Text(item.$1, style: const TextStyle(fontWeight: FontWeight.w800)),
-          subtitle: Text(item.$3),
-          trailing: const Icon(Icons.open_in_new),
-          onTap: () async {
-            final uri = Uri.parse(item.$2);
-            await launchUrl(uri, mode: LaunchMode.externalApplication);
-          },
-        )),
       const SizedBox(height: 8),
       const Text('SAFETY STATUS FROM THE PDF', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
       const Card(child: Column(children: [
