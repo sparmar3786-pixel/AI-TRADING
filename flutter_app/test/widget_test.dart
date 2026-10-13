@@ -105,7 +105,7 @@ void main() {
     expect(find.text('PAPER TRADING'), findsNothing);
   });
 
-  testWidgets('Research Engines shows live data and non-chart research sources', (tester) async {
+  testWidgets('Research Engines shows live validation outputs without repository links', (tester) async {
     await tester.pumpWidget(const FreshApp());
     final tabBarContext = tester.element(find.byType(TabBar).first);
     DefaultTabController.of(tabBarContext).animateTo(tabs.indexOf('Research Engines'));
