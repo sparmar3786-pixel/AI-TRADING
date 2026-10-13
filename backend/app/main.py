@@ -1129,7 +1129,7 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
 def _empty_payload(reason: str) -> dict[str, Any]:
     now = _utc_now().isoformat()
     return {
-        "live": False, "last_fetch": None,
+        "live": False, "last_fetch": None, "message": reason,
         "feed": {"authenticated": False, "connected": False, "mode": "REST_FULL_DEPTH", "message": reason, "stream_started": False, "stream_open": False, "tick_count": 0, "unique_tokens_seen": 0, "last_tick_age_seconds": None, "last_error": reason},
         "store": {"source": "angelone_smartapi", "fresh": False, "message": reason, "update_count": 0, "last_update_age_seconds": None, "unique_tokens": 0},
         "ai": {"status": "not_configured", "message": "AI validation is not used to fabricate market data."},
@@ -2121,6 +2121,43 @@ def _run_ai_validation_probe(provider: str, api_key: str, model: str, endpoint: 
         return {"provider": provider, "configured": True, "ok": False, "status": "connection_error",
                 "model": model, "latency_ms": round((time.perf_counter() - started) * 1000, 1),
                 "verdict": "WAIT", "error": f"Provider request failed ({type(exc).__name__})."}
+
+
+@app.post("/v1/ai/validate")
+def ai_validate_snapshot(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
+    """Return provider configuration and deterministic market-data eligibility without inventing an AI pass."""
+    payload = _get_signals(force=False)
+    index = str(body.get("index") or "NIFTY").strip().upper()
+    market_row = dict((payload.get("market") or {}).get(index) or {})
+    signal_row = dict((payload.get("signals") or {}).get(index) or {})
+    timestamp = _iso(market_row.get("source_timestamp") or market_row.get("timestamp"))
+    parsed = datetime.fromisoformat(timestamp) if timestamp else None
+    age = (_utc_now() - parsed).total_seconds() if parsed else None
+    fresh = (
+        market_row.get("source") == "angelone_smartapi"
+        and _number(market_row.get("ltp")) is not None
+        and (_number(market_row.get("ltp")) or 0) > 0
+        and age is not None and 0 <= age <= 60
+    )
+    providers: dict[str, Any] = {}
+    for provider, env_name in (("openai", "OPENAI_API_KEY"), ("openrouter", "OPENROUTER_API_KEY")):
+        configured = bool(os.getenv(env_name, "").strip())
+        providers[provider] = {
+            "configured": configured,
+            "ok": False,
+            "status": "not_configured" if not configured else "configured_not_tested",
+            "verdict": "WAIT",
+        }
+    return {
+        "overall_status": "BLOCKED_NO_LIVE_DATA" if not fresh else "PROVIDER_TEST_REQUIRED",
+        "deterministic_decision": str(signal_row.get("decision") or "WAIT") if fresh else "WAIT",
+        "providers": providers,
+        "market_snapshot_available": fresh,
+        "source_timestamp": timestamp,
+        "age_seconds": round(age, 2) if age is not None else None,
+        "signal_only": True,
+        "order_placement_enabled": False,
+    }
 
 
 @app.post("/v1/providers/ai/test")
