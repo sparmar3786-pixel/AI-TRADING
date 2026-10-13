@@ -15,7 +15,7 @@ import 'order_flow_page.dart';
 import 'strategy_library_page.dart';
 import 'flow_monitor_page.dart';
 
-const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Engine Data','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','PDF Report & Fixes','AI Chat','Order Flow','Quant Engine Lab','Strategy Library','Flow Monitor'];
+const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Market Diagnostics','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','PDF Report & Fixes','AI Chat','Order Flow','Quant Engine Lab','Strategy Library','Flow Monitor'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
 
 void main() {
@@ -576,7 +576,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           onRefresh: refresh,
         ),
         const ApiRailwayPage(),
-        RepositoryLibraryPage(market: market, signals: signals, feed: feed, diagnostics: storeDiagnostics, lastFetch: lastFetch),
+        MarketDiagnosticsPage(market: market, signals: signals, feed: feed, diagnostics: storeDiagnostics, lastFetch: lastFetch),
         TradingSetupPage(backendUrl: backendUrl, apiOnline: apiOnline, signalsOnline: signalsEndpointOnline, angelOnline: angelOnline, market: market, signals: signals, ai: ai, liveStatus: liveTrading, lastFetch: lastFetch),
         ResearchEnginesPage(market: market, signals: signals, ai: ai, lastFetch: lastFetch, selectedIndex: selectedIndex, onIndexChanged: (value) => setState(() => selectedIndex = value)),
         TradeEnginePage(
@@ -1025,8 +1025,8 @@ class _BacktestingPageState extends State<BacktestingPage> {
   }
 }
 
-class RepositoryLibraryPage extends StatelessWidget {
-  const RepositoryLibraryPage({
+class MarketDiagnosticsPage extends StatelessWidget {
+  const MarketDiagnosticsPage({
     required this.market,
     required this.signals,
     required this.feed,
@@ -1044,7 +1044,7 @@ class RepositoryLibraryPage extends StatelessWidget {
   Widget build(BuildContext context) => ListView(
     padding: const EdgeInsets.all(12),
     children: [
-      const Text('ENGINE DATA • CURRENT BACKEND SNAPSHOT', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
+      const Text('MARKET DATA DIAGNOSTICS • CURRENT BACKEND SNAPSHOT', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
       const SizedBox(height: 8),
       Card(child: Column(children: [
         InfoRow('Latest fetch', lastFetch ?? 'No successful fetch recorded'),
