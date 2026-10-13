@@ -1334,9 +1334,54 @@ def _index_snapshot(
             "volume": sum(value for value in volumes if value is not None) if any(value is not None for value in volumes) else None,
         })
     # Run the full local research suite against the same completed 5m
-    # candles exposed to the app. It remains advisory and never overrides the
-    # deterministic five-layer risk gate or authorizes an order.
-    result["strategy_suite"] = evaluate_strategy_suite(chart_5m, oi_change=None)
+    # Angel One candles exposed to the app. Attach a reproducible execution
+    # trace so downstream AI can be told exactly which output entered context.
+    strategy_suite = evaluate_strategy_suite(chart_5m, oi_change=None)
+    strategy_hash = hashlib.sha256(
+        json.dumps(chart_5m, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    ).hexdigest()
+    strategy_execution_id = f"strategy-{uuid.uuid4().hex}"
+    strategy_trace = {
+        "execution_id": strategy_execution_id,
+        "strategy_version": "strategy-suite-v1",
+        "evaluated_at": _utc_now().isoformat(),
+        "input_candle_count": len(chart_5m),
+        "input_sha256": strategy_hash,
+        "source": "angelone_completed_5m_candles",
+        "ai_context_sent": False,
+        "ai_semantic_use_verifiable": False,
+        "research_engine_received": False,
+        "trading_setup_received": False,
+        "order_placement_enabled": False,
+    }
+    strategy_trace_rows = []
+    for strategy_name, strategy_signal in (strategy_suite.get("strategies") or {}).items():
+        strategy_signal = str(strategy_signal or "WAIT").upper()
+        strategy_trace_rows.append({
+            "strategy_id": f"{strategy_execution_id}:{strategy_name}",
+            "strategy_name": strategy_name,
+            "strategy_version": "strategy-suite-v1",
+            "execution_id": strategy_execution_id,
+            "signal": strategy_signal,
+            "score": None,
+            "score_status": "NOT_COMPUTED_BY_RULE",
+            "input_candle_count": len(chart_5m),
+            "input_sha256": strategy_hash,
+            "source": "angelone_completed_5m_candles",
+            "status": "evaluated",
+            "rejection_reason": None if strategy_signal in ("LONG", "SHORT") else (
+                "No directional LONG/SHORT event was returned for the final completed candle; WAIT is not a trade."
+            ),
+            "ai_context_sent": False,
+            "ai_semantic_use_verifiable": False,
+            "research_engine_received": False,
+            "trading_setup_received": False,
+            "order_placement_enabled": False,
+        })
+    strategy_suite["execution_id"] = strategy_execution_id
+    strategy_suite["trace"] = strategy_trace
+    strategy_suite["strategy_trace"] = strategy_trace_rows
+    result["strategy_suite"] = strategy_suite
     result["indicators"] = indicators
     result["oi_summary"] = {
         "call_oi": call_oi, "put_oi": put_oi, "pcr": pcr,
