@@ -116,6 +116,11 @@ class _SmcChartPageState extends State<SmcChartPage> {
     ].join(' • ');
     return {'bias':bias,'signal':ready?(bias=='BULLISH'?'LONG':'SHORT'):'NO TRADE','reason':reason,'bos':structure,'choch':choch,'ob':ob,'fvg':fvg,'bsl':bsl,'ssl':ssl,'poi':poi,'tol':tol};
   }
+  Widget _smcTag(String title, String value, Color color) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+    decoration: BoxDecoration(color: color.withOpacity(.10), border: Border.all(color: color.withOpacity(.5)), borderRadius: BorderRadius.circular(8)),
+    child: Text('$title • $value', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: color)),
+  );
   @override Widget build(BuildContext context){
     final a=_analyze(bars);
     final live=_liveFeed && bars.length>=2;
@@ -132,11 +137,9 @@ class _SmcChartPageState extends State<SmcChartPage> {
       Card(child:Padding(padding:const EdgeInsets.all(10),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
         const Text('PROCHART • LIVE API ONLY',style:TextStyle(fontWeight:FontWeight.w900)),
         const SizedBox(height:6),
-        SizedBox(height:320,child:WebViewWidget(controller:_proChartController)),
-        const SizedBox(height:8),
         Row(children:[Expanded(child:Text(widget.index,style:const TextStyle(fontWeight:FontWeight.w800,fontSize:15))),Text(_last?.toStringAsFixed(2)??'—',style:const TextStyle(fontWeight:FontWeight.w900,fontSize:18))]),
         const SizedBox(height:8),
-        SizedBox(height:270,width:double.infinity,child:bars.length<2?const Center(child:Text('No real candles received — demo data is disabled.')):CustomPaint(painter:SmcCandlePainter(bars:bars,orderBlocks:showOb?(a['ob'] as List<Map<String,dynamic>>):const[],fvgs:showFvg?(a['fvg'] as List<Map<String,dynamic>>):const[]))),
+        SizedBox(height:390,width:double.infinity,child:bars.length<2?const Center(child:Text('No real candles received — demo data is disabled.')):CustomPaint(painter:SmcCandlePainter(bars:bars,orderBlocks:showOb?(a['ob'] as List<Map<String,dynamic>>):const[],fvgs:showFvg?(a['fvg'] as List<Map<String,dynamic>>):const[]))),
         Wrap(spacing:6,children:[FilterChip(label:const Text('Order Blocks'),selected:showOb,onSelected:(v)=>setState(()=>showOb=v)),FilterChip(label:const Text('FVG'),selected:showFvg,onSelected:(v)=>setState(()=>showFvg=v)),FilterChip(label:const Text('Liquidity'),selected:showLiquidity,onSelected:(v)=>setState(()=>showLiquidity=v))]),
         Text('Source: backend candle snapshots. Overlay calculations are chart-side and do not replace server validation.',style:TextStyle(fontSize:11,color:Colors.white.withOpacity(.6))),
       ]))),
@@ -145,7 +148,16 @@ class _SmcChartPageState extends State<SmcChartPage> {
         const SizedBox(height:8),
         Row(children:[Expanded(child:Text('Bias\n${a['bias']}',style:const TextStyle(fontWeight:FontWeight.w800))),Expanded(child:Text('Setup\n${a['signal']}',style:TextStyle(fontWeight:FontWeight.w900,color:a['signal']=='NO TRADE'?Colors.orangeAccent:a['signal']=='LONG'?Colors.greenAccent:Colors.redAccent)))]),
         const SizedBox(height:8),Text((a['reason']??'').toString()),
-        const SizedBox(height:8),Text('BOS: ${a['bos']} • Liquidity tolerance: ${a['tol']??'waiting for candles'}'),
+        const SizedBox(height:8),
+        Wrap(spacing:6,runSpacing:6,children:[
+          _smcTag('BOS', a['bos']==true ? 'CONFIRMED' : 'WAIT', a['bos']==true ? Colors.greenAccent : Colors.orangeAccent),
+          _smcTag('CHoCH', a['choch']==true ? 'CONFIRMED' : 'NOT CONFIRMED', a['choch']==true ? Colors.cyanAccent : Colors.white54),
+          _smcTag('IDM', (a['idm'] ?? 'NOT CONFIRMED').toString(), Colors.orangeAccent),
+          _smcTag('FVG', (a['fvg'] as List).isEmpty ? 'NONE' : '${(a['fvg'] as List).length} ZONES', Colors.purpleAccent),
+          _smcTag('ORDER BLOCK', (a['ob'] as List).isEmpty ? 'NONE' : '${(a['ob'] as List).length} ZONES', Colors.blueAccent),
+        ]),
+        Text('BOS = structure break • CHoCH = possible trend shift • IDM = inducement proxy; needs confirmed swing/liquidity evidence. These labels describe the selected timeframe ($tf), not every timeframe.',style:const TextStyle(fontSize:11,color:Colors.white70)),
+        Text('BOS: ${a['bos']} • Liquidity tolerance: ${a['tol']??'waiting for candles'}'),
         if(a['poi'] is Map) Text('POI: ${(a['poi'] as Map)['bottom']} – ${(a['poi'] as Map)['top']}'),
         const Text('Order placement remains disabled from this page. Confirmed live data, risk limits and the central engine must approve independently.',style:TextStyle(fontSize:11,color:Colors.white60)),
       ]))),
