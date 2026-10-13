@@ -135,3 +135,67 @@ def analyze_smc(
         "reasons": reasons, "execution_allowed": False,
         "note": "SMC/ICT is an advisory setup detector, not a profit guarantee or order authorization."
     }
+
+
+def analyze_guardeer(
+    htf_candles: list[dict[str, Any]],
+    mtf_candles: list[dict[str, Any]],
+    ltf_candles: list[dict[str, Any]],
+    *, instrument: str = "NIFTY", in_killzone: bool = True,
+) -> dict[str, Any]:
+    """Guardeer 11-lecture SMC profile: fractal HTF/MTF/LTF, structure,
+    inducement proxy, OB/FVG POI, liquidity and intermediate/short-term swings.
+    This is a transparent evidence profile, not a claim that every named block
+    can be inferred from OHLC alone.
+    """
+    result = analyze_smc(htf_candles, mtf_candles, ltf_candles,
+                         instrument=instrument, in_killzone=in_killzone)
+    htf_swings = find_swings(_valid(htf_candles))
+    mtf_swings = find_swings(_valid(mtf_candles))
+    ltf_swings = find_swings(_valid(ltf_candles))
+    result["strategy_format"] = "Guardeer"
+    result["format_modules"] = {
+        "lecture_1": "Smart Money Concept",
+        "lecture_2_fractal": {"htf": "4H", "mtf": "1H", "ltf": "15m", "available": bool(htf_swings and mtf_swings and ltf_swings)},
+        "lecture_3_structure": {"bos": result["mtf"].get("bos", False), "choch": result["mtf"].get("choch", False), "inducement_proxy": mtf_swings[-2] if len(mtf_swings) >= 2 else None},
+        "lecture_4_blocks_fvg": {"order_blocks": result["ltf"]["order_blocks"], "fvgs": result["ltf"]["fvgs"]},
+        "lecture_5_liquidity": {"bsl": result["ltf"]["bsl"], "ssl": result["ltf"]["ssl"]},
+        "lecture_6_poi": result["ltf"].get("poi"),
+        "lecture_7_block_types": ["order_block", "breaker_block", "mitigation_block", "reclaimed_block", "rejection_block"],
+        "lecture_8_swing_classes": {"ith_itl_sth_stl": "Requires confirmed nested swing hierarchy; not inferred from labels alone"},
+        "lecture_9_bias": result["bias"],
+        "lecture_10_timing": {"in_killzone": bool(in_killzone), "ote": "Calculated only when a valid dealing range is available"},
+        "lecture_11_true_ict": {"htf_bias_mtf_structure_ltf_liquidity": True},
+    }
+    return result
+
+
+def analyze_inner_circle(
+    htf_candles: list[dict[str, Any]],
+    mtf_candles: list[dict[str, Any]],
+    ltf_candles: list[dict[str, Any]],
+    *, instrument: str = "NIFTY", in_killzone: bool = True,
+) -> dict[str, Any]:
+    """Inner Circle ICT Core Course profile with bias, structure, liquidity,
+    FVG/OB, OTE range, killzone and Power-of-3 evidence."""
+    result = analyze_smc(htf_candles, mtf_candles, ltf_candles,
+                         instrument=instrument, in_killzone=in_killzone)
+    htf = _valid(htf_candles)
+    swing_high = max((c["high"] for c in htf), default=None)
+    swing_low = min((c["low"] for c in htf), default=None)
+    ote = None
+    if swing_high is not None and swing_low is not None and swing_high > swing_low:
+        span = swing_high - swing_low
+        ote = {"62": swing_high - span * 0.62, "70.5": swing_high - span * 0.705, "79": swing_high - span * 0.79}
+    result["strategy_format"] = "Inner Circle"
+    result["format_modules"] = {
+        "daily_weekly_bias": result["bias"],
+        "market_structure": {"bos": result["mtf"].get("bos", False), "mss": result["mtf"].get("choch", False), "choch": result["mtf"].get("choch", False)},
+        "liquidity": {"bsl": result["ltf"]["bsl"], "ssl": result["ltf"]["ssl"]},
+        "fvg": result["ltf"]["fvgs"],
+        "order_blocks": result["ltf"]["order_blocks"],
+        "ote": ote,
+        "killzone_filter": bool(in_killzone),
+        "power_of_3": {"accumulation": None, "manipulation": None, "distribution": None, "note": "Session range/sweep data not supplied; AMD phases are not fabricated"},
+    }
+    return result
