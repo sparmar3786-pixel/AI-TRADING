@@ -2084,6 +2084,30 @@ class _AiAccessState extends State<AiAccessPage>{
           final value = raw[name];
           if (value is Map) next[name] = Map<String, dynamic>.from(value);
         }
+      } else {
+        // Fresh-Apk's AI backend returns provider_health as a list. Configuration
+        // alone is not a successful test, so keep every configured model red until
+        // the explicit Test AI button returns a real completion.
+        final health = result['provider_health'];
+        if (health is List) {
+          for (final item in health.whereType<Map>()) {
+            final name = (item['name'] ?? '').toString().toLowerCase();
+            if (!['gemini', 'openai', 'openrouter'].contains(name)) continue;
+            next[name] = <String, dynamic>{
+              'configured': true,
+              'ok': false,
+              'working': false,
+              'status': item['status'] == 'COOLDOWN' ? 'cooldown' : 'configured_not_tested',
+              'model': item['model'] ?? item['model_name'] ?? 'model not reported',
+              'last_error': item['last_error'],
+            };
+          }
+        }
+        for (final name in ['gemini', 'openai', 'openrouter']) {
+          next.putIfAbsent(name, () => <String, dynamic>{
+            'configured': false, 'ok': false, 'working': false, 'status': 'not_configured',
+          });
+        }
       }
     } catch (error) {
       if (mounted) setState(() => message = 'AI provider status failed: ' + error.toString().replaceFirst('Exception: ', ''));
@@ -2099,7 +2123,7 @@ class _AiAccessState extends State<AiAccessPage>{
       final updated = <String, Map<String, dynamic>>{...providers};
       for (final item in checks.whereType<Map>()) {
         final name = (item['provider'] ?? '').toString();
-        if (name == 'openai' || name == 'openrouter') updated[name] = Map<String, dynamic>.from(item);
+        if (name == 'gemini' || name == 'openai' || name == 'openrouter') updated[name] = Map<String, dynamic>.from(item);
       }
       final details = checks.whereType<Map>().map((item) {
         final name = (item['provider'] ?? 'provider').toString().toUpperCase();
