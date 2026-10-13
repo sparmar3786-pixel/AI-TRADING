@@ -423,7 +423,19 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  Map<String,dynamic> _signal(String i) => Map<String,dynamic>.from(signals[i] as Map? ?? const {});
+  Map<String, dynamic> _signal(String i) {
+    final row = Map<String, dynamic>.from(signals[i] as Map? ?? const {});
+    final marketRow = _market(i);
+    // A blocked strategy must still allow the pages to display independently
+    // verified spot indicators/depth; missing signal fields remain WAIT.
+    if (row['indicators'] is! Map && marketRow['indicators'] is Map) {
+      row['indicators'] = marketRow['indicators'];
+    }
+    if (row['order_flow'] is! Map && marketRow['order_flow'] is Map) {
+      row['order_flow'] = marketRow['order_flow'];
+    }
+    return row;
+  }
   Map<String,dynamic> _market(String i) {
     final row = Map<String, dynamic>.from(market[i] as Map? ?? const {});
     final cachedChain = optionChainsByIndex[i];
