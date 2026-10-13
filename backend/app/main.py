@@ -863,6 +863,63 @@ def _market_chain_rows(options: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return output
 
 
+def _live_validation_contract(
+    result: dict[str, Any],
+    engine_layers: dict[str, Any],
+    option_age_seconds: Any,
+    ai_review: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return explicit fail-closed checks for the Flutter Risk & Validation panel."""
+    candidate = str(result.get("decision") or "WAIT").upper()
+    is_candidate = candidate in ("CALL BUY", "PUT BUY")
+    data_layer = dict(engine_layers.get("data_quality") or {})
+    option_layer = dict(engine_layers.get("option_selection") or {})
+    risk_layer = dict(engine_layers.get("risk_levels") or {})
+    age = _number(data_layer.get("age_seconds"))
+    option_age = _number(option_age_seconds)
+    fresh_market = data_layer.get("pass") is True and age is not None and 0 <= age <= 60
+    valid_option_quote = option_layer.get("pass") is True and option_age is not None and 0 <= option_age <= 60
+    entry = _number(result.get("entry"))
+    stop = _number(result.get("stop_loss"))
+    target = _number(result.get("target"))
+    valid_levels = entry is not None and stop is not None and target is not None and 0 < stop < entry < target
+    five_layer_pass = len(engine_layers) >= 5 and all(
+        isinstance(layer, dict) and layer.get("pass") is True for layer in engine_layers.values()
+    )
+    risk_pass = risk_layer.get("pass") is True
+    ai_conflict = False
+    ai_decision = "NOT_RUN"
+    if isinstance(ai_review, dict) and (ai_review.get("ok") is True or ai_review.get("validated") is True):
+        ai_decision = str(ai_review.get("decision") or ai_review.get("action") or "WAIT").upper()
+        if ai_decision in ("WAIT", "REJECT", "CALL BUY", "PUT BUY"):
+            ai_conflict = ai_decision != candidate
+    checks = {
+        "fresh_market_data": fresh_market,
+        "valid_option_quote": valid_option_quote,
+        "five_layer_engine": five_layer_pass,
+        "valid_sl_target": valid_levels,
+        "risk_checks": risk_pass,
+        "ai_direction_consistent": not ai_conflict,
+    }
+    blocks = [name.upper() for name, passed in checks.items() if not passed]
+    if not is_candidate:
+        blocks.append("NO_QUALIFIED_STRATEGY_CANDIDATE")
+    final_pass = is_candidate and all(checks.values())
+    return {
+        "decision": candidate if final_pass else "WAIT",
+        "verdict": "PASS" if final_pass else "WAIT",
+        "checks": checks,
+        "market_direction": (dict(engine_layers.get("trend_sentiment") or {}).get("trend") or "UNKNOWN"),
+        "market_age_seconds": age,
+        "option_age_seconds": option_age,
+        "reward_risk": risk_layer.get("reward_risk") or risk_layer.get("risk_reward"),
+        "ai_decision": ai_decision,
+        "blocks": blocks,
+        "ai_conflict": ai_conflict,
+        "signal_only": True,
+        "order_placement_enabled": False,
+    }
+
 def _index_snapshot(
     adapter: AngelOneReadOnly,
     rows: list[dict[str, Any]],
@@ -1120,15 +1177,19 @@ def _index_snapshot(
         "target": result.get("target"),
         "signal_only": True,
     }
-    result["live_validation"] = {
-        "decision": result.get("decision", "WAIT"),
-        "verdict": "PASS" if result.get("decision") in ("CALL BUY", "PUT BUY") else "WARN",
-        "market_direction": result.get("layers", {}).get("trend_sentiment", {}).get("trend", "UNKNOWN"),
-        "market_age_seconds": result.get("layers", {}).get("data_quality", {}).get("age_seconds"),
-        "option_age_seconds": next((item.get("age_seconds") for item in chain_payload if item.get("strike") == result.get("strike")), None),
-        "ai_decision": "NOT_CONFIGURED",
-        "blocks": list(result.get("reasons") or []),
-    }
+    option_age_seconds = next((item.get("age_seconds") for item in chain_payload if item.get("strike") == result.get("strike")), None)
+    live_validation = _live_validation_contract(result, engine_layers, option_age_seconds)
+    if live_validation["verdict"] != "PASS":
+        if result.get("decision") in ("CALL BUY", "PUT BUY"):
+            result["candidate_decision"] = result.get("decision")
+        result["decision"] = "WAIT"
+        result["five_layer_engine"]["decision"] = "WAIT"
+        result["quant_engine"] = result["five_layer_engine"]
+        result["trade_plan"]["selection_grade"] = "WAIT"
+        existing_reasons = list(result.get("reasons") or [])
+        existing_reasons.extend("VALIDATION_BLOCKED:" + item for item in live_validation["blocks"])
+        result["reasons"] = list(dict.fromkeys(existing_reasons))
+    result["live_validation"] = live_validation
     chart_5m: list[dict[str, Any]] = []
     for candle in candle_rows:
         if not isinstance(candle, (list, tuple)) or len(candle) < 6:
