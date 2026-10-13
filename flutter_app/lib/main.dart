@@ -632,12 +632,11 @@ IconData _tabIcon(int index) => switch (index) {
   16 => Icons.layers_outlined,
   17 => Icons.account_balance_wallet_outlined,
   18 => Icons.picture_as_pdf_outlined,
-  19 => Icons.science_outlined,
-  20 => Icons.library_books_outlined,
-  21 => Icons.chat_bubble_outline,
-  22 => Icons.show_chart,
-  23 => Icons.library_books_outlined,
-  25 => Icons.speed,
+  19 => Icons.chat_bubble_outline,
+  20 => Icons.show_chart,
+  21 => Icons.library_books_outlined,
+  22 => Icons.layers_outlined,
+  23 => Icons.speed,
   _ => Icons.layers_outlined,
 };
 
@@ -795,7 +794,7 @@ class ApiRailwayPage extends StatelessWidget {
             onTap: () => _openExternal(context, item.$2),
           ),
         ),
-      const Text('Links open in your browser. A repository/template link is a reference, not proof that your current Railway service is connected or deployed.', style: TextStyle(fontSize: 12, color: Colors.white70)),
+      const Text('Use runtime diagnostics above to verify the actual backend, broker session and data freshness.', style: TextStyle(fontSize: 12, color: Colors.white70)),
     ],
   );
 }
