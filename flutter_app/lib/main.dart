@@ -17,6 +17,8 @@ import 'flow_monitor_page.dart';
 
 const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Market Diagnostics','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','PDF Report & Fixes','AI Chat','Order Flow','Quant Engine Lab','Strategy Library','Flow Monitor'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
+const commodityOptionUnderlyings = ['CRUDEOIL','CRUDEOILM','NATURALGAS','NATGASMINI','GOLD','GOLDM','SILVER','SILVERM','COPPER','ZINC','ALUMINIUM','LEAD','NICKEL'];
+const optionUnderlyings = [...indexes, ...commodityOptionUnderlyings];
 
 void main() {
   // Capture Dart/Flutter errors in logcat so a phone-side crash can be
@@ -558,7 +560,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         DashboardPage(index:selectedIndex, connected:status == 'LIVE market feed connected.', status:status, signals:signals, market:market, aiProviders:aiProviderStatus, tradePlans:tradePlans, qualifiedCount:qualifiedCount, lastFetch:lastFetch, onSelected:(v)=>setState(()=>selectedIndex=v)),
         MarketPage(selected:selectedIndex,onChanged:(v)=>setState(()=>selectedIndex=v), signal:_signal(selectedIndex), market:_market(selectedIndex)),
         ChainPage(selected:selectedIndex,onChanged:(v)=>setState(()=>selectedIndex=v), market:_market(selectedIndex), error:optionChainError),
-        OIPage(signals:signals, market:market),
+        OIPage(signals:signals, market:market, commodities:commodities, optionChains:optionChainsByIndex),
         IndicatorsPage(selected:selectedIndex,signal:_signal(selectedIndex),fast:emaFast,slow:emaSlow,onChanged:(f,s){setState((){emaFast=f;emaSlow=s;});refresh();},onIndex:(v)=>setState(()=>selectedIndex=v)),
         SignalPage(backendUrl:backendUrl,liveStatus:liveTrading,index:selectedIndex,signals:signals,ai:ai,aiProviders:aiProviderStatus,tradePlans:tradePlans,market:market,onChanged:(v)=>setState(()=>selectedIndex=v)),
         RiskPage(index:selectedIndex,signal:_signal(selectedIndex),plans:tradePlans),
@@ -1564,18 +1566,21 @@ class _ChainPageState extends State<ChainPage> {
 
 
 class OIPage extends StatelessWidget {
-  const OIPage({required this.signals, required this.market, super.key});
+  const OIPage({required this.signals, required this.market, required this.commodities, required this.optionChains, super.key});
   final Map<String, dynamic> signals;
   final Map<String, dynamic> market;
+  final List<dynamic> commodities;
+  final Map<String, List<dynamic>> optionChains;
   double _n(dynamic value) => value is num ? value.toDouble() : double.tryParse(value?.toString() ?? '') ?? 0;
   @override
   Widget build(BuildContext context) => ListView(padding: const EdgeInsets.all(10), children: [
     const Section('OI Lab — broker option-chain data'),
     const Text('OI/PCR are calculated only from returned Angel One option quotes. Missing chains remain unavailable; no sample OI is generated.', style: TextStyle(fontSize: 11, color: Colors.white70)),
-    ...indexes.map((index) {
+    ...optionUnderlyings.map((index) {
       final signal = Map<String, dynamic>.from(signals[index] as Map? ?? const {});
       final marketRow = Map<String, dynamic>.from(market[index] as Map? ?? const {});
-      final rows = ((marketRow['option_chain'] as List?) ?? const <dynamic>[])
+      final cached = optionChains[index];
+      final rows = ((marketRow['option_chain'] as List?) ?? cached ?? const <dynamic>[])
           .whereType<Map>().map((row) => Map<String, dynamic>.from(row)).toList();
       final calls = rows.where((row) => (row['side'] ?? row['option_type'] ?? '').toString().toUpperCase().contains('C')).toList();
       final puts = rows.where((row) => (row['side'] ?? row['option_type'] ?? '').toString().toUpperCase().contains('P')).toList();
@@ -2174,7 +2179,7 @@ class ChainRow extends StatelessWidget { const ChainRow(this.strike,this.ce,this
 class OIBox extends StatelessWidget { const OIBox(this.title,this.hint,{super.key}); final String title,hint; @override Widget build(BuildContext context)=>Card(child:ListTile(leading:const Icon(Icons.swap_vert),title:Text(title,style:const TextStyle(fontWeight:FontWeight.w800)),subtitle:Text(hint),trailing:const Text('—'))); }
 class IndexPicker extends StatelessWidget{
   const IndexPicker({required this.selected,required this.onChanged,super.key});final String selected;final ValueChanged<String> onChanged;
-  @override Widget build(BuildContext context)=>DropdownButtonFormField<String>(initialValue:selected,decoration:const InputDecoration(labelText:'Select Index'),items:indexes.map((i)=>DropdownMenuItem(value:i,child:Text(i))).toList(),onChanged:(v){if(v!=null)onChanged(v);});
+  @override Widget build(BuildContext context)=>DropdownButtonFormField<String>(initialValue:selected,decoration:const InputDecoration(labelText:'Select Index / MCX Commodity'),items:optionUnderlyings.map((i)=>DropdownMenuItem(value:i,child:Text(commodityOptionUnderlyings.contains(i) ? 'MCX • $i' : i))).toList(),onChanged:(v){if(v!=null)onChanged(v);});
 }
 class TradePlanCard extends StatelessWidget {
   const TradePlanCard({required this.rank, required this.plan, super.key});
