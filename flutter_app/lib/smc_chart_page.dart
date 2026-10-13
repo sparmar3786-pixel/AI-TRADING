@@ -95,7 +95,7 @@ class _SmcChartPageState extends State<SmcChartPage> {
     // Use confirmed two-left/two-right pivots, and freeze the pivot set
     // before the latest candle so the break candle cannot define its own level.
     final highs=<double>[], lows=<double>[];
-    for(var i=2;i<c.length-2;i++){
+    for(var i=2;i<c.length-3;i++){
       final h=(c[i]['high'] as num).toDouble(), l=(c[i]['low'] as num).toDouble();
       final left=c.sublist(i-2,i), right=c.sublist(i+1,i+3);
       if([...left,...right].every((bar)=>h>(bar['high'] as num).toDouble()))highs.add(h);
