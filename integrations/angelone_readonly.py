@@ -18,6 +18,32 @@ class AngelOneConfigError(RuntimeError):
     """Raised when required server-side credentials are missing."""
 
 
+# Per-process throttles are deliberately conservative and shared across adapter
+# instances, because SmartAPI limits are per client code, not per object.
+_rate_lock = threading.Lock()
+_last_rate_call: dict[str, float] = {}
+_RATE_INTERVAL_SECONDS = {"market_data": 1.05, "candles": 0.40, "option_greeks": 1.05}
+
+
+def _throttled_call(bucket: str, operation):
+    interval = _RATE_INTERVAL_SECONDS[bucket]
+    with _rate_lock:
+        now = time.monotonic()
+        delay = interval - (now - _last_rate_call.get(bucket, 0.0))
+        if delay > 0:
+            time.sleep(delay)
+        _last_rate_call[bucket] = time.monotonic()
+    try:
+        return operation()
+    except Exception as exc:
+        message = str(exc).lower()
+        if "exceeding access rate" in message or "access denied because of exceeding rate" in message or "rate limit" in message:
+            # SmartAPI SDK may try to parse its plain-text HTTP 403 as JSON.
+            # Normalize it for callers; do not blindly retry and worsen the limit.
+            raise RuntimeError(f"rate_limited: Angel One {bucket.replace('_', ' ')} endpoint rejected the request; preserve cached data and retry after cooldown.") from None
+        raise
+
+
 def _required_env(name: str) -> str:
     value = os.getenv(name, "").strip()
     if not value:
@@ -296,7 +322,10 @@ class AngelOneReadOnly:
             total += len(tokens)
         if not normalized or total > 100:
             raise ValueError("Provide 1-100 tokens total, with at most 50 per exchange")
-        response = _ok(self._login().getMarketData(normalized_mode, normalized))
+        response = _throttled_call(
+            "market_data",
+            lambda: _ok(self._login().getMarketData(normalized_mode, normalized)),
+        )
         return {
             "source": "angelone_smartapi",
             "mode": normalized_mode,
@@ -328,7 +357,7 @@ class AngelOneReadOnly:
             "exchange": exchange, "symboltoken": symboltoken,
             "interval": interval, "fromdate": fromdate, "todate": todate,
         }
-        response = _ok(self._login().getCandleData(params))
+        response = _throttled_call("candles", lambda: _ok(self._login().getCandleData(params)))
         return {
             "source": "angelone_smartapi",
             "exchange": exchange,
@@ -344,7 +373,10 @@ class AngelOneReadOnly:
             raise ValueError("name and expirydate are required")
         if len(name) > 40 or len(expirydate) > 20:
             raise ValueError("name or expirydate is too long")
-        response = _ok(self._login().optionGreek({"name": name.strip().upper(), "expirydate": expirydate.strip().upper()}))
+        response = _throttled_call(
+            "option_greeks",
+            lambda: _ok(self._login().optionGreek({"name": name.strip().upper(), "expirydate": expirydate.strip().upper()})),
+        )
         return {
             "source": "angelone_smartapi",
             "name": name.strip().upper(),
