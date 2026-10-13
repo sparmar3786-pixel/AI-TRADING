@@ -85,6 +85,9 @@ _master_rows: list[dict[str, Any]] = []
 _master_loaded_at = 0.0
 _signal_cache: dict[str, Any] | None = None
 _signal_cache_at = 0.0
+# Single-flight guard: concurrent dashboard refreshes and WebSocket clients must not
+# trigger duplicate slow Angel One REST collection for the same cache window.
+_signal_build_lock = threading.Lock()
 _confirmation_states: dict[str, dict[str, Any]] = {}
 _last_market: dict[str, Any] = {}
 _option_history: dict[str, dict[str, float]] = {}
@@ -1406,6 +1409,15 @@ def market_sentiment(index: str = Query(default="NIFTY"), _: str = Depends(_devi
 
 
 def _get_signals(force: bool = False) -> dict[str, Any]:
+    """Return a shared signal snapshot; serialize expensive cache misses."""
+    with _signal_build_lock:
+        with _lock:
+            if _signal_cache is not None and not force and time.monotonic() - _signal_cache_at < SIGNAL_CACHE_SECONDS:
+                return _signal_cache
+        return _build_signals(force=force)
+
+
+def _build_signals(force: bool = False) -> dict[str, Any]:
     global _signal_cache, _signal_cache_at, _last_market
     with _lock:
         if _signal_cache is not None and not force and time.monotonic() - _signal_cache_at < SIGNAL_CACHE_SECONDS:
