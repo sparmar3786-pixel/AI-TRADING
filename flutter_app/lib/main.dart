@@ -1306,7 +1306,8 @@ class DashboardPage extends StatelessWidget {
   double _n(dynamic v)=>v is num?v.toDouble():double.tryParse(v?.toString()??'')??0;
   @override Widget build(BuildContext context){
     final s=Map<String,dynamic>.from(signals[index] as Map? ?? const{}),m=Map<String,dynamic>.from(market[index] as Map? ?? const{});
-    final f=Map<String,dynamic>.from(s['order_flow'] as Map? ?? m['order_flow'] as Map? ?? const{}),i=Map<String,dynamic>.from(s['indicators'] as Map? ?? const{}),v=Map<String,dynamic>.from(s['live_validation'] as Map? ?? const{}),g=(s['guards'] as List? ?? const[]);\n    final providers=Map<String,dynamic>.from(aiProviders['providers'] as Map? ?? const{});\n    final openai=Map<String,dynamic>.from(providers['openai'] as Map? ?? const{});\n    final openrouter=Map<String,dynamic>.from(providers['openrouter'] as Map? ?? const{});
+    final f=Map<String,dynamic>.from(s['order_flow'] as Map? ?? m['order_flow'] as Map? ?? const{}),i=Map<String,dynamic>.from(s['indicators'] as Map? ?? const{}),v=Map<String,dynamic>.from(s['live_validation'] as Map? ?? const{}),g=(s['guards'] as List? ?? const[]);
+    final providers=Map<String,dynamic>.from(aiProviders['providers'] as Map? ?? const{});\n    final openai=Map<String,dynamic>.from(providers['openai'] as Map? ?? const{});\n    final openrouter=Map<String,dynamic>.from(providers['openrouter'] as Map? ?? const{});
     final d=(s['decision']??'WAIT').toString().toUpperCase(),fresh=s['data_fresh']==true&&connected,buy=_n(f['buy_volume']),sell=_n(f['sell_volume']),total=buy+sell;
     final layers=<List<dynamic>>[
       ['Market data integrity','Angel One quote + freshness',_has(m['ltp'])&&fresh],
