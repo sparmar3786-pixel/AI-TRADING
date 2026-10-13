@@ -94,6 +94,9 @@ _request_metrics: dict[str, dict[str, Any]] = {}
 _confirmation_states: dict[str, dict[str, Any]] = {}
 _last_market: dict[str, Any] = {}
 _option_history: dict[str, dict[str, float]] = {}
+# Retain only real broker candles/depth observed since this process started,
+# so a WebSocket reconnect does not erase captured footprint levels.
+_footprint_history: dict[str, list[dict[str, Any]]] = {}
 
 def _record_request_metric(path: str, status_code: int, elapsed_ms: float, response_bytes: int | None) -> None:
     with _lock:
@@ -1122,12 +1125,13 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
         await websocket.send_json({"type": "status", "mode": "wait", "message": "Unsupported index symbol"})
         await websocket.close(code=1008)
         return
-    candles: list[dict[str, Any]] = []
+    with _lock:
+        candles: list[dict[str, Any]] = [dict(item) for item in _footprint_history.get(symbol, [])]
     last_trade_volume: float | None = None
     last_source_timestamp: str | None = None
     future: dict[str, str] | None = None
     rows: list[dict[str, Any]] = []
-    history_loaded = False
+    history_loaded = bool(candles)
     try:
         while True:
             try:
@@ -1216,6 +1220,9 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
                         existing["source_timestamp"] = source_timestamp
                     candles = candles[-250:]
                     last_source_timestamp = source_timestamp
+                if candles:
+                    with _lock:
+                        _footprint_history[symbol] = [dict(item) for item in candles[-250:]]
                 mode = "live" if live else ("closed" if candles else "wait")
                 await websocket.send_json({
                     "type": "snap", "symbol": symbol, "candles": candles, "step": 5,
