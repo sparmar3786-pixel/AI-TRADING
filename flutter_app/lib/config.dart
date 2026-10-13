@@ -1,7 +1,7 @@
 class AppConfig {
-  // This APK must use its own AI-TRADING Railway service for both general
-  // API calls and signal endpoints. Do not silently route general requests to
-  // Fresh-Apk's backend: that can mix app state and broker sessions.
+  // BACKEND_URL preserves the existing AI/chat service in release builds.
+  // SIGNAL_BACKEND_URL owns Angel One market data, signals, paper ledger and
+  // read-only account routes. They are intentionally separate in the APK.
   static const String backendUrl = String.fromEnvironment(
     'BACKEND_URL',
     defaultValue: 'https://ai-trading-signals-api-production.up.railway.app',
