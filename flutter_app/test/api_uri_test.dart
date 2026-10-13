@@ -26,6 +26,38 @@ void main() {
     expect(requestedUri!.path, '/v1/angel/status');
   });
 
+  test('Health checks the FreshApi instance base URL', () async {
+    Uri? requestedUri;
+    final client = MockClient((request) async {
+      requestedUri = request.url;
+      return http.Response(jsonEncode({'status': 'ok'}), 200);
+    });
+    addTearDown(client.close);
+    final api = FreshApi('https://legacy.example.test', client, 'https://signals.example.test');
+    await api.health();
+    expect(requestedUri!.origin, 'https://legacy.example.test');
+    expect(requestedUri!.path, '/health');
+  });
+
+  test('Portfolio and paper ledger use the AI-TRADING signal service', () async {
+    final requested = <Uri>[];
+    final client = MockClient((request) async {
+      requested.add(request.url);
+      return http.Response(jsonEncode({'status': 'ok', 'trades': []}), 200);
+    });
+    addTearDown(client.close);
+    final api = FreshApi('https://legacy.example.test', client, 'https://signals.example.test');
+    await api.portfolio();
+    await api.paperTrades();
+    await api.paperReport();
+    expect(requested.map((uri) => uri.origin), everyElement('https://signals.example.test'));
+    expect(requested.map((uri) => uri.path), [
+      '/v1/portfolio',
+      '/v1/paper/trades',
+      '/v1/paper/report',
+    ]);
+  });
+
   test('Cloud AI remains on the legacy backend', () async {
     Uri? requestedUri;
     final client = MockClient((request) async {
