@@ -138,7 +138,7 @@ class _RiskCalculatorState extends State<RiskCalculator> {
     final stopValid = stopPoints != null && stopPoints > 0;
     final targetPnl = targetValid && qty != null ? targetPoints * qty : null;
     final stopPnl = stopValid && qty != null ? -stopPoints * qty : null;
-    final livePnl = ltp != null && entry != null && qty != null
+    final livePnl = !_indices.contains(_symbol) && ltp != null && entry != null && qty != null
         ? (ltp - entry) * qty * (isBuy ? 1 : -1) : null;
     final currency = (double? value) => value == null
         ? '—'
@@ -212,7 +212,7 @@ class _RiskCalculatorState extends State<RiskCalculator> {
             _metric('SL distance', points(stopValid ? stopPoints : null)),
             _metric('Potential profit', currency(targetPnl), color: Colors.greenAccent),
             _metric('Potential loss', currency(stopPnl), color: Colors.redAccent),
-            _metric('Current LTP P&L', currency(livePnl), color: livePnl == null ? null : livePnl >= 0 ? Colors.greenAccent : Colors.redAccent),
+            _metric('Current contract P&L', currency(livePnl), color: livePnl == null ? null : livePnl >= 0 ? Colors.greenAccent : Colors.redAccent),
           ]),
           const SizedBox(height: 6),
           Text(
