@@ -191,8 +191,7 @@ class FreshApi {
       final rawDetail = decoded is Map ? decoded['detail'] : null;
       String detail = '';
       if (rawDetail is String) {
-        detail = rawDetail.replaceAll(RegExp(r'[\r
-]+'), ' ').trim();
+        detail = rawDetail.replaceAll(RegExp(r'[\r\n]+'), ' ').trim();
       } else if (rawDetail is Map) {
         // Angel One login diagnostics are structured. Show actionable broker
         // context while deliberately excluding credential/token-shaped fields.
