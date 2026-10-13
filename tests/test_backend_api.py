@@ -231,7 +231,8 @@ class BackendApiTests(unittest.TestCase):
             "market": {"NIFTY": {"ltp": 25000.0, "age_seconds": 3, "live": True}},
             "signals": {"NIFTY": {"decision": "WAIT", "reasons": ["missing option evidence"], "live_validation": {"verdict": "WARN"}}},
         }
-        with patch.object(api, "_get_signals", return_value=payload):
+        with patch.object(api, "_get_signals", return_value=payload), \
+             patch.dict(os.environ, {"OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
             response = self.client.post(
                 "/v1/ai/chat",
                 headers=self.device_headers,
@@ -243,6 +244,71 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(body["provider"], "deterministic_fallback")
         self.assertIn("25000.0", body["answer"])
         self.assertIn("missing option evidence", body["answer"])
+
+    def test_ai_chat_uses_real_provider_when_configured(self):
+        payload = {
+            "market": {"NIFTY": {"ltp": 25000.0, "age_seconds": 3, "live": True, "source": "angelone_smartapi"}},
+            "signals": {"NIFTY": {"decision": "WAIT", "reasons": ["risk gate"], "live_validation": {"verdict": "WARN"}}},
+        }
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                return False
+            def read(self):
+                return json.dumps({"choices": [{"message": {"content": "Snapshot reviewed; risk gate remains WAIT."}}]}).encode()
+
+        with patch.object(api, "_get_signals", return_value=payload), \
+             patch.dict(os.environ, {"OPENAI_API_KEY": "test-key", "OPENAI_MODEL": "gpt-4o-mini", "OPENROUTER_API_KEY": ""}, clear=False), \
+             patch.object(api.urllib.request, "urlopen", return_value=FakeResponse()):
+            response = self.client.post(
+                "/v1/ai/chat", headers=self.device_headers,
+                json={"index": "NIFTY", "question": "Explain the current signal", "history": []},
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        data = response.json()
+        self.assertTrue(data["llm_used"])
+        self.assertEqual(data["provider"], "openai")
+        self.assertEqual(data["answer"], "Snapshot reviewed; risk gate remains WAIT.")
+        self.assertFalse(data["order_placement_enabled"])
+
+    def test_search_provider_test_uses_live_provider_checks(self):
+        fake_evidence = {
+            "provider_checks": {
+                "exa": {"configured": True, "ok": False, "status": "authentication_failed", "result_count": 0},
+                "tavily": {"configured": True, "ok": True, "status": "ok", "result_count": 2},
+            },
+            "articles": [{"title": "source-backed headline", "url": "https://example.com", "source": "tavily"}],
+            "errors": ["exa_authentication_failed"],
+        }
+        with patch.dict(os.environ, {"EXA_API_KEY": "exa-test", "TAVILY_API_KEY": "tavily-test"}, clear=False), \
+             patch.object(api, "fetch_market_news_sentiment", return_value=fake_evidence) as fetch:
+            response = self.client.post("/v1/providers/search/test", headers=self.device_headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        fetch.assert_called_once()
+        self.assertTrue(fetch.call_args.kwargs["force"])
+        data = response.json()
+        self.assertEqual(data["status"], "ok")
+        self.assertFalse(data["providers"]["exa"]["ok"])
+        self.assertTrue(data["providers"]["tavily"]["ok"])
+        self.assertEqual(data["providers"]["exa"]["status"], "authentication_failed")
+
+    def test_quotes_split_large_same_exchange_batches_to_smartapi_limit(self):
+        class FakeAdapter:
+            def __init__(self):
+                self.batch_sizes = []
+            def market_data(self, mode, exchange_tokens):
+                tokens = exchange_tokens["MCX"]
+                self.batch_sizes.append(len(tokens))
+                return {"rows": [{"symbolToken": token, "ltp": 1.0} for token in tokens]}
+
+        adapter = FakeAdapter()
+        with patch.object(api, "_stream", None), \
+             patch.object(api, "_quote_rows", side_effect=lambda result: result["rows"]):
+            result = api._quotes(adapter, "MCX", [str(i) for i in range(101)])
+        self.assertEqual(adapter.batch_sizes, [50, 50, 1])
+        self.assertEqual(len(result), 101)
 
     def test_paper_trade_open_close_and_report_deduct_costs(self):
         with tempfile.TemporaryDirectory() as tmp, \
