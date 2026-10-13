@@ -2427,15 +2427,25 @@ def _run_chat_completion(provider: str, api_key: str, model: str, endpoint: str,
 def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
     """Use a real cloud provider when configured; disclose fallback if every provider fails."""
     index = str(body.get("index") or "NIFTY").strip().upper()
-    if index not in INDEXES:
-        raise HTTPException(status_code=400, detail="Unsupported index.")
+    is_commodity = index in COMMODITY_NAMES
+    if index not in INDEXES and not is_commodity:
+        raise HTTPException(status_code=400, detail="Unsupported index or MCX commodity.")
     question = str(body.get("question") or "").strip()
     if not question:
         raise HTTPException(status_code=422, detail="A question is required.")
     try:
         payload = _get_signals()
-        market = dict((payload.get("market") or {}).get(index) or {})
-        signal = dict((payload.get("signals") or {}).get(index) or {})
+        if is_commodity:
+            commodity_rows = payload.get("commodities") if isinstance(payload.get("commodities"), list) else []
+            market = next(
+                (dict(row) for row in commodity_rows if isinstance(row, dict)
+                 and str(row.get("name") or row.get("symbol") or "").strip().upper() == index),
+                {"name": index, "symbol": index, "source": "angelone_smartapi", "live": False, "ltp": None, "status": "WAIT"},
+            )
+            signal = dict(market)
+        else:
+            market = dict((payload.get("market") or {}).get(index) or {})
+            signal = dict((payload.get("signals") or {}).get(index) or {})
         news = dict(signal.get("news_sentiment") or cached_market_news_sentiment(index))
         validation = dict(signal.get("live_validation") or {})
         reasons = signal.get("reasons") or signal.get("reason") or []
