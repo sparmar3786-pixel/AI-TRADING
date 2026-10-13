@@ -65,7 +65,7 @@ function reportWsTelemetry(payload,m){
 function connect(){
  if(ws){ws.onclose=null;ws.close()}
  raw=[];off=0;
- ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws?symbol='+sym);
+ const wsBase=window.ORDER_FLOW_WS_BASE||((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws');ws=new WebSocket(wsBase+'?symbol='+encodeURIComponent(sym));
  ws.onopen=()=>{retry=0;try{if(window.Telemetry&&window.Telemetry.postMessage)window.Telemetry.postMessage(JSON.stringify({kind:'order_flow_ws',mode:'connected',source_timestamp:null,payload_bytes:0,bytes_per_second:0,messages_per_second:0,quote_age_ms:null,level_semantics:'waiting for first broker snapshot'}))}catch(_){}};
  ws.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch(_){mode='wait';status();return}reportWsTelemetry(e.data,m);mode=String(m.mode||'wait').toLowerCase();
   if(mode==='demo'||mode.includes('sample')){raw=[];mode='wait';status();$('info').textContent='Demo/sample feed blocked. Waiting for broker-sourced data.';dirty=1;return}
