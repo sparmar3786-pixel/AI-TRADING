@@ -19,6 +19,34 @@ class BackendApiTests(unittest.TestCase):
         self.client = TestClient(api.app)
         self.device_headers = {"X-Device-Id": "A" * 43}
 
+    def test_live_validation_contract_returns_explicit_checks_and_fails_closed(self):
+        result = {"decision": "CALL BUY", "entry": 100.0, "stop_loss": 90.0, "target": 120.0}
+        layers = {
+            "data_quality": {"pass": True, "age_seconds": 3.0},
+            "trend_sentiment": {"pass": True, "trend": "BULLISH"},
+            "order_flow": {"pass": True},
+            "option_selection": {"pass": True},
+            "risk_levels": {"pass": True, "reward_risk": 2.0},
+            "confirmation": {"pass": True},
+        }
+        passed = api._live_validation_contract(result, layers, 2.0)
+        self.assertEqual(passed["verdict"], "PASS")
+        self.assertTrue(passed["checks"]["fresh_market_data"])
+        self.assertTrue(passed["checks"]["valid_option_quote"])
+        self.assertEqual(passed["decision"], "CALL BUY")
+
+        stale_quote = api._live_validation_contract(result, layers, 90.0)
+        self.assertEqual(stale_quote["verdict"], "WAIT")
+        self.assertEqual(stale_quote["decision"], "WAIT")
+        self.assertFalse(stale_quote["checks"]["valid_option_quote"])
+
+        bad_levels = api._live_validation_contract({**result, "stop_loss": 105.0}, layers, 2.0)
+        self.assertEqual(bad_levels["verdict"], "WAIT")
+        self.assertFalse(bad_levels["checks"]["valid_sl_target"])
+
+        conflicting_ai = api._live_validation_contract(result, layers, 2.0, {"ok": True, "decision": "PUT BUY"})
+        self.assertEqual(conflicting_ai["verdict"], "WAIT")
+        self.assertFalse(conflicting_ai["checks"]["ai_direction_consistent"])
     def test_health_is_available_without_device_header(self):
         response = self.client.get("/health")
         self.assertEqual(response.status_code, 200)
