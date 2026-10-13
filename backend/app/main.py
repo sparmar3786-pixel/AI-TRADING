@@ -73,7 +73,7 @@ INDEXES: dict[str, dict[str, str]] = {
     "SENSEX": {"exchange": "BSE", "token": "99919000", "name": "SENSEX"},
     "BANKEX": {"exchange": "BSE", "token": "99919012", "name": "BANKEX"},
 }
-COMMODITY_NAMES = ("GOLD", "SILVER", "CRUDEOIL", "NATURALGAS", "COPPER")
+COMMODITY_NAMES = ("CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM", "SILVER", "SILVERM", "COPPER", "ZINC", "ALUMINIUM", "LEAD", "NICKEL", "MENTHAOIL", "CASTORSEED", "COTTON", "RUBBER")
 _lock = threading.RLock()
 _adapter: AngelOneReadOnly | None = None
 _stream: AngelOneStream | None = None
@@ -2107,10 +2107,16 @@ def _run_ai_validation_probe(provider: str, api_key: str, model: str, endpoint: 
             "verdict": verdict, "reason": reason, "output": output[:240],
         }
     except urllib.error.HTTPError as exc:
-        # Do not echo provider response bodies: they can include account metadata.
-        return {"provider": provider, "configured": True, "ok": False, "status": "http_error",
+        # Never echo provider response bodies; they may contain account details.
+        # Rate limits are actionable and should not be misreported as malformed JSON.
+        retry_after = (exc.headers.get("Retry-After") if exc.headers else None)
+        rate_limited = exc.code == 429
+        return {"provider": provider, "configured": True, "ok": False,
+                "status": "rate_limited" if rate_limited else "http_error",
                 "model": model, "latency_ms": round((time.perf_counter() - started) * 1000, 1),
-                "verdict": "WAIT", "error": f"Provider returned HTTP {exc.code}."}
+                "verdict": "WAIT",
+                "retry_after_seconds": retry_after if retry_after and retry_after.isdigit() else None,
+                "error": "Provider access rate exceeded; retry after the provider's cooldown." if rate_limited else f"Provider returned HTTP {exc.code}."}
     except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
         return {"provider": provider, "configured": True, "ok": False, "status": "connection_error",
                 "model": model, "latency_ms": round((time.perf_counter() - started) * 1000, 1),
