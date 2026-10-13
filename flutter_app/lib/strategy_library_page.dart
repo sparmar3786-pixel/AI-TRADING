@@ -98,18 +98,48 @@ class _StrategyLibraryPageState extends State<StrategyLibraryPage> {
             Text('Signal: ${signalRow['decision'] ?? 'WAIT'} • Layers passed: $passedLayers / ${layers.length}', style: const TextStyle(color: Colors.white70, fontSize: 12)),
             Text('Strategy consumption: ${suiteStrategies.length} outputs • LONG votes ${suiteVotes['LONG'] ?? 0} • SHORT votes ${suiteVotes['SHORT'] ?? 0} • status ${suite['status'] ?? 'NOT RETURNED'}',
               style: const TextStyle(color: Color(0xFF12D6FF), fontSize: 11, fontWeight: FontWeight.w700)),
+            if (suite['trace'] is Map) ...[
+              Text('Backend execution ID: ${(suite['trace'] as Map)['execution_id'] ?? suite['execution_id'] ?? 'not supplied'}',
+                style: const TextStyle(fontSize: 10, color: Colors.white70)),
+              Text('Version: ${(suite['trace'] as Map)['strategy_version'] ?? 'not supplied'} • Input candles: ${(suite['trace'] as Map)['input_candle_count'] ?? 'unknown'}',
+                style: const TextStyle(fontSize: 10, color: Colors.white54)),
+              Text('Input SHA-256: ${(suite['trace'] as Map)['input_sha256'] ?? 'unknown'}',
+                style: const TextStyle(fontSize: 9, color: Colors.white38)),
+              Text('AI context sent: ${(suite['trace'] as Map)['ai_context_sent'] ?? false} • Research Engine received: ${(suite['trace'] as Map)['research_engine_received'] ?? false} • Trading Setup received: ${(suite['trace'] as Map)['trading_setup_received'] ?? false}',
+                style: const TextStyle(fontSize: 10, color: Colors.orangeAccent)),
+            ],
             if (suiteStrategies.isEmpty)
               const Padding(
                 padding: EdgeInsets.only(top: 6),
                 child: Text('EXECUTION TRACE UNAVAILABLE • backend returned no per-strategy outputs. Catalogue entries below are not execution evidence.',
                   style: TextStyle(color: Colors.orangeAccent, fontSize: 11, fontWeight: FontWeight.w700)),
               )
+            else if (suite['strategy_trace'] is List)
+              ...(suite['strategy_trace'] as List).whereType<Map>().map((rawTrace) {
+                final item = Map<String, dynamic>.from(rawTrace);
+                return Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(color: const Color(0xFF080E17), borderRadius: BorderRadius.circular(8)),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('${item['strategy_name'] ?? 'Strategy'} • ${item['signal'] ?? 'WAIT'}',
+                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
+                      Text('Reason: ${item['rejection_reason'] ?? 'Directional output returned'}',
+                        style: const TextStyle(fontSize: 10, color: Colors.white70)),
+                      Text('Execution ID: ${item['strategy_id'] ?? 'not supplied'}',
+                        style: const TextStyle(fontSize: 9, color: Colors.white54)),
+                      Text('Input bars: ${item['input_candle_count'] ?? 'unknown'} • Score: ${item['score'] ?? 'not computed'}',
+                        style: const TextStyle(fontSize: 9, color: Colors.white54)),
+                    ]),
+                  ),
+                );
+              })
             else ...suiteStrategies.entries.map((entry) {
               final value = entry.value;
               final details = value is Map ? Map<String, dynamic>.from(value) : <String, dynamic>{'signal': value};
-              final trace = details['trace'] is Map
-                  ? Map<String, dynamic>.from(details['trace'] as Map)
-                  : <String, dynamic>{};
+              final trace = details['trace'] is Map ? Map<String, dynamic>.from(details['trace'] as Map) : <String, dynamic>{};
               final signal = details['signal'] ?? details['decision'] ?? details['direction'] ?? 'NOT RETURNED';
               final score = details['score'] ?? details['confidence'] ?? details['alignment_score'] ?? '—';
               final reason = details['reason'] ?? details['reason_code'] ?? details['rejection_reason'] ?? 'No reason supplied';
@@ -127,8 +157,6 @@ class _StrategyLibraryPageState extends State<StrategyLibraryPage> {
                       style: const TextStyle(fontSize: 10, color: Colors.white54)),
                     Text('Version: ${trace['strategy_version'] ?? details['strategy_version'] ?? 'not supplied'} • Input candles: ${trace['input_candle_count'] ?? 'not supplied'}',
                       style: const TextStyle(fontSize: 10, color: Colors.white54)),
-                    Text('AI consumed: ${trace['ai_consumed'] ?? 'not proven'} • Research propagated: ${trace['research_engine_received'] ?? 'not proven'}',
-                      style: const TextStyle(fontSize: 10, color: Colors.orangeAccent)),
                   ]),
                 ),
               );
@@ -164,6 +192,28 @@ class _StrategyLibraryPageState extends State<StrategyLibraryPage> {
                   padding: const EdgeInsets.only(top: 3),
                   child: Text('${entry.key}: ${entry.value}', style: const TextStyle(fontSize: 11, color: Colors.white70)),
                 )),
+              if (_suiteRun['strategy_trace'] is List) ...[
+                const SizedBox(height: 8),
+                const Text('PER-STRATEGY EXECUTION TRACE', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: Color(0xFF12D6FF))),
+                ...(_suiteRun['strategy_trace'] as List).whereType<Map>().map((rawTrace) {
+                  final item = Map<String, dynamic>.from(rawTrace);
+                  final signal = item['signal'] ?? 'WAIT';
+                  final rejection = item['rejection_reason'] ?? 'Directional output returned';
+                  return Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(top: 5),
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(color: const Color(0xFF080E17), borderRadius: BorderRadius.circular(8)),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('${item['strategy_name'] ?? 'Strategy'} • $signal', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
+                      Text('Reason: $rejection', style: const TextStyle(fontSize: 10, color: Colors.white70)),
+                      Text('ID: ${item['strategy_id'] ?? 'missing'}', style: const TextStyle(fontSize: 9, color: Colors.white54)),
+                      Text('Score: ${item['score'] ?? 'not computed'} • Input bars: ${item['input_candle_count'] ?? 'unknown'}', style: const TextStyle(fontSize: 9, color: Colors.white54)),
+                      Text('AI consumed: ${item['ai_consumed'] ?? false} • Research received: ${item['research_engine_received'] ?? false} • Trading Setup received: ${item['trading_setup_received'] ?? false}', style: const TextStyle(fontSize: 9, color: Colors.orangeAccent)),
+                    ]),
+                  );
+                }),
+              ],
             ],
             const Text('This panel reads the shared backend signal snapshot. Only fields actually returned by the backend are displayed; missing execution IDs, versions, AI-consumption and propagation evidence are explicitly marked unverified.',
               style: TextStyle(color: Colors.white60, fontSize: 10)),

@@ -19,6 +19,25 @@ class BackendApiTests(unittest.TestCase):
         self.client = TestClient(api.app)
         self.device_headers = {"X-Device-Id": "A" * 43}
 
+    def test_provider_json_retries_one_transient_503(self):
+        class FakeResponse:
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def read(self):
+                return json.dumps({"choices": [{"message": {"content": "ROUTER_OK"}}]}).encode()
+
+        transient = api.urllib.error.HTTPError(
+            "https://openrouter.ai/api/v1/chat/completions", 503, "Service Unavailable", {}, None
+        )
+        request = api.urllib.request.Request(
+            "https://openrouter.ai/api/v1/chat/completions",
+            data=b"{}", headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with patch.object(api.urllib.request, "urlopen", side_effect=[transient, FakeResponse()]) as urlopen:
+            result = api._provider_json_with_retry(request, timeout=1, provider="openrouter")
+        self.assertEqual(result["choices"][0]["message"]["content"], "ROUTER_OK")
+        self.assertEqual(urlopen.call_count, 2)
+
     def test_credentials_from_env_accepts_railway_angel_client_id_name(self):
         keys = ("ANGEL_API_KEY", "ANGEL_CLIENT_CODE", "ANGEL_CLIENT_ID", "ANGEL_PIN", "ANGEL_TOTP_SECRET")
         with patch.dict(os.environ, {
@@ -149,9 +168,23 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["overall_status"], "BLOCKED_NO_LIVE_DATA")
-        self.assertEqual(data["providers"]["openai"]["status"], "not_configured")
+        self.assertNotIn("openai", data["providers"])
         self.assertEqual(data["providers"]["openrouter"]["status"], "not_configured")
         self.assertEqual(data["deterministic_decision"], "WAIT")
+
+    def test_openai_environment_key_is_ignored_by_ai_status(self):
+        with patch.dict(os.environ, {
+            "GEMINI_API_KEY": "", "GOOGLE_API_KEY": "",
+            "OPENROUTER_API_KEY": "", "OPEN_ROUTER_API_KEY": "",
+            "OPENAI_API_KEY": "legacy-key-must-be-ignored",
+            "OPENAI_MODEL": "legacy-model-must-be-ignored",
+        }, clear=False):
+            response = self.client.get("/v1/ai/status", headers=self.device_headers)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertNotIn("openai", data["providers"])
+        self.assertFalse(data["llm_configured"])
+        self.assertEqual(data["provider"], "deterministic_fallback")
 
     def test_metadata_requires_valid_device_id_and_disables_orders(self):
         self.assertEqual(self.client.get("/v1/metadata").status_code, 401)
@@ -353,25 +386,55 @@ class BackendApiTests(unittest.TestCase):
         self.assertIn("25000.0", body["answer"])
         self.assertIn("missing option evidence", body["answer"])
 
-    def test_ai_chat_uses_openai_when_gemini_is_unconfigured(self):
-        payload = {"market": {"NIFTY": {"ltp": 25000.0, "age_seconds": 3, "live": True}},
+    def test_ai_chat_uses_openrouter_when_gemini_is_unconfigured(self):
+        payload = {"market": {"NIFTY": {
+                       "ltp": 25000.0, "age_seconds": 3, "live": True,
+                       "strategy_suite": {"signal": "WAIT", "trace": {
+                           "execution_id": "strategy-test", "strategy_version": "strategy-suite-v1",
+                           "input_candle_count": 35, "input_sha256": "a" * 64,
+                       }},
+                   }},
                    "signals": {"NIFTY": {"decision": "WAIT", "reasons": ["risk gate wait"]}}}
         with patch.object(api, "_get_signals", return_value=payload), \
              patch.dict(os.environ, {"GEMINI_API_KEY": "", "GOOGLE_API_KEY": "",
-                                      "OPENAI_API_KEY": "unit-test-key", "OPENAI_MODEL": "gpt-test",
-                                      "OPENROUTER_API_KEY": ""}, clear=False), \
+                                      "OPENROUTER_API_KEY": "unit-test-key", "OPENROUTER_MODEL": "router-test"}, clear=False), \
              patch.object(api, "_run_openai_compatible_completion", return_value={
-                 "answer": "Distinct test response", "provider": "openai", "model": "gpt-test",
+                 "answer": "Distinct test response", "provider": "openrouter", "model": "router-test",
                  "llm_used": True, "ok": True, "status": "connected", "latency_ms": 12.0,
              }) as completion:
             response = self.client.post("/v1/ai/chat", headers=self.device_headers,
                                         json={"index": "NIFTY", "question": "Explain only the risk gate", "history": []})
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
-        self.assertEqual(body["provider"], "openai")
+        self.assertEqual(body["provider"], "openrouter")
         self.assertTrue(body["llm_used"])
         self.assertEqual(body["answer"], "Distinct test response")
+        self.assertTrue(body["strategy_consumption_trace"]["ai_context_sent"])
+        self.assertEqual(body["strategy_consumption_trace"]["execution_id"], "strategy-test")
+        self.assertEqual(body["strategy_consumption_trace"]["ai_provider"], "openrouter")
+        self.assertFalse(body["strategy_consumption_trace"]["ai_semantic_use_verifiable"])
         completion.assert_called_once()
+
+    def test_ai_chat_falls_back_to_openrouter_when_gemini_fails(self):
+        payload = {"market": {"NIFTY": {"ltp": 25000.0, "age_seconds": 3, "live": True}},
+                   "signals": {"NIFTY": {"decision": "WAIT", "reasons": ["risk gate wait"]}}}
+        with patch.object(api, "_get_signals", return_value=payload), \
+             patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-test-key", "GOOGLE_API_KEY": "",
+                                      "OPENROUTER_API_KEY": "router-test-key", "OPENROUTER_MODEL": "router-test"}, clear=False), \
+             patch.object(api, "_run_gemini_completion", side_effect=RuntimeError("gemini_http_503")) as gemini, \
+             patch.object(api, "_run_openai_compatible_completion", return_value={
+                 "answer": "Router fallback response", "provider": "openrouter", "model": "router-test",
+                 "llm_used": True, "ok": True, "status": "connected", "latency_ms": 15.0,
+             }) as router:
+            response = self.client.post("/v1/ai/chat", headers=self.device_headers,
+                                        json={"index": "NIFTY", "question": "Explain the current wait", "history": []})
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["provider"], "openrouter")
+        self.assertEqual(body["answer"], "Router fallback response")
+        self.assertEqual(body["provider_failures"][0]["status"], "gemini_http_503")
+        gemini.assert_called_once()
+        router.assert_called_once()
 
     def test_ai_chat_can_read_mcX_commodity_snapshot(self):
         payload = {
@@ -543,7 +606,7 @@ class BackendApiTests(unittest.TestCase):
 
         with patch.object(api.urllib.request, "urlopen", return_value=FakeResponse()):
             result = api._run_ai_validation_probe(
-                "openai", "test-secret", "test-model", "https://api.openai.com/v1/chat/completions",
+                "openrouter", "test-secret", "test-model", "https://openrouter.ai/api/v1/chat/completions",
                 {"source": "angelone_smartapi", "source_timestamp": "2026-10-13T09:00:00+00:00",
                  "ltp": 25000.0, "age_seconds": 120.0, "live": False},
             )
@@ -557,11 +620,11 @@ class BackendApiTests(unittest.TestCase):
         headers = Message()
         headers["Retry-After"] = "30"
         error = api.urllib.error.HTTPError(
-            "https://api.openai.com/v1/chat/completions", 429, "Too Many Requests", headers, None
+            "https://openrouter.ai/api/v1/chat/completions", 429, "Too Many Requests", headers, None
         )
         with patch.object(api.urllib.request, "urlopen", side_effect=error):
             result = api._run_ai_validation_probe(
-                "openai", "test-secret", "test-model", "https://api.openai.com/v1/chat/completions",
+                "openrouter", "test-secret", "test-model", "https://openrouter.ai/api/v1/chat/completions",
                 {"source": "angelone_smartapi", "source_timestamp": "2026-10-13T09:00:00+00:00",
                  "ltp": 25000.0, "age_seconds": 2.0, "live": True},
             )

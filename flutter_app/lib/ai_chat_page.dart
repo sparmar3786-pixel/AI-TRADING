@@ -115,9 +115,22 @@ class _AiChatPageState extends State<AiChatPage> {
       } else {
         displayAnswer += '\n\n**Live Search Evidence:** Search providers are not configured for this chat request.';
       }
+      final rawStrategyTrace = response['strategy_consumption_trace'];
+      if (rawStrategyTrace is Map && rawStrategyTrace['execution_id'] != null) {
+        final trace = Map<String, dynamic>.from(rawStrategyTrace);
+        displayAnswer += '\n\n**Strategy Execution Trace**'
+            '\n- Execution ID: ${trace['execution_id']}'
+            '\n- Version: ${trace['strategy_version'] ?? 'unknown'}'
+            '\n- Input candles: ${trace['input_candle_count'] ?? 'unknown'}'
+            '\n- Input SHA-256: ${trace['input_sha256'] ?? 'unknown'}'
+            '\n- Strategy context sent to AI: ${trace['ai_context_sent'] == true ? 'yes' : 'no'}'
+            '\n- Provider/model: ${trace['ai_provider'] ?? response['provider'] ?? 'unknown'} / ${trace['ai_model'] ?? response['model'] ?? 'unknown'}'
+            '\n- Semantic use by model independently verifiable: no'
+            '\n- Research Engine / Trading Setup propagation: ${trace['research_engine_received'] == true && trace['trading_setup_received'] == true ? 'confirmed' : 'not connected'}';
+      }
       final providerName = (response['provider'] ?? '').toString().toLowerCase();
       final actualCloudResponse = response['llm_used'] == true ||
-          (response['ok'] == true && const {'gemini', 'openai', 'openrouter'}.contains(providerName));
+          (response['ok'] == true && const {'gemini', 'openrouter'}.contains(providerName));
       unawaited(DailyAiMemory.saveChatTurn(
         question: question,
         answer: displayAnswer,
@@ -201,7 +214,7 @@ class _AiChatPageState extends State<AiChatPage> {
                 const Text('GEMINI CLOUD CHAT • MARKET Q&A', textAlign: TextAlign.center, style: TextStyle(color: Color(0xFF32D583), fontWeight: FontWeight.w700, fontSize: 12)),
                 const SizedBox(height: 8),
                 const Text(
-                  'This chat uses Gemini only. OpenAI and OpenRouter are tested separately for provider/validation status and are not silent chat fallbacks. Missing or stale market evidence remains unavailable.',
+                  'This chat tries Gemini first and OpenRouter as fallback. Missing or stale market evidence remains unavailable.',
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 20),

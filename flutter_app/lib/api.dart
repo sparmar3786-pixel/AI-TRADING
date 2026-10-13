@@ -339,7 +339,7 @@ class FreshApi {
       });
 
   /// Gemini-only cloud chat can take longer than a normal JSON call.
-  /// OpenAI and OpenRouter are separately tested validation providers, not chat fallbacks.
+  /// OpenRouter is the secondary provider; backend tries it after Gemini fails.
   Future<Map<String, dynamic>> aiChat({
     required String index,
     required String question,

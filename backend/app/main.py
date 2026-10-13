@@ -1334,9 +1334,54 @@ def _index_snapshot(
             "volume": sum(value for value in volumes if value is not None) if any(value is not None for value in volumes) else None,
         })
     # Run the full local research suite against the same completed 5m
-    # candles exposed to the app. It remains advisory and never overrides the
-    # deterministic five-layer risk gate or authorizes an order.
-    result["strategy_suite"] = evaluate_strategy_suite(chart_5m, oi_change=None)
+    # Angel One candles exposed to the app. Attach a reproducible execution
+    # trace so downstream AI can be told exactly which output entered context.
+    strategy_suite = evaluate_strategy_suite(chart_5m, oi_change=None)
+    strategy_hash = hashlib.sha256(
+        json.dumps(chart_5m, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    ).hexdigest()
+    strategy_execution_id = f"strategy-{uuid.uuid4().hex}"
+    strategy_trace = {
+        "execution_id": strategy_execution_id,
+        "strategy_version": "strategy-suite-v1",
+        "evaluated_at": _utc_now().isoformat(),
+        "input_candle_count": len(chart_5m),
+        "input_sha256": strategy_hash,
+        "source": "angelone_completed_5m_candles",
+        "ai_context_sent": False,
+        "ai_semantic_use_verifiable": False,
+        "research_engine_received": False,
+        "trading_setup_received": False,
+        "order_placement_enabled": False,
+    }
+    strategy_trace_rows = []
+    for strategy_name, strategy_signal in (strategy_suite.get("strategies") or {}).items():
+        strategy_signal = str(strategy_signal or "WAIT").upper()
+        strategy_trace_rows.append({
+            "strategy_id": f"{strategy_execution_id}:{strategy_name}",
+            "strategy_name": strategy_name,
+            "strategy_version": "strategy-suite-v1",
+            "execution_id": strategy_execution_id,
+            "signal": strategy_signal,
+            "score": None,
+            "score_status": "NOT_COMPUTED_BY_RULE",
+            "input_candle_count": len(chart_5m),
+            "input_sha256": strategy_hash,
+            "source": "angelone_completed_5m_candles",
+            "status": "evaluated",
+            "rejection_reason": None if strategy_signal in ("LONG", "SHORT") else (
+                "No directional LONG/SHORT event was returned for the final completed candle; WAIT is not a trade."
+            ),
+            "ai_context_sent": False,
+            "ai_semantic_use_verifiable": False,
+            "research_engine_received": False,
+            "trading_setup_received": False,
+            "order_placement_enabled": False,
+        })
+    strategy_suite["execution_id"] = strategy_execution_id
+    strategy_suite["trace"] = strategy_trace
+    strategy_suite["strategy_trace"] = strategy_trace_rows
+    result["strategy_suite"] = strategy_suite
     result["indicators"] = indicators
     result["oi_summary"] = {
         "call_oi": call_oi, "put_oi": put_oi, "pcr": pcr,
@@ -2426,10 +2471,10 @@ def _provider_key_present(*names: str) -> bool:
 
 @app.get("/v1/ai/status")
 def ai_status(_: str = Depends(_device)) -> dict[str, Any]:
+    # Only Gemini and OpenRouter are supported cloud providers in this app.
     providers = [
         ("gemini", ("GEMINI_API_KEY", "GOOGLE_API_KEY"), os.getenv("GEMINI_MODEL", "gemini-2.5-flash")),
-        ("openrouter", ("OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY"), os.getenv("OPENROUTER_MODEL", "openrouter/free")),
-        ("openai", ("OPENAI_API_KEY", "OPEN_AI_API_KEY", "OPENAI_KEY"), os.getenv("OPENAI_MODEL", "gpt-4o-mini")),
+        ("openrouter", ("OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY"), os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash")),
     ]
     selected = next((item for item in providers if _provider_key_present(*item[1])), None)
     provider_status = {
@@ -2442,7 +2487,7 @@ def ai_status(_: str = Depends(_device)) -> dict[str, Any]:
         for name, env_names, model_name in providers
     }
     with _lock:
-        for name in ("gemini", "openai", "openrouter"):
+        for name in ("gemini", "openrouter"):
             cached = _ai_provider_test_cache.get(name)
             if cached and cached.get("configured") == provider_status[name]["configured"]:
                 provider_status[name] = dict(cached)
@@ -2489,8 +2534,7 @@ def _run_ai_validation_probe(provider: str, api_key: str, model: str, endpoint: 
         headers["X-Title"] = "AI-TRADING Data Validator"
     request = urllib.request.Request(endpoint, data=body, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(request, timeout=8) as response:
-            data = json.loads(response.read().decode("utf-8"))
+        data = _provider_json_with_retry(request, timeout=8, provider="openrouter")
         choices = data.get("choices") or []
         output = str(((choices[0].get("message") or {}).get("content") if choices else "") or "").strip()
         # Parse the model's verdict if possible; malformed output is WAIT, never PASS.
@@ -2544,8 +2588,11 @@ def ai_validate_snapshot(body: dict[str, Any], _: str = Depends(_device)) -> dic
         and age is not None and 0 <= age <= 60
     )
     providers: dict[str, Any] = {}
-    for provider, env_name in (("openai", "OPENAI_API_KEY"), ("openrouter", "OPENROUTER_API_KEY")):
-        configured = bool(os.getenv(env_name, "").strip())
+    for provider, env_names in (
+        ("gemini", ("GEMINI_API_KEY", "GOOGLE_API_KEY")),
+        ("openrouter", ("OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY")),
+    ):
+        configured = any(os.getenv(name, "").strip() for name in env_names)
         providers[provider] = {
             "configured": configured,
             "ok": False,
@@ -2603,21 +2650,14 @@ def test_ai_providers(_: str = Depends(_device)) -> dict[str, Any]:
             "provider": "gemini", "configured": False, "ok": False,
             "status": "not_configured", "verdict": "WAIT",
         })
-    openai_key = (os.getenv("OPENAI_API_KEY") or os.getenv("OPEN_AI_API_KEY") or os.getenv("OPENAI_KEY") or "").strip()
     openrouter_key = (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPEN_ROUTER_API_KEY") or "").strip()
-    if openai_key:
-        checks.append(_run_ai_validation_probe(
-            "openai", openai_key, os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip(),
-            "https://api.openai.com/v1/chat/completions", market_row))
-    else:
-        checks.append({"provider": "openai", "configured": False, "ok": False, "status": "not_configured", "verdict": "WAIT"})
     if openrouter_key:
         checks.append(_run_ai_validation_probe(
-            "openrouter", openrouter_key, os.getenv("OPENROUTER_MODEL", "openrouter/free").strip(),
+            "openrouter", openrouter_key, os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash").strip(),
             "https://openrouter.ai/api/v1/chat/completions", market_row))
     else:
         checks.append({"provider": "openrouter", "configured": False, "ok": False, "status": "not_configured", "verdict": "WAIT"})
-    tested = [item for item in checks if item.get("provider") in ("gemini", "openai", "openrouter")]
+    tested = [item for item in checks if item.get("provider") in ("gemini", "openrouter")]
     with _lock:
         for item in tested:
             _ai_provider_test_cache[item["provider"]] = dict(item)
@@ -2633,10 +2673,10 @@ def test_ai_providers(_: str = Depends(_device)) -> dict[str, Any]:
 
 @app.post("/v1/ai/review-signal")
 def review_signal_with_gemini(payload: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
-    """Gemini may veto a candidate; it can never promote a blocked deterministic signal."""
+    """Use Gemini first and OpenRouter as fallback; neither can override deterministic risk gates."""
     index = str(payload.get("index") or "").strip().upper()
     if index not in INDEXES:
-        return {"provider": "gemini", "ok": False, "verdict": "WAIT", "decision": "WAIT", "status": "invalid_index", "reason": "Index is not supported."}
+        return {"provider": "none", "ok": False, "verdict": "WAIT", "decision": "WAIT", "status": "invalid_index", "reason": "Index is not supported."}
     snapshot = dict(_signal_cache or {})
     signal_map = dict(snapshot.get("signals") or {})
     market_map = dict(snapshot.get("market") or {})
@@ -2647,58 +2687,80 @@ def review_signal_with_gemini(payload: dict[str, Any], _: str = Depends(_device)
     expected = str(signal.get("decision") or "WAIT").upper()
     if expected not in ("CALL BUY", "PUT BUY") or validation.get("verdict") != "PASS" or not checks or not all(value is True for value in checks.values()):
         return {
-            "provider": "gemini", "configured": _provider_key_present("GEMINI_API_KEY", "GOOGLE_API_KEY"),
-            "ok": False, "verdict": "WAIT", "decision": "WAIT", "status": "deterministic_gate_blocked",
-            "reason": "The backend five-layer checks are not all PASS; Gemini cannot override them.",
+            "provider": "none", "configured": False, "ok": False, "verdict": "WAIT", "decision": "WAIT",
+            "status": "deterministic_gate_blocked",
+            "reason": "The backend five-layer checks are not all PASS; cloud AI cannot override them.",
             "blocks": list(validation.get("blocks") or ["DETERMINISTIC_VALIDATION_NOT_PASS"]),
             "checks": {"backend_validation": False, "ai_direction_consistent": False},
             "signal_only": True, "order_placement_enabled": False,
         }
-    api_key = (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()
-    model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
-    if not api_key:
+    providers: list[tuple[str, str, str]] = []
+    gemini_key = (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()
+    if gemini_key:
+        providers.append(("gemini", gemini_key, os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()))
+    openrouter_key = (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPEN_ROUTER_API_KEY") or "").strip()
+    if openrouter_key:
+        providers.append(("openrouter", openrouter_key, os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash").strip()))
+    if not providers:
         return {
-            "provider": "gemini", "configured": False, "ok": False, "verdict": "WAIT",
-            "decision": "WAIT", "status": "not_configured", "reason": "GEMINI_API_KEY is not configured on the signal service.",
-            "blocks": ["GEMINI_NOT_CONFIGURED"], "checks": {"backend_validation": True, "ai_direction_consistent": False},
+            "provider": "none", "configured": False, "ok": False, "verdict": "WAIT",
+            "decision": "WAIT", "status": "not_configured",
+            "reason": "Configure GEMINI_API_KEY and/or OPENROUTER_API_KEY on the backend.",
+            "blocks": ["AI_PROVIDER_NOT_CONFIGURED"],
+            "checks": {"backend_validation": True, "ai_direction_consistent": False},
             "signal_only": True, "order_placement_enabled": False,
         }
     review_input = {
         "index": index, "candidate_decision": expected,
         "market": {key: market.get(key) for key in ("ltp", "source", "source_timestamp", "timestamp", "age_seconds", "live")},
         "signal": {key: signal.get(key) for key in ("decision", "strike", "option_side", "entry", "stop_loss", "target", "data_fresh")},
+        "strategy_suite": signal.get("strategy_suite"),
         "live_validation": validation,
     }
-    try:
-        result = _run_gemini_completion(api_key, model, [
-            {"role": "system", "content": "You are a strict independent trading risk reviewer. Read only the supplied JSON. Return ONLY JSON with keys verdict (PASS or WAIT), decision (CALL BUY, PUT BUY, or WAIT), conflicting_direction (boolean), reason (string). Return PASS only when the provided deterministic checks are all true and the candidate has no missing/stale data, invalid quote, conflicting direction, invalid stop loss/target, or failed risk gate. If uncertain return WAIT. Do not invent prices. Confidence is not profit probability."},
-            {"role": "user", "content": json.dumps(review_input, separators=(",", ":"), default=str)[:10000]},
-        ])
-        text_response = str(result.get("answer") or "").strip()
-        match = re.search(r"\{.*\}", text_response, re.DOTALL)
-        parsed = json.loads(match.group(0)) if match else {}
-        ai_decision = str(parsed.get("decision") or "WAIT").strip().upper()
-        ai_verdict = str(parsed.get("verdict") or "WAIT").strip().upper()
-        conflict = parsed.get("conflicting_direction") is True or ai_decision != expected
-        passed = ai_verdict == "PASS" and ai_decision == expected and not conflict
-        return {
-            "provider": "gemini", "configured": True, "ok": True, "status": "ok",
-            "model": result.get("model"), "latency_ms": result.get("latency_ms"),
-            "verdict": "PASS" if passed else "WAIT", "decision": expected if passed else "WAIT",
-            "ai_decision": ai_decision, "ai_direction_consistent": not conflict,
-            "reason": str(parsed.get("reason") or "Gemini did not confirm every risk condition.")[:500],
-            "blocks": [] if passed else ["GEMINI_REVIEW_NOT_PASS"],
-            "checks": {"backend_validation": True, "ai_direction_consistent": not conflict, "ai_verdict_pass": ai_verdict == "PASS"},
-            "signal_only": True, "order_placement_enabled": False,
-        }
-    except (RuntimeError, ValueError, TypeError) as exc:
-        return {
-            "provider": "gemini", "configured": True, "ok": False, "verdict": "WAIT",
-            "decision": "WAIT", "status": str(exc)[:100], "reason": "Gemini review failed or returned invalid JSON.",
-            "blocks": ["GEMINI_REVIEW_FAILED"],
-            "checks": {"backend_validation": True, "ai_direction_consistent": False},
-            "signal_only": True, "order_placement_enabled": False,
-        }
+    messages = [
+        {"role": "system", "content": "You are a strict independent trading risk reviewer. Read only the supplied JSON. Return ONLY JSON with keys verdict (PASS or WAIT), decision (CALL BUY, PUT BUY, or WAIT), conflicting_direction (boolean), reason (string). Return PASS only when the provided deterministic checks are all true and the candidate has no missing/stale data, invalid quote, conflicting direction, invalid stop loss/target, or failed risk gate. If uncertain return WAIT. Do not invent prices. Confidence is not profit probability."},
+        {"role": "user", "content": json.dumps(review_input, separators=(",", ":"), default=str)[:10000]},
+    ]
+    failures: list[dict[str, str]] = []
+    for provider, api_key, model in providers:
+        try:
+            if provider == "gemini":
+                result = _run_gemini_completion(api_key, model, messages)
+            else:
+                result = _run_openai_compatible_completion(
+                    api_key, model, messages, provider="openrouter",
+                    endpoint=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1/chat/completions").strip(),
+                )
+            text_response = str(result.get("answer") or "").strip()
+            match = re.search(r"\{.*\}", text_response, re.DOTALL)
+            parsed = json.loads(match.group(0)) if match else {}
+            ai_decision = str(parsed.get("decision") or "WAIT").strip().upper()
+            ai_verdict = str(parsed.get("verdict") or "WAIT").strip().upper()
+            conflict = parsed.get("conflicting_direction") is True or ai_decision != expected
+            passed = ai_verdict == "PASS" and ai_decision == expected and not conflict
+            return {
+                "provider": provider, "configured": True, "ok": True, "status": "ok",
+                "model": result.get("model"), "latency_ms": result.get("latency_ms"),
+                "verdict": "PASS" if passed else "WAIT", "decision": expected if passed else "WAIT",
+                "ai_decision": ai_decision, "ai_direction_consistent": not conflict,
+                "reason": str(parsed.get("reason") or f"{provider} did not confirm every risk condition.")[:500],
+                "blocks": [] if passed else [f"{provider.upper()}_REVIEW_NOT_PASS"],
+                "checks": {"backend_validation": True, "ai_direction_consistent": not conflict, "ai_verdict_pass": ai_verdict == "PASS"},
+                "provider_failures": failures,
+                "signal_only": True, "order_placement_enabled": False,
+            }
+        except (RuntimeError, ValueError, TypeError) as exc:
+            failures.append({"provider": provider, "status": str(exc)[:100]})
+    return {
+        "provider": "none", "configured": True, "ok": False, "verdict": "WAIT",
+        "decision": "WAIT", "status": "all_providers_failed",
+        "reason": "Gemini and OpenRouter review failed or returned invalid JSON.",
+        "provider_failures": failures,
+        "blocks": ["AI_REVIEW_FAILED"],
+        "checks": {"backend_validation": True, "ai_direction_consistent": False},
+        "signal_only": True, "order_placement_enabled": False,
+    }
+
 
 @app.post("/v1/providers/search/status")
 def search_provider_status(_: str = Depends(_device)) -> dict[str, Any]:
@@ -2780,6 +2842,37 @@ def _run_chat_completion(provider: str, api_key: str, model: str, endpoint: str,
         raise RuntimeError(f"{provider}_{type(exc).__name__.lower()}") from None
 
 
+def _provider_json_with_retry(request: urllib.request.Request, *, timeout: float, provider: str) -> dict[str, Any]:
+    """Retry one transient transport/5xx or empty-body response without retrying auth/quota errors."""
+    last_error: Exception | None = None
+    for attempt in range(2):
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                data = json.loads(response.read().decode("utf-8"))
+            if provider == "gemini":
+                candidates = data.get("candidates") or []
+                parts = ((candidates[0].get("content") or {}).get("parts") or []) if candidates else []
+                answer = "\n".join(str(part.get("text") or "") for part in parts if isinstance(part, dict)).strip()
+            else:
+                choices = data.get("choices") or []
+                answer = str(((choices[0].get("message") or {}).get("content") if choices else "") or "").strip()
+            if answer or attempt == 1:
+                return data
+            last_error = RuntimeError(f"{provider}_empty_response")
+        except urllib.error.HTTPError as exc:
+            last_error = exc
+            if attempt == 1 or exc.code not in (502, 503, 504):
+                raise
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+            last_error = exc
+            if attempt == 1:
+                raise
+        time.sleep(0.25)
+    if last_error:
+        raise last_error
+    raise RuntimeError(f"{provider}_request_failed")
+
+
 def _run_gemini_completion(api_key: str, model: str, messages: list[dict[str, str]]) -> dict[str, Any]:
     """Call Gemini's native generateContent API; never expose the key or raw provider body."""
     started = time.perf_counter()
@@ -2817,8 +2910,7 @@ def _run_gemini_completion(api_key: str, model: str, messages: list[dict[str, st
         headers={"Content-Type": "application/json"}, method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=18) as response:
-            data = json.loads(response.read().decode("utf-8"))
+        data = _provider_json_with_retry(request, timeout=18, provider="gemini")
         candidates = data.get("candidates") or []
         parts = ((candidates[0].get("content") or {}).get("parts") or []) if candidates else []
         answer = "\n".join(str(part.get("text") or "") for part in parts if isinstance(part, dict)).strip()
@@ -2862,8 +2954,7 @@ def _run_openai_compatible_completion(
     request = urllib.request.Request(endpoint, data=json.dumps(payload).encode("utf-8"),
                                      headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(request, timeout=22) as response:
-            data = json.loads(response.read().decode("utf-8"))
+        data = _provider_json_with_retry(request, timeout=22, provider=provider)
         choices = data.get("choices") or []
         message = (choices[0].get("message") or {}) if choices else {}
         answer = str(message.get("content") or "").strip()
@@ -2941,7 +3032,6 @@ def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
         failures: list[dict[str, str]] = []
         providers = [
             ("gemini", (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()),
-            ("openai", (os.getenv("OPENAI_API_KEY") or os.getenv("OPEN_AI_API_KEY") or os.getenv("OPENAI_KEY") or "").strip()),
             ("openrouter", (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPEN_ROUTER_API_KEY") or "").strip()),
         ]
         for provider, api_key in providers:
@@ -2953,21 +3043,26 @@ def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
                     result = _run_gemini_completion(
                         api_key, os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip(), messages
                     )
-                elif provider == "openai":
-                    result = _run_openai_compatible_completion(
-                        api_key, os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip(), messages,
-                        provider="openai",
-                        endpoint=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1/chat/completions").strip(),
-                    )
                 else:
                     result = _run_openai_compatible_completion(
-                        api_key, os.getenv("OPENROUTER_MODEL", "openrouter/free").strip(), messages,
+                        api_key, os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash").strip(), messages,
                         provider="openrouter",
                         endpoint=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1/chat/completions").strip(),
                     )
+                suite = dict(market.get("strategy_suite") or signal.get("strategy_suite") or {})
+                suite_trace = dict(suite.get("trace") or {})
+                suite_trace["ai_context_sent"] = bool(suite)
+                suite_trace["ai_semantic_use_verifiable"] = False
+                suite_trace["ai_provider"] = provider if suite else None
+                suite_trace["ai_model"] = result.get("model") if suite else None
+                suite_trace["ai_context_status"] = (
+                    "STRATEGY_OUTPUT_INCLUDED_IN_PROMPT_CONTEXT"
+                    if suite else "STRATEGY_OUTPUT_NOT_AVAILABLE"
+                )
                 return {
                     **result, "index": index, "question": question,
                     "market": market, "signal": signal, "validation": validation,
+                    "strategy_consumption_trace": suite_trace,
                     "search_attempted": bool(os.getenv("EXA_API_KEY", "").strip() or os.getenv("TAVILY_API_KEY", "").strip()),
                     "search_evidence": list(news.get("articles") or [])[:8],
                     "provider_failures": failures, "signal_only": True,
@@ -3216,12 +3311,41 @@ def evaluate_strategies(body: dict[str, Any], _: str = Depends(_device)) -> dict
         "ai_consumption_status": "NOT_CONNECTED_TO_THIS_ENDPOINT",
         "research_engine_received": False,
         "trading_setup_received": False,
+        "downstream_status": "NOT_CONNECTED",
     }
+    # Per-strategy trace records the actual returned rule output. A catalogue
+    # entry alone is never treated as an execution, and scores are not fabricated.
+    strategy_outputs = result.get("strategies") if isinstance(result.get("strategies"), dict) else {}
+    strategy_trace = []
+    for strategy_name, strategy_signal in strategy_outputs.items():
+        signal_text = str(strategy_signal or "WAIT").upper()
+        strategy_trace.append({
+            "strategy_id": f"{execution_id}:{strategy_name}",
+            "strategy_name": strategy_name,
+            "strategy_version": "strategy-suite-v1",
+            "execution_id": execution_id,
+            "signal": signal_text,
+            "score": None,
+            "score_status": "NOT_COMPUTED_BY_RULE",
+            "input_candle_count": len(candles),
+            "input_sha256": input_hash,
+            "source": "submitted_completed_candles",
+            "status": "evaluated",
+            "rejection_reason": (
+                None if signal_text in ("LONG", "SHORT")
+                else "No directional LONG/SHORT event was returned for the final evaluated candle; WAIT is not a trade."
+            ),
+            "ai_consumed": False,
+            "research_engine_received": False,
+            "trading_setup_received": False,
+            "order_placement_enabled": False,
+        })
     return {
         **result,
         "source": "submitted_completed_candles",
         "execution_id": execution_id,
         "trace": trace,
+        "strategy_trace": strategy_trace,
         "order_placement_enabled": False,
     }
 
