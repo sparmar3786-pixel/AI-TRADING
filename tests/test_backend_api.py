@@ -53,6 +53,35 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(signal["live_validation"]["verdict"], "WAIT")
         self.assertIn("checks", signal["live_validation"])
         self.assertFalse(any(signal["live_validation"]["checks"].values()))
+    def test_gemini_review_cannot_override_or_conflict_with_deterministic_candidate(self):
+        payload = {
+            "market": {"NIFTY": {"ltp": 25000.0, "age_seconds": 3.0, "live": True}},
+            "signals": {"NIFTY": {
+                "decision": "CALL BUY", "entry": 100.0, "stop_loss": 90.0, "target": 120.0,
+                "live_validation": {"verdict": "PASS", "checks": {
+                    "fresh_market_data": True, "valid_option_quote": True, "five_layer_engine": True,
+                    "valid_sl_target": True, "risk_checks": True, "ai_direction_consistent": True,
+                }, "blocks": []},
+            }},
+        }
+        class FakeGemini:
+            def __init__(self, answer): self.answer = answer
+        with patch.object(api, "_signal_cache", payload), \\
+             patch.dict(os.environ, {"GEMINI_API_KEY": "test-key", "GOOGLE_API_KEY": ""}, clear=False), \\
+             patch.object(api, "_run_gemini_completion", return_value={"answer": json.dumps({"verdict": "PASS", "decision": "CALL BUY", "conflicting_direction": False, "reason": "All checks agree."}), "model": "gemini-2.5-flash", "latency_ms": 25.0}):
+            response = self.client.post("/v1/ai/review-signal", headers=self.device_headers, json={"index": "NIFTY"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["verdict"], "PASS")
+        self.assertEqual(response.json()["decision"], "CALL BUY")
+
+        with patch.object(api, "_signal_cache", payload), \\
+             patch.dict(os.environ, {"GEMINI_API_KEY": "test-key", "GOOGLE_API_KEY": ""}, clear=False), \\
+             patch.object(api, "_run_gemini_completion", return_value={"answer": json.dumps({"verdict": "PASS", "decision": "PUT BUY", "conflicting_direction": True, "reason": "Direction conflicts."}), "model": "gemini-2.5-flash", "latency_ms": 25.0}):
+            response = self.client.post("/v1/ai/review-signal", headers=self.device_headers, json={"index": "NIFTY"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["verdict"], "WAIT")
+        self.assertEqual(response.json()["decision"], "WAIT")
+        self.assertFalse(response.json()["ai_direction_consistent"])
     def test_health_is_available_without_device_header(self):
         response = self.client.get("/health")
         self.assertEqual(response.status_code, 200)
