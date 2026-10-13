@@ -1307,7 +1307,9 @@ class DashboardPage extends StatelessWidget {
   @override Widget build(BuildContext context){
     final s=Map<String,dynamic>.from(signals[index] as Map? ?? const{}),m=Map<String,dynamic>.from(market[index] as Map? ?? const{});
     final f=Map<String,dynamic>.from(s['order_flow'] as Map? ?? m['order_flow'] as Map? ?? const{}),i=Map<String,dynamic>.from(s['indicators'] as Map? ?? const{}),v=Map<String,dynamic>.from(s['live_validation'] as Map? ?? const{}),g=(s['guards'] as List? ?? const[]);
-    final providers=Map<String,dynamic>.from(aiProviders['providers'] as Map? ?? const{});\n    final openai=Map<String,dynamic>.from(providers['openai'] as Map? ?? const{});\n    final openrouter=Map<String,dynamic>.from(providers['openrouter'] as Map? ?? const{});
+    final providers=Map<String,dynamic>.from(aiProviders['providers'] as Map? ?? const{});
+    final openai=Map<String,dynamic>.from(providers['openai'] as Map? ?? const{});
+    final openrouter=Map<String,dynamic>.from(providers['openrouter'] as Map? ?? const{});
     final d=(s['decision']??'WAIT').toString().toUpperCase(),fresh=s['data_fresh']==true&&connected,buy=_n(f['buy_volume']),sell=_n(f['sell_volume']),total=buy+sell;
     final layers=<List<dynamic>>[
       ['Market data integrity','Angel One quote + freshness',_has(m['ltp'])&&fresh],
@@ -1339,6 +1341,11 @@ class DashboardPage extends StatelessWidget {
         const SizedBox(height:12),Row(children:[Expanded(child:_metric('CONFIDENCE',s['confidence']==null?'—':s['confidence'].toString()+'%')),Expanded(child:_metric('REGIME',(s['regime']??'—').toString())),Expanded(child:_metric('QUALIFIED',qualifiedCount.toString()+' / 5'))]),
       ])),
       const SizedBox(height:10),_status('Market feed',fresh?'LIVE VERIFIED':'NOT VERIFIED',fresh),
+      const Section('AI PROVIDERS • OPENAI + OPENROUTER'),
+      Card(child: Column(children: [
+        ListTile(leading: Icon(Icons.circle, color: openai['ok'] == true ? Colors.greenAccent : Colors.redAccent, size: 12), title: const Text('OpenAI'), subtitle: Text((openai['status'] ?? 'STATUS NOT CHECKED').toString()), trailing: Text((openai['model'] ?? '—').toString(), style: const TextStyle(fontSize: 10))),
+        ListTile(leading: Icon(Icons.circle, color: openrouter['ok'] == true ? Colors.greenAccent : Colors.redAccent, size: 12), title: const Text('OpenRouter'), subtitle: Text((openrouter['status'] ?? 'STATUS NOT CHECKED').toString()), trailing: Text((openrouter['model'] ?? '—').toString(), style: const TextStyle(fontSize: 10))),
+      ])),
       const SizedBox(height:18),const Text('ORDER FLOW',style:TextStyle(fontSize:15,fontWeight:FontWeight.w900,letterSpacing:1)),
       const SizedBox(height:8),Container(padding:const EdgeInsets.all(14),decoration:BoxDecoration(color:const Color(0xFF101722),borderRadius:BorderRadius.circular(16),border:Border.all(color:const Color(0xFF202D3A))),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
         Row(children:[Expanded(child:_metric('BUY VOLUME',f.isEmpty?'—':_fmt(buy),const Color(0xFF35D39A))),Expanded(child:_metric('SELL VOLUME',f.isEmpty?'—':_fmt(sell),const Color(0xFFFF6577))),Expanded(child:_metric('DELTA',f.isEmpty?'—':_fmt(buy-sell),(buy-sell)>=0?const Color(0xFF35D39A):const Color(0xFFFF6577)))]),
