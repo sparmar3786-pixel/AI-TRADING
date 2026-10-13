@@ -274,12 +274,12 @@ void main() {
     expect(find.text('SERVER API ROUTE METRICS'), findsOneWidget);
 
     await tester.scrollUntilVisible(
-      find.text('GEMINI + OPENAI + OPENROUTER DATA VALIDATION'),
+      find.text('GEMINI + OPENROUTER DATA VALIDATION'),
       250,
       scrollable: monitorScrollable,
     );
-    expect(find.text('GEMINI + OPENAI + OPENROUTER DATA VALIDATION'), findsOneWidget);
-    expect(find.text('TEST GEMINI + OPENAI + OPENROUTER'), findsOneWidget);
+    expect(find.text('GEMINI + OPENROUTER DATA VALIDATION'), findsOneWidget);
+    expect(find.text('TEST GEMINI + OPENROUTER'), findsOneWidget);
 
     // Dispose Flow Monitor first so its periodic poll is cancelled, then let
     // outstanding Future.timeout timers finish. This tests real cleanup rather
