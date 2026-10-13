@@ -89,7 +89,9 @@ class PdfReportSolutionsPage extends StatelessWidget {
       const Text(
         'In-app transcription and structured guide based on the uploaded 10-page screenshot report. Operational screenshot captions are indexed below; repository-library screenshots are omitted. This is report content in a new tab, not an embedded pixel-for-pixel PDF viewer.',
         style: TextStyle(color: Colors.white70, fontSize: 12)),
-      const SizedBox(height: 12),
+      const SizedBox(height: 8),
+      const Text('SCREENSHOT INDEX • REPOSITORY ITEMS REMOVED', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
+      const SizedBox(height: 8),
       Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: const [
@@ -122,7 +124,7 @@ class PdfReportSolutionsPage extends StatelessWidget {
           ],
         )),
       const SizedBox(height: 8),
-      const Text('ALL 15 SCREENSHOT INDEX', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
+      const Text('REMAINING OPERATIONAL SCREENSHOTS', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
       const SizedBox(height: 6),
       Card(child: Column(children: [
         for (var i = 0; i < screenshotCaptions.length; i++)
