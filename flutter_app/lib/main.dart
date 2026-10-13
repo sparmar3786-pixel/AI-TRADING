@@ -14,8 +14,10 @@ import 'quant_engine_lab_page.dart';
 import 'order_flow_page.dart';
 import 'strategy_library_page.dart';
 import 'flow_monitor_page.dart';
+import 'daily_ai_memory.dart';
+import 'daily_ai_memory_page.dart';
 
-const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Market Diagnostics','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','PDF Report & Fixes','AI Chat','Order Flow','Quant Engine Lab','Strategy Library','Flow Monitor'];
+const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Market Diagnostics','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','PDF Report & Fixes','AI Chat','Order Flow','Quant Engine Lab','Strategy Library','Flow Monitor','AI Memory'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
 const commodityOptionUnderlyings = ['CRUDEOIL','CRUDEOILM','NATURALGAS','NATGASMINI','GOLD','GOLDM','SILVER','SILVERM','COPPER','ZINC','ALUMINIUM','LEAD','NICKEL'];
 const optionUnderlyings = [...indexes, ...commodityOptionUnderlyings];
@@ -248,6 +250,15 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     return result;
   }
 
+  void _saveAiMemory() {
+    unawaited(DailyAiMemory.saveSnapshot(
+      market: Map<String, dynamic>.from(market),
+      signals: Map<String, dynamic>.from(signals),
+      commodities: List<dynamic>.from(commodities),
+      optionChains: optionChainsByIndex.map((key, value) => MapEntry(key, List<dynamic>.from(value))),
+    ));
+  }
+
   Future<void> refresh() async {
     if (_refreshing) return;
     _refreshing = true;
@@ -369,6 +380,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
                     ? 'Signal API responded, but Angel One status check failed: $angelStatusError'
                     : (lastFetch != null ? 'LIVE unavailable — showing last fetched market data.' : 'Backend online — waiting for Angel One market data. Check broker credentials and connection status.')));
       });
+      _saveAiMemory();
     } catch (e) {
       if (mounted) setState(() { apiOnline = false; signalsEndpointOnline = false; signalsFetchError = e.toString().replaceFirst('Exception: ', ''); systemDiagnostics = const {}; systemDiagnosticsError = e.toString().replaceFirst('Exception: ', ''); });
       final s = _makeCachedSignalsNonActionable(await _loadCachedSignals());
@@ -389,6 +401,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         lastFetch = s['last_fetch']?.toString();
         status = lastFetch != null ? 'Backend unavailable — showing last fetched market data. Error: ${signalsFetchError ?? 'request failed'}' : 'Backend offline or unreachable: ${signalsFetchError ?? 'health check failed'}';
       });
+      _saveAiMemory();
     } finally {
       _refreshing = false;
     }
@@ -619,6 +632,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         ),
         StrategyLibraryPage(market: market, signals: signals, selectedIndex: selectedIndex),
         FlowMonitorPage(signalBackendUrl: signalBackendUrl),
+        const DailyAiMemoryPage(),
       ]),
     ),
   );
