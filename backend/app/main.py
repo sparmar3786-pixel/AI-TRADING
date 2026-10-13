@@ -962,8 +962,35 @@ def angel_connect(body: ConnectRequest, _: str = Depends(_device)) -> dict[str, 
         except AngelOneConfigError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except Exception as exc:
-            # Never echo SDK request/response details from a credential-bearing login.
-            raise HTTPException(status_code=502, detail="Angel One login failed. Verify API key, Client ID, MPIN, current TOTP and SmartAPI access.") from exc
+            # Keep secrets and raw SDK payloads out of the response, but expose a
+            # bounded, non-secret SmartAPI error code/message so 502s are actionable.
+            error_text = str(exc)
+            match = re.search(r"Angel One SmartAPI error \\(([^)]+)\\): (.*)", error_text)
+            if match:
+                error_code = match.group(1)[:32]
+                safe_message = re.sub(r"[^A-Za-z0-9 .,;:_-]", "", match.group(2))[:180].strip()
+                detail = {
+                    "message": "Angel One login rejected by SmartAPI.",
+                    "stage": "smartapi_authentication",
+                    "error_code": error_code,
+                    "broker_message": safe_message or "SmartAPI returned an authentication error.",
+                    "next_step": "Verify Client ID, MPIN, current TOTP, API key access and system clock.",
+                }
+            elif "no refresh token" in error_text.lower() or "sdk version" in error_text.lower():
+                detail = {
+                    "message": "Angel One login response did not provide a usable session token.",
+                    "stage": "session_token_extraction",
+                    "next_step": "Check the deployed smartapi-python version and token fields returned by SmartAPI.",
+                }
+            else:
+                # Network errors and unexpected SDK exceptions stay generic; never
+                # return exception text that could contain request headers or secrets.
+                detail = {
+                    "message": "Angel One login failed before session verification.",
+                    "stage": "broker_request_or_profile_verification",
+                    "next_step": "Check Railway outbound connectivity and SmartAPI status, then retry with a fresh TOTP.",
+                }
+            raise HTTPException(status_code=502, detail=detail) from exc
         status = adapter.status()
         if not status["has_jwt_token"] or not status["has_feed_token"]:
             raise HTTPException(status_code=502, detail="Profile login succeeded but JWT/feed token readiness was not verified. Check SmartAPI SDK version/session response.")
