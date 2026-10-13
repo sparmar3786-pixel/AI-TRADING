@@ -19,11 +19,11 @@ class _OrderFlowPageState extends State<OrderFlowPage> {
 
   Uri get _webSocketBase {
     final base = Uri.parse(widget.signalBackendUrl.trim());
-    return base.replace(
+    return Uri(
       scheme: base.scheme == 'https' ? 'wss' : 'ws',
+      host: base.host,
+      port: base.hasPort ? base.port : null,
       path: '/ws',
-      queryParameters: const <String, String>{},
-      fragment: '',
     );
   }
 
