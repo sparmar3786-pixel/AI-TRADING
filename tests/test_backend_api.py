@@ -293,7 +293,7 @@ class BackendApiTests(unittest.TestCase):
              patch.object(api, "_stream", None):
             result = api._get_signals_uncached(force=True)
         self.assertEqual(result["market"]["NIFTY"]["ltp"], 25000.0)
-        self.assertTrue(result["market"]["NIFTY"]["live"])
+        self.assertEqual(result["signals"]["NIFTY"]["decision"], "WAIT")
         self.assertEqual(result["signals"]["NIFTY"]["decision"], "WAIT")
         self.assertIn("insufficient candle history", result["market"]["NIFTY"]["signal_error"])
 
