@@ -23,7 +23,7 @@ main{flex:1;min-height:0;position:relative}canvas{width:100%;height:100%;display
 #man .cols{columns:1;column-gap:24px}#mx{position:sticky;top:0;float:right;font-weight:700}
 @media(orientation:landscape) and (min-width:560px){#man .cols{columns:2}#man h3{break-after:avoid}#man section{break-inside:avoid}}
 .rr{color:var(--r)}.gg{color:var(--g)}
-body.fullview header,body.fullview #info{display:none}body.fullview main{flex:1}
+body.fullview header{height:0;padding:0;border:0;overflow:visible;display:block}body.fullview header>*{display:none}body.fullview #fs{display:block;position:fixed;top:8px;right:8px;z-index:20;background:#121821}body.fullview #info{display:none}body.fullview main{flex:1}
 </style></head><body>
 <header>
  <select id="sym"><optgroup label="Indian Indices"><option>NIFTY</option><option>BANKNIFTY</option><option>FINNIFTY</option><option>MIDCPNIFTY</option><option>SENSEX</option><option>BANKEX</option></optgroup><optgroup label="MCX Commodity Futures"><option>CRUDEOIL</option><option>CRUDEOILM</option><option>NATURALGAS</option><option>NATGASMINI</option><option>GOLD</option><option>GOLDM</option><option>SILVER</option><option>SILVERM</option><option>COPPER</option><option>ZINC</option><option>ALUMINIUM</option><option>LEAD</option><option>NICKEL</option><option>MENTHAOIL</option><option>CASTORSEED</option><option>COTTON</option><option>RUBBER</option></optgroup></select>
