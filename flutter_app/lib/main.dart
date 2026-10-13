@@ -256,6 +256,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       signals: Map<String, dynamic>.from(signals),
       commodities: List<dynamic>.from(commodities),
       optionChains: optionChainsByIndex.map((key, value) => MapEntry(key, List<dynamic>.from(value))),
+      footprint: Map<String, dynamic>.from(OrderFlowTelemetry.latest),
     ));
   }
 
