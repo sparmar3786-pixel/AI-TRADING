@@ -7,6 +7,7 @@ This service never places, modifies, or cancels broker orders.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import logging
 import os
@@ -18,6 +19,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 import asyncio
 from datetime import date, datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
@@ -3189,13 +3191,39 @@ def evaluate_strategies(body: dict[str, Any], _: str = Depends(_device)) -> dict
     reward_risk = _number(body.get("risk_reward", 2.0))
     if reward_risk is None or reward_risk <= 0 or reward_risk > 10:
         raise HTTPException(status_code=422, detail="risk_reward must be finite and between 0 and 10.")
+    # Trace the exact submitted input so the UI can distinguish an evaluated
+    # strategy result from a static catalogue entry. This endpoint does not call
+    # an AI provider or propagate results to another engine.
+    input_hash = hashlib.sha256(
+        json.dumps(candles, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    ).hexdigest()
+    execution_id = f"strategy-{uuid.uuid4().hex}"
+    evaluated_at = _utc_now().isoformat()
     result = evaluate_strategy_suite(
         candles,
         oi_change=body.get("oi_change"),
         min_consensus=raw_consensus,
         risk_reward=reward_risk,
     )
-    return {**result, "source": "submitted_completed_candles", "order_placement_enabled": False}
+    trace = {
+        "execution_id": execution_id,
+        "strategy_version": "strategy-suite-v1",
+        "evaluated_at": evaluated_at,
+        "input_candle_count": len(candles),
+        "input_sha256": input_hash,
+        "source": "submitted_completed_candles",
+        "ai_consumed": False,
+        "ai_consumption_status": "NOT_CONNECTED_TO_THIS_ENDPOINT",
+        "research_engine_received": False,
+        "trading_setup_received": False,
+    }
+    return {
+        **result,
+        "source": "submitted_completed_candles",
+        "execution_id": execution_id,
+        "trace": trace,
+        "order_placement_enabled": False,
+    }
 
 
 @app.get("/v1/signals")
