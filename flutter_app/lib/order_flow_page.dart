@@ -12,7 +12,7 @@ class OrderFlowPage extends StatefulWidget {
 }
 
 class _OrderFlowPageState extends State<OrderFlowPage> {
-  static const green=Color(0xFF26C281), red=Color(0xFFEF4B5B), amber=Color(0xFFF0B429);
+  static const green=Color(0xFF26C281), red=Color(0xFFEF4B5B);
   static const symbols=['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
   static const frames=<int,String>{1:'1m',3:'3m',5:'5m',15:'15m',30:'30m',60:'1h'};
   String symbol='NIFTY', status='CONNECTING', error='';
@@ -131,6 +131,7 @@ class _OrderFlowPageState extends State<OrderFlowPage> {
 }
 
 class FootprintPainter extends CustomPainter {
+  static const green=Color(0xFF26C281), red=Color(0xFFEF4B5B);
   FootprintPainter(this.candles,{required this.zoom});
   final List<Map<String,dynamic>> candles; final int zoom;
   double n(dynamic v)=>v is num?v.toDouble():double.tryParse(v.toString())??0;
