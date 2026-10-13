@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import tempfile
@@ -262,6 +263,27 @@ class BackendApiTests(unittest.TestCase):
         self.assertTrue(result["refreshing"])
         self.assertFalse(result["live"])
         self.assertIn("loading in the background", result["message"])
+
+    def test_ai_probe_cannot_pass_stale_market_data(self):
+        class FakeResponse:
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                return False
+            def read(self):
+                return json.dumps({
+                    "choices": [{"message": {"content": "{\\"verdict\\":\\"PASS\\",\\"reason\\":\\"looks good\\"}"}}]
+                }).encode("utf-8")
+
+        with patch.object(api.urllib.request, "urlopen", return_value=FakeResponse()):
+            result = api._run_ai_validation_probe(
+                "openai", "test-secret", "test-model", "https://api.openai.com/v1/chat/completions",
+                {"source": "angelone_smartapi", "source_timestamp": "2026-10-13T09:00:00+00:00",
+                 "ltp": 25000.0, "age_seconds": 120.0, "live": False},
+            )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["verdict"], "WAIT")
+        self.assertNotIn("test-secret", str(result))
 
     def test_footprint_levels_use_only_broker_best5_depth(self):
         quote = {
