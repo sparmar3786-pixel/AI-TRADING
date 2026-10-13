@@ -29,13 +29,17 @@ class _RiskCalculatorState extends State<RiskCalculator> {
   final _target = TextEditingController();
   final _lots = TextEditingController(text: '1');
   final _lotSize = TextEditingController();
+  final _optionLtp = TextEditingController(text: '220');
+  final _premiumPointSl = TextEditingController(text: '5');
+  final _premiumRupeeSl = TextEditingController(text: '30');
+  final _thetaPerDay = TextEditingController(text: '2');
 
   @override
   void initState() {
     super.initState();
     _symbol = widget.selectedIndex;
     _seedFromQuote();
-    for (final c in [_entry, _stop, _target, _lots, _lotSize]) {
+    for (final c in [_entry, _stop, _target, _lots, _lotSize, _optionLtp, _premiumPointSl, _premiumRupeeSl, _thetaPerDay]) {
       c.addListener(_changed);
     }
   }
@@ -99,7 +103,7 @@ class _RiskCalculatorState extends State<RiskCalculator> {
 
   @override
   void dispose() {
-    for (final c in [_entry, _stop, _target, _lots, _lotSize]) {
+    for (final c in [_entry, _stop, _target, _lots, _lotSize, _optionLtp, _premiumPointSl, _premiumRupeeSl, _thetaPerDay]) {
       c.removeListener(_changed);
       c.dispose();
     }
@@ -132,6 +136,15 @@ class _RiskCalculatorState extends State<RiskCalculator> {
         ? lotsRaw.toInt() : null;
     final qty = lots != null && lotSize != null && lotSize > 0 ? lots * lotSize : null;
     final isBuy = _side == 'BUY';
+    final optionLtp = _num(_optionLtp.text);
+    final premiumPointSl = _num(_premiumPointSl.text);
+    final premiumRupeeSl = _num(_premiumRupeeSl.text);
+    final thetaPerDay = _num(_thetaPerDay.text);
+    final premiumSlByPoints = optionLtp != null && premiumPointSl != null && premiumPointSl > 0 ? optionLtp - premiumPointSl : null;
+    final premiumPointsByRupees = optionLtp != null && premiumRupeeSl != null && premiumRupeeSl > 0 ? optionLtp - premiumRupeeSl : null;
+    final rupeeRiskByPoints = qty != null && premiumPointSl != null && premiumPointSl > 0 ? qty * premiumPointSl : null;
+    final pointsByRupeeRisk = qty != null && premiumRupeeSl != null && premiumRupeeSl > 0 ? premiumRupeeSl / qty : null;
+    final oneDayThetaEstimate = thetaPerDay != null && thetaPerDay > 0 ? thetaPerDay : null;
     final targetPoints = entry != null && target != null ? (target - entry) * (isBuy ? 1 : -1) : null;
     final stopPoints = entry != null && stop != null ? (entry - stop) * (isBuy ? 1 : -1) : null;
     final targetValid = targetPoints != null && targetPoints > 0;
@@ -205,6 +218,24 @@ class _RiskCalculatorState extends State<RiskCalculator> {
             _field('Lots', _lots, hint: '1'),
             _field('Qty per lot', _lotSize, hint: 'Verified lot size'),
           ]),
+          const Divider(height: 22),
+          const Text('OPTION PREMIUM STOP-LOSS • POINTS + RUPEES', style: TextStyle(fontWeight: FontWeight.w900, color: Color(0xFF12D6FF))),
+          const SizedBox(height: 6),
+          Wrap(spacing: 10, runSpacing: 8, children: [
+            _field('Option premium LTP', _optionLtp, hint: '220'),
+            _field('SL distance (premium pts)', _premiumPointSl, hint: '5'),
+            _field('Max loss per unit (₹)', _premiumRupeeSl, hint: '30'),
+            _field('Theta (₹/unit/day)', _thetaPerDay, hint: 'from live Greeks'),
+          ]),
+          const SizedBox(height: 8),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            _metric('5-point SL premium', premiumSlByPoints == null || premiumSlByPoints <= 0 ? '—' : '₹${premiumSlByPoints.toStringAsFixed(2)}'),
+            _metric('₹30-risk SL premium', premiumPointsByRupees == null || premiumPointsByRupees <= 0 ? '—' : '₹${premiumPointsByRupees.toStringAsFixed(2)}'),
+            _metric('Loss at point SL', currency(rupeeRiskByPoints), color: Colors.redAccent),
+            _metric('Points for rupee risk', points(pointsByRupeeRisk)),
+            _metric('1-day theta estimate', currency(oneDayThetaEstimate), color: Colors.orangeAccent),
+          ]),
+          const Text('Example: option LTP ₹220, 5 premium-point SL → SL premium ₹215. With quantity 50, estimated loss = ₹250 before costs. A ₹30 premium drop gives SL premium ₹190; loss per unit is ₹30 (₹1,500 for quantity 50). Enter verified live theta; theta is not constant and decay accelerates near expiry. Delta, gamma, IV/vega, spread, liquidity and directional move also change option premium.', style: TextStyle(fontSize: 11, color: Colors.white70)),
           const Divider(height: 22),
           Wrap(spacing: 8, runSpacing: 8, children: [
             _metric('Quantity', qty == null ? 'Enter lot size' : qty.toStringAsFixed(qty == qty.roundToDouble() ? 0 : 2)),
