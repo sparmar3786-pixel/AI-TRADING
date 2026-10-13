@@ -250,6 +250,31 @@ class BackendApiTests(unittest.TestCase):
             self.assertEqual(report.json()["metrics"]["net_total_r"], 0.96)
             api._paper_trades_memory.clear()
 
+    def test_index_quote_survives_signal_pipeline_failure(self):
+        quote = {
+            "ltp": 25000.0,
+            "exchange_timestamp": api._utc_now().isoformat(),
+            "best5Data": {
+                "buy": [{"price": 24999.5, "quantity": 10}],
+                "sell": [{"price": 25000.5, "quantity": 12}],
+            },
+        }
+        with patch.object(api, "_signal_cache", None), \
+             patch.object(api, "_signal_cache_at", 0), \
+             patch.object(api, "_require_adapter", return_value=object()), \
+             patch.object(api, "_load_master", return_value=[]), \
+             patch.object(api, "_start_stream"), \
+             patch.object(api, "_schedule_news_refresh"), \
+             patch.object(api, "_index_snapshot", side_effect=RuntimeError("insufficient candle history")), \
+             patch.object(api, "_quotes", side_effect=lambda adapter, exchange, tokens: {tokens[0]: quote}), \
+             patch.object(api, "_commodity_snapshot", return_value=[]), \
+             patch.object(api, "_stream", None):
+            result = api._get_signals(force=True)
+        self.assertEqual(result["market"]["NIFTY"]["ltp"], 25000.0)
+        self.assertTrue(result["market"]["NIFTY"]["live"])
+        self.assertEqual(result["signals"]["NIFTY"]["decision"], "WAIT")
+        self.assertIn("insufficient candle history", result["market"]["NIFTY"]["signal_error"])
+
 
 if __name__ == "__main__":
     unittest.main()
