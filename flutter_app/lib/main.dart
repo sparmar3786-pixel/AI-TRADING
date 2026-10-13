@@ -293,6 +293,25 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         // Cloud AI credentials/status belong to the AI/chat backend; market
         // feed health remains owned by signalApi.
         providerStatus = await api.aiStatus();
+        if (providerStatus['providers'] is! Map && providerStatus['provider_health'] is List) {
+          final normalized = <String, dynamic>{};
+          for (final item in (providerStatus['provider_health'] as List).whereType<Map>()) {
+            final name = (item['name'] ?? '').toString().toLowerCase();
+            if (!['gemini', 'openai', 'openrouter'].contains(name)) continue;
+            normalized[name] = <String, dynamic>{
+              'configured': true,
+              'ok': false,
+              'status': item['status'] == 'COOLDOWN' ? 'cooldown' : 'configured_not_tested',
+              'model': item['model'] ?? item['model_name'] ?? 'not reported',
+            };
+          }
+          for (final name in ['gemini', 'openai', 'openrouter']) {
+            normalized.putIfAbsent(name, () => <String, dynamic>{
+              'configured': false, 'ok': false, 'status': 'not_configured', 'model': '—',
+            });
+          }
+          providerStatus['providers'] = normalized;
+        }
       } catch (providerError) {
         debugPrint('AI_PROVIDER_STATUS_FAILED: $providerError');
       }
