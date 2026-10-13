@@ -2426,10 +2426,10 @@ def _provider_key_present(*names: str) -> bool:
 
 @app.get("/v1/ai/status")
 def ai_status(_: str = Depends(_device)) -> dict[str, Any]:
+    # Only Gemini and OpenRouter are supported cloud providers in this app.
     providers = [
         ("gemini", ("GEMINI_API_KEY", "GOOGLE_API_KEY"), os.getenv("GEMINI_MODEL", "gemini-2.5-flash")),
         ("openrouter", ("OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY"), os.getenv("OPENROUTER_MODEL", "openrouter/free")),
-        ("openai", ("OPENAI_API_KEY", "OPEN_AI_API_KEY", "OPENAI_KEY"), os.getenv("OPENAI_MODEL", "gpt-4o-mini")),
     ]
     selected = next((item for item in providers if _provider_key_present(*item[1])), None)
     provider_status = {
@@ -2442,7 +2442,7 @@ def ai_status(_: str = Depends(_device)) -> dict[str, Any]:
         for name, env_names, model_name in providers
     }
     with _lock:
-        for name in ("gemini", "openai", "openrouter"):
+        for name in ("gemini", "openrouter"):
             cached = _ai_provider_test_cache.get(name)
             if cached and cached.get("configured") == provider_status[name]["configured"]:
                 provider_status[name] = dict(cached)
@@ -2544,8 +2544,11 @@ def ai_validate_snapshot(body: dict[str, Any], _: str = Depends(_device)) -> dic
         and age is not None and 0 <= age <= 60
     )
     providers: dict[str, Any] = {}
-    for provider, env_name in (("openai", "OPENAI_API_KEY"), ("openrouter", "OPENROUTER_API_KEY")):
-        configured = bool(os.getenv(env_name, "").strip())
+    for provider, env_names in (
+        ("gemini", ("GEMINI_API_KEY", "GOOGLE_API_KEY")),
+        ("openrouter", ("OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY")),
+    ):
+        configured = any(os.getenv(name, "").strip() for name in env_names)
         providers[provider] = {
             "configured": configured,
             "ok": False,
@@ -2603,21 +2606,14 @@ def test_ai_providers(_: str = Depends(_device)) -> dict[str, Any]:
             "provider": "gemini", "configured": False, "ok": False,
             "status": "not_configured", "verdict": "WAIT",
         })
-    openai_key = (os.getenv("OPENAI_API_KEY") or os.getenv("OPEN_AI_API_KEY") or os.getenv("OPENAI_KEY") or "").strip()
     openrouter_key = (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPEN_ROUTER_API_KEY") or "").strip()
-    if openai_key:
-        checks.append(_run_ai_validation_probe(
-            "openai", openai_key, os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip(),
-            "https://api.openai.com/v1/chat/completions", market_row))
-    else:
-        checks.append({"provider": "openai", "configured": False, "ok": False, "status": "not_configured", "verdict": "WAIT"})
     if openrouter_key:
         checks.append(_run_ai_validation_probe(
             "openrouter", openrouter_key, os.getenv("OPENROUTER_MODEL", "openrouter/free").strip(),
             "https://openrouter.ai/api/v1/chat/completions", market_row))
     else:
         checks.append({"provider": "openrouter", "configured": False, "ok": False, "status": "not_configured", "verdict": "WAIT"})
-    tested = [item for item in checks if item.get("provider") in ("gemini", "openai", "openrouter")]
+    tested = [item for item in checks if item.get("provider") in ("gemini", "openrouter")]
     with _lock:
         for item in tested:
             _ai_provider_test_cache[item["provider"]] = dict(item)
@@ -2941,7 +2937,6 @@ def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
         failures: list[dict[str, str]] = []
         providers = [
             ("gemini", (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()),
-            ("openai", (os.getenv("OPENAI_API_KEY") or os.getenv("OPEN_AI_API_KEY") or os.getenv("OPENAI_KEY") or "").strip()),
             ("openrouter", (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPEN_ROUTER_API_KEY") or "").strip()),
         ]
         for provider, api_key in providers:
@@ -2952,12 +2947,6 @@ def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
                 if provider == "gemini":
                     result = _run_gemini_completion(
                         api_key, os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip(), messages
-                    )
-                elif provider == "openai":
-                    result = _run_openai_compatible_completion(
-                        api_key, os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip(), messages,
-                        provider="openai",
-                        endpoint=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1/chat/completions").strip(),
                     )
                 else:
                     result = _run_openai_compatible_completion(
