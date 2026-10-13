@@ -1,6 +1,9 @@
 import unittest
 
-from strategies.suite import classify_oi_change, evaluate_strategy_suite
+from strategies.suite import (
+    classify_oi_change, evaluate_strategy_suite, liquidity_sweep_signal,
+    rate_of_change_signal, stochastic_reversal,
+)
 
 
 def candles(values, volume=100):
@@ -26,6 +29,20 @@ class StrategySuiteTests(unittest.TestCase):
         self.assertEqual(classify_oi_change(0.02, -500), "SHORT_COVERING")
         self.assertEqual(classify_oi_change(-0.02, -500), "LONG_UNWINDING")
         self.assertEqual(classify_oi_change(0, 500), "UNKNOWN")
+
+    def test_roc_momentum(self):
+        self.assertEqual(rate_of_change_signal([100 + i for i in range(12)]), "LONG")
+        self.assertEqual(rate_of_change_signal([100 - i for i in range(12)]), "SHORT")
+
+    def test_liquidity_sweep_uses_prior_levels(self):
+        highs = [101.0 + (i % 3) for i in range(21)]
+        lows = [99.0 - (i % 3) for i in range(21)]
+        closes = [100.0] * 20 + [100.0]
+        highs[-1] = max(highs[:-1]) + 1.0
+        self.assertEqual(liquidity_sweep_signal(highs, lows, closes, lookback=20), "SHORT")
+
+    def test_stochastic_warmup_waits(self):
+        self.assertEqual(stochastic_reversal([2, 3], [1, 2], [1.5, 2.5], period=14), "WAIT")
 
     def test_full_suite_returns_named_strategies_and_levels(self):
         result = evaluate_strategy_suite(candles([100 + i * 0.8 for i in range(35)]), min_consensus=2)
