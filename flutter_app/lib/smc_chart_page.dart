@@ -76,7 +76,17 @@ class _SmcChartPageState extends State<SmcChartPage> {
   }
   List<Map<String,dynamic>> _bars(String timeframe) {
     final all=Map<String,dynamic>.from(widget.market['timeframes'] as Map? ?? const{});
-    return (all[timeframe] as List? ?? const[]).whereType<Map>().map((x)=>Map<String,dynamic>.from(x)).where((x)=>['open','high','low','close'].every((k)=>x[k] is num)).toList();
+    final aliases = <String, List<String>>{
+      '1m': ['1m','1min','1minute'], '3m': ['3m','3min'], '5m': ['5m','5min'],
+      '15m': ['15m','15min'], '30m': ['30m','30min'], '1H': ['1H','1h','60m','60min'],
+      '2H': ['2H','2h','120m'], '4H': ['4H','4h','240m'], '1D': ['1D','1d','day','daily'],
+      '1W': ['1W','1w','week','weekly'], '1M': ['1M','1mo','month','monthly'],
+    };
+    List? raw;
+    for (final key in aliases[timeframe] ?? [timeframe]) {
+      if (all[key] is List) { raw = all[key] as List; break; }
+    }
+    return (raw ?? const[]).whereType<Map>().map((x)=>Map<String,dynamic>.from(x)).where((x)=>['open','high','low','close'].every((k)=>x[k] is num)).toList();
   }
   List<Map<String,dynamic>> get bars => _bars(tf);
   double? get _last => bars.isEmpty ? null : (bars.last['close'] as num).toDouble();
