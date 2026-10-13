@@ -20,14 +20,24 @@ class _SmcChartPageState extends State<SmcChartPage> {
   bool showOb=true, showFvg=true, showLiquidity=true, _engineBusy=false;
   Map<String,dynamic> _engineResult=const {};
   String? _engineError;
+  bool get _liveFeed => widget.market['live']==true || widget.market['feed_mode']=='LIVE';
   Future<void> _runEngine() async {
-    setState((){_engineBusy=true;_engineError=null;});
+    final htf = _bars('1D'), mtf = _bars('1H'), ltf = _bars('15m');
+    if (!_liveFeed) {
+      setState(() { _engineError='Live backend feed is not confirmed. Demo/synthetic data is disabled.'; _engineResult=const {}; });
+      return;
+    }
+    if (htf.length < 5 || mtf.length < 5 || ltf.length < 5) {
+      setState(() { _engineError='Insufficient real candles: at least 5 candles are required for 1D, 1H and 15m. No demo data will be generated.'; _engineResult=const {}; });
+      return;
+    }
+    setState(() { _engineBusy=true; _engineError=null; _engineResult=const {}; });
     try {
       final response=await FreshApi().postJson('/v1/smc/analyze', {
         'instrument':widget.index,
-        'htf_candles':_bars('1D'),
-        'mtf_candles':_bars('1H'),
-        'ltf_candles':_bars('15m'),
+        'htf_candles':htf,
+        'mtf_candles':mtf,
+        'ltf_candles':ltf,
         'in_killzone':true,
       }, timeout:const Duration(seconds:20));
       if(mounted)setState(()=>_engineResult=response);
@@ -76,7 +86,7 @@ class _SmcChartPageState extends State<SmcChartPage> {
   }
   @override Widget build(BuildContext context){
     final a=_analyze(bars);
-    final live=widget.market['live']==true||widget.market['feed_mode']=='LIVE';
+    final live=_liveFeed && bars.length>=2;
     final aiText=(widget.ai['summary']??widget.ai['status']??widget.signal['ai_validation']??'AI context not returned by backend').toString();
     return ListView(padding:const EdgeInsets.all(12),children:[
       Row(children:[const Expanded(child:Text('SMC / ICT PRO CHART',style:TextStyle(fontWeight:FontWeight.w900,fontSize:18))),Chip(label:Text(live?'LIVE FEED':'WAITING FOR LIVE',style:const TextStyle(fontSize:10)),backgroundColor:live?Colors.green.withOpacity(.18):Colors.orange.withOpacity(.15))]),
@@ -88,7 +98,7 @@ class _SmcChartPageState extends State<SmcChartPage> {
       Card(child:Padding(padding:const EdgeInsets.all(10),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
         Row(children:[Expanded(child:Text(widget.index,style:const TextStyle(fontWeight:FontWeight.w800,fontSize:15))),Text(_last?.toStringAsFixed(2)??'—',style:const TextStyle(fontWeight:FontWeight.w900,fontSize:18))]),
         const SizedBox(height:8),
-        SizedBox(height:270,width:double.infinity,child:bars.length<2?const Center(child:Text('No real candles received — synthetic data is disabled.')):CustomPaint(painter:SmcCandlePainter(bars:bars,orderBlocks:showOb?(a['ob'] as List<Map<String,dynamic>>):const[],fvgs:showFvg?(a['fvg'] as List<Map<String,dynamic>>):const[]))),
+        SizedBox(height:270,width:double.infinity,child:bars.length<2?const Center(child:Text('No real candles received — demo data is disabled.')):CustomPaint(painter:SmcCandlePainter(bars:bars,orderBlocks:showOb?(a['ob'] as List<Map<String,dynamic>>):const[],fvgs:showFvg?(a['fvg'] as List<Map<String,dynamic>>):const[]))),
         Wrap(spacing:6,children:[FilterChip(label:const Text('Order Blocks'),selected:showOb,onSelected:(v)=>setState(()=>showOb=v)),FilterChip(label:const Text('FVG'),selected:showFvg,onSelected:(v)=>setState(()=>showFvg=v)),FilterChip(label:const Text('Liquidity'),selected:showLiquidity,onSelected:(v)=>setState(()=>showLiquidity=v))]),
         Text('Source: backend candle snapshots. Overlay calculations are chart-side and do not replace server validation.',style:TextStyle(fontSize:11,color:Colors.white.withOpacity(.6))),
       ]))),
