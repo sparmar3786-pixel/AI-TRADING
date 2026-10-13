@@ -158,7 +158,7 @@ class FootprintPainter extends CustomPainter {
       final keys=lv is Map?lv.keys.map((k)=>double.tryParse(k.toString())).whereType<double>().toList() : <double>[];
       keys.sort((a,b)=>b.compareTo(a));double poc=-1,pocVol=-1;
       for(final p in keys){
-        final pair=(lv as Map)[p.toString()]??(lv as Map)[p.toStringAsFixed(2)]??(lv as Map)[p.toStringAsFixed(1)];
+        final pair=lv[p.toString()]??lv[p.toStringAsFixed(2)]??lv[p.toStringAsFixed(1)];
         if(pair is! List||pair.length<2)continue;
         final sell=n(pair[0]),buy=n(pair[1]),total=sell+buy;if(total>pocVol){pocVol=total;poc=p;}
         final yy=y(p);if(yy<top-rh||yy>top+plot)continue;
