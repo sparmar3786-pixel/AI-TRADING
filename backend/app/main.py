@@ -965,7 +965,7 @@ def angel_connect(body: ConnectRequest, _: str = Depends(_device)) -> dict[str, 
             # Keep secrets and raw SDK payloads out of the response, but expose a
             # bounded, non-secret SmartAPI error code/message so 502s are actionable.
             error_text = str(exc)
-            match = re.search(r"Angel One SmartAPI error \\(([^)]+)\\): (.*)", error_text)
+            match = re.search(r"Angel One SmartAPI error \(([^)]+)\): (.*)", error_text)
             if match:
                 error_code = match.group(1)[:32]
                 safe_message = re.sub(r"[^A-Za-z0-9 .,;:_-]", "", match.group(2))[:180].strip()
