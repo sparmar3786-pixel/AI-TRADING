@@ -978,7 +978,7 @@ def angel_connect(body: ConnectRequest, _: str = Depends(_device)) -> dict[str, 
                 if isinstance(secret, str) and len(secret) >= 4:
                     safe_error_text = safe_error_text.replace(secret, "[redacted]")
             safe_error_text = re.sub(
-                r"(?i)(?:eyJ[a-zA-Z0-9_=-]{12,}\.[a-zA-Z0-9_=-]{12,}(?:\.[a-zA-Z0-9_=-]{8,})?|Bearer\s+\\S+)",
+                r"(?i)(?:eyJ[a-zA-Z0-9_=-]{12,}\.[a-zA-Z0-9_=-]{12,}(?:\.[a-zA-Z0-9_=-]{8,})?|Bearer\s+\S+)",
                 "[redacted-token]", safe_error_text,
             )
             safe_error_text = re.sub(
