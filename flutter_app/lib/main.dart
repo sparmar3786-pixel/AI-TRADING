@@ -1593,12 +1593,43 @@ class _ChainPageState extends State<ChainPage> {
 
 
 class OIPage extends StatelessWidget {
-  const OIPage({required this.signals,super.key}); final Map<String,dynamic> signals;
-  @override Widget build(BuildContext context)=>ListView(padding:const EdgeInsets.all(10),children:[
-    const Section('OI Lab — all indices'),
-    ...indexes.map((i){final s=Map<String,dynamic>.from(signals[i] as Map? ?? const {});final o=Map<String,dynamic>.from(s['oi_summary'] as Map? ?? const{});return Card(child:Padding(padding:const EdgeInsets.all(14),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-      Text(i,style:const TextStyle(fontSize:19,fontWeight:FontWeight.w900)),InfoRow('CALL OI',_val(o['call_oi'])),InfoRow('PUT OI',_val(o['put_oi'])),InfoRow('PCR',_val(o['pcr'])),InfoRow('Classification',o['classification']?.toString()??'—'),InfoRow('Selected OI regime',o['selected_oi_regime']?.toString()??'—'),
-    ])));}),
+  const OIPage({required this.signals, required this.market, super.key});
+  final Map<String, dynamic> signals;
+  final Map<String, dynamic> market;
+  double _n(dynamic value) => value is num ? value.toDouble() : double.tryParse(value?.toString() ?? '') ?? 0;
+  @override
+  Widget build(BuildContext context) => ListView(padding: const EdgeInsets.all(10), children: [
+    const Section('OI Lab — broker option-chain data'),
+    const Text('OI/PCR are calculated only from returned Angel One option quotes. Missing chains remain unavailable; no sample OI is generated.', style: TextStyle(fontSize: 11, color: Colors.white70)),
+    ...indexes.map((index) {
+      final signal = Map<String, dynamic>.from(signals[index] as Map? ?? const {});
+      final marketRow = Map<String, dynamic>.from(market[index] as Map? ?? const {});
+      final rows = ((marketRow['option_chain'] as List?) ?? const <dynamic>[])
+          .whereType<Map>().map((row) => Map<String, dynamic>.from(row)).toList();
+      final calls = rows.where((row) => (row['side'] ?? row['option_type'] ?? '').toString().toUpperCase().contains('C')).toList();
+      final puts = rows.where((row) => (row['side'] ?? row['option_type'] ?? '').toString().toUpperCase().contains('P')).toList();
+      final callOi = calls.fold<double>(0, (sum, row) => sum + _n(row['oi']));
+      final putOi = puts.fold<double>(0, (sum, row) => sum + _n(row['oi']));
+      final callWall = calls.isEmpty ? null : calls.reduce((a, b) => _n(a['oi']) >= _n(b['oi']) ? a : b);
+      final putWall = puts.isEmpty ? null : puts.reduce((a, b) => _n(a['oi']) >= _n(b['oi']) ? a : b);
+      final old = Map<String, dynamic>.from(signal['oi_summary'] as Map? ?? const {});
+      final hasChainOi = rows.any((row) => row['oi'] != null);
+      final effectiveCallOi = hasChainOi ? callOi : old['call_oi'];
+      final effectivePutOi = hasChainOi ? putOi : old['put_oi'];
+      final pcr = hasChainOi ? (callOi > 0 ? putOi / callOi : null) : old['pcr'];
+      final classification = pcr is num ? (pcr >= 1.1 ? 'PUT OI HEAVY' : pcr <= 0.8 ? 'CALL OI HEAVY' : 'BALANCED') : 'DATA REQUIRED';
+      return Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [Expanded(child: Text(index, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w900))), Text(rows.isEmpty ? 'NO CHAIN' : '${rows.length} QUOTES', style: const TextStyle(color: Colors.white60, fontSize: 11))]),
+        InfoRow('CALL OI', _val(effectiveCallOi)),
+        InfoRow('PUT OI', _val(effectivePutOi)),
+        InfoRow('PCR', _val(pcr)),
+        InfoRow('CALL OI wall', callWall == null ? '—' : '${callWall['strike'] ?? '—'}'),
+        InfoRow('PUT OI wall', putWall == null ? '—' : '${putWall['strike'] ?? '—'}'),
+        InfoRow('Classification', hasChainOi ? classification : (old['classification']?.toString() ?? 'WAIT — no broker OI')),
+        InfoRow('Selected OI regime', old['selected_oi_regime']?.toString() ?? 'Derived from available chain only'),
+        if (marketRow['signal_error'] != null) Text('Signal engine: ${marketRow['signal_error']}', style: const TextStyle(color: Colors.orangeAccent, fontSize: 11)),
+      ])));
+    }),
   ]);
 }
 
