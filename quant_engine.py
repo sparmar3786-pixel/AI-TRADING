@@ -22,15 +22,49 @@ def _number(value: Any) -> float | None:
 
 
 def _timestamp(value: Any) -> datetime | None:
-    if not isinstance(value, str) or not value.strip():
+    """Normalize ISO strings and epoch seconds/milliseconds into UTC."""
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, (int, float)) and isfinite(float(value)):
+        stamp = float(value)
+        # Epoch milliseconds are currently 13 digits; seconds are 10 digits.
+        if abs(stamp) >= 100_000_000_000:
+            stamp /= 1000.0
+        try:
+            return datetime.fromtimestamp(stamp, timezone.utc)
+        except (ValueError, OSError, OverflowError):
+            return None
+    elif isinstance(value, str) and value.strip():
+        text = value.strip()
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
+    else:
         return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed.astimezone(timezone.utc)
-    except (TypeError, ValueError):
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _snapshot_timestamp(snapshot: dict[str, Any]) -> datetime | None:
+    """Accept known timestamp aliases without treating receipt time as exchange time."""
+    for key in ("observed_at", "source_timestamp", "exchange_timestamp", "timestamp", "time", "t"):
+        if snapshot.get(key) is not None:
+            parsed = _timestamp(snapshot.get(key))
+            if parsed is not None:
+                return parsed
+    return None
+
+
+def _age_seconds(now_utc: datetime, observed: datetime | None, *, future_skew_seconds: float = 2.0) -> float | None:
+    if observed is None:
         return None
+    age = (now_utc - observed).total_seconds()
+    # Small device/exchange clock skew should not invalidate a fresh tick.
+    if -future_skew_seconds <= age < 0:
+        return 0.0
+    return age
 
 
 def _closes_direction(values: Any) -> str:
@@ -70,19 +104,28 @@ def evaluate_five_layer_signal(
     reasons: list[str] = []
 
     # Layer 1: data quality and freshness.
-    observed = _timestamp(snapshot.get("observed_at"))
-    age = (now_utc - observed).total_seconds() if observed else None
-    underlying = _number(snapshot.get("underlying_ltp"))
-    data_ok = (
-        observed is not None and age is not None and 0 <= age <= max_data_age_seconds
-        and underlying is not None and underlying > 0
-    )
+    observed = _snapshot_timestamp(snapshot)
+    age = _age_seconds(now_utc, observed)
+    underlying = _number(snapshot.get("underlying_ltp", snapshot.get("ltp", snapshot.get("price"))))
+    if observed is None:
+        data_reason_code, data_reason = "MISSING_OR_INVALID_TIMESTAMP", "No valid exchange/source timestamp (checked observed_at, source_timestamp, exchange_timestamp, timestamp, time, t)"
+    elif age is not None and age < 0:
+        data_reason_code, data_reason = "FUTURE_TIMESTAMP", "Market timestamp is more than 2 seconds ahead of server time"
+    elif age is not None and age > max_data_age_seconds:
+        data_reason_code, data_reason = "STALE_MARKET_DATA", f"Market snapshot is {age:.1f}s old; allowed maximum is {max_data_age_seconds:.1f}s"
+    elif underlying is None or underlying <= 0:
+        data_reason_code, data_reason = "INVALID_LTP", "Underlying LTP is missing, non-numeric, non-finite or not positive"
+    else:
+        data_reason_code, data_reason = "OK", "Timestamp and underlying LTP passed validation"
+    data_ok = data_reason_code == "OK"
     layers["data_quality"] = {
         "pass": data_ok, "age_seconds": round(age, 2) if age is not None else None,
         "max_age_seconds": max_data_age_seconds,
+        "source_timestamp": observed.isoformat() if observed else None,
+        "reason_code": data_reason_code, "reason": data_reason,
     }
     if not data_ok:
-        reasons.append("Market snapshot missing, invalid, future-dated or stale")
+        reasons.append(data_reason)
 
     # Layer 2: multi-timeframe trend + day/session sentiment alignment.
     raw_tfs = snapshot.get("timeframe_closes")
@@ -180,8 +223,8 @@ def evaluate_five_layer_signal(
         obid, oask, ltp = map(_number, (option.get("bid"), option.get("ask"), option.get("ltp")))
         volume, oi, delta = map(_number, (option.get("volume"), option.get("oi"), option.get("delta")))
         expiry = _timestamp(str(option.get("expiry", "")) + "T23:59:00+00:00") if option.get("expiry") else None
-        option_time = _timestamp(option.get("timestamp")) if option.get("timestamp") else observed
-        option_age = (now_utc - option_time).total_seconds() if option_time else None
+        option_time = _timestamp(option.get("timestamp", option.get("source_timestamp", option.get("exchange_timestamp")))) if any(option.get(key) is not None for key in ("timestamp", "source_timestamp", "exchange_timestamp")) else observed
+        option_age = _age_seconds(now_utc, option_time)
         valid = (
             strike is not None and strike > 0 and obid is not None and oask is not None
             and ltp is not None and 0 < obid <= ltp <= oask
@@ -305,13 +348,23 @@ def evaluate_futures_signal(
     reasons: list[str] = []
     layers: dict[str, dict[str, Any]] = {}
 
-    observed = _timestamp(snapshot.get("observed_at"))
-    age = (now_utc - observed).total_seconds() if observed else None
-    ltp = _number(snapshot.get("underlying_ltp"))
-    data_ok = observed is not None and age is not None and 0 <= age <= max_data_age_seconds and ltp is not None and ltp > 0
-    layers["data_quality"] = {"pass": data_ok, "age_seconds": round(age, 2) if age is not None else None, "max_age_seconds": max_data_age_seconds}
+    observed = _snapshot_timestamp(snapshot)
+    age = _age_seconds(now_utc, observed)
+    ltp = _number(snapshot.get("underlying_ltp", snapshot.get("ltp", snapshot.get("price"))))
+    if observed is None:
+        data_reason_code, data_reason = "MISSING_OR_INVALID_TIMESTAMP", "No valid exchange/source timestamp (checked observed_at, source_timestamp, exchange_timestamp, timestamp, time, t)"
+    elif age is not None and age < 0:
+        data_reason_code, data_reason = "FUTURE_TIMESTAMP", "Commodity timestamp is more than 2 seconds ahead of server time"
+    elif age is not None and age > max_data_age_seconds:
+        data_reason_code, data_reason = "STALE_MARKET_DATA", f"Commodity quote is {age:.1f}s old; allowed maximum is {max_data_age_seconds:.1f}s"
+    elif ltp is None or ltp <= 0:
+        data_reason_code, data_reason = "INVALID_LTP", "Commodity LTP is missing, non-numeric, non-finite or not positive"
+    else:
+        data_reason_code, data_reason = "OK", "Timestamp and commodity LTP passed validation"
+    data_ok = data_reason_code == "OK"
+    layers["data_quality"] = {"pass": data_ok, "age_seconds": round(age, 2) if age is not None else None, "max_age_seconds": max_data_age_seconds, "source_timestamp": observed.isoformat() if observed else None, "reason_code": data_reason_code, "reason": data_reason}
     if not data_ok:
-        reasons.append("Commodity quote is missing, invalid, future-dated or stale")
+        reasons.append(data_reason)
 
     raw_tfs = snapshot.get("timeframe_closes")
     raw_tfs = raw_tfs if isinstance(raw_tfs, dict) else {}
