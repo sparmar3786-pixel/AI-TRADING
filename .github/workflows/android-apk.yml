@@ -165,6 +165,10 @@ jobs:
             fi
             printf '%s\n' "$COMPILED_STRINGS" | grep -F 'nse-algo-backend-final-production.up.railway.app' >/dev/null
             printf '%s\n' "$COMPILED_STRINGS" | grep -F 'ai-trading-signals-api-production.up.railway.app' >/dev/null
+            if printf '%s\n' "$COMPILED_STRINGS" | grep -E 'OPENAI_API_KEY|OPEN_AI_API_KEY|OPENAI_MODEL|api[.]openai[.]com' >/dev/null; then
+              echo "Direct OpenAI provider configuration unexpectedly found in $APK"
+              exit 1
+            fi
             if printf '%s\n' "$COMPILED_STRINGS" | grep -E '/v1/live/execute-signal|PLACE_REAL_ANGEL_ORDER|PLACE REAL ANGEL ONE ORDER' >/dev/null; then
               echo "Order-placement capability unexpectedly found in APK"
               exit 1
