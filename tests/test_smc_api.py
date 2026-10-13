@@ -1,11 +1,18 @@
+import sys
 import unittest
+from contextlib import ExitStack
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
 
-SMC_ENDPOINT = next(route.endpoint for route in app.routes if getattr(route, "path", None) == "/v1/smc/analyze")
+def patched_killzone(killzone):
+    stack = ExitStack()
+    for name, module in list(sys.modules.items()):
+        if name.endswith("smc_api") and hasattr(module, "smc_analyze") and hasattr(module, "ict_killzone_status"):
+            stack.enter_context(patch.object(module, "ict_killzone_status", return_value=killzone))
+    return stack
 
 
 class SmcApiTests(unittest.TestCase):
@@ -19,7 +26,7 @@ class SmcApiTests(unittest.TestCase):
             "timezone": "America/New_York",
             "local_time": "2026-10-13T14:00:00-04:00",
         }
-        with patch.dict(SMC_ENDPOINT.__globals__, {"ict_killzone_status": lambda: killzone}):
+        with patched_killzone(killzone):
             response = self.client.post("/v1/smc/analyze", json={
                 "instrument": "NIFTY",
                 "strategy_format": "Guardeer",
