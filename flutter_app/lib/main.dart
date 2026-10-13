@@ -584,7 +584,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         const ApiRailwayPage(),
         MarketDiagnosticsPage(market: market, signals: signals, feed: feed, diagnostics: storeDiagnostics, lastFetch: lastFetch),
         TradingSetupPage(backendUrl: backendUrl, apiOnline: apiOnline, signalsOnline: signalsEndpointOnline, angelOnline: angelOnline, market: market, signals: signals, ai: ai, liveStatus: liveTrading, lastFetch: lastFetch),
-        ResearchEnginesPage(market: market, signals: signals, ai: ai, lastFetch: lastFetch, selectedIndex: selectedIndex, onIndexChanged: (value) => setState(() => selectedIndex = value)),
+        ResearchEnginesPage(market: market, signals: signals, ai: ai, commodities: commodities, optionChains: optionChainsByIndex, lastFetch: lastFetch, selectedIndex: selectedIndex, onIndexChanged: (value) => setState(() => selectedIndex = value)),
         TradeEnginePage(
           backendUrl: backendUrl,
           selectedIndex: selectedIndex,
@@ -1097,28 +1097,54 @@ class ResearchEnginesPage extends StatelessWidget {
     required this.market,
     required this.signals,
     required this.ai,
+    required this.commodities,
+    required this.optionChains,
     required this.lastFetch,
     required this.selectedIndex,
     required this.onIndexChanged,
     super.key,
   });
   final Map<String, dynamic> market, signals, ai;
+  final List<dynamic> commodities;
+  final Map<String, List<dynamic>> optionChains;
   final String? lastFetch;
   final String selectedIndex;
   final ValueChanged<String> onIndexChanged;
 
   @override
   Widget build(BuildContext context) {
-    final m = Map<String, dynamic>.from(market[selectedIndex] as Map? ?? const {});
-    final s = Map<String, dynamic>.from(signals[selectedIndex] as Map? ?? const {});
+    Map<String, dynamic>? commodity;
+    for (final raw in commodities) {
+      if (raw is! Map) continue;
+      final row = Map<String, dynamic>.from(raw);
+      final name = (row['name'] ?? row['symbol'] ?? '').toString().toUpperCase();
+      if (name == selectedIndex.toUpperCase() ||
+          (row['symbol'] ?? '').toString().toUpperCase() == selectedIndex.toUpperCase()) {
+        commodity = row;
+        break;
+      }
+    }
+    final m = commodity ?? Map<String, dynamic>.from(market[selectedIndex] as Map? ?? const {});
+    final s = commodity ?? Map<String, dynamic>.from(signals[selectedIndex] as Map? ?? const {});
     final indicators = Map<String, dynamic>.from(s['indicators'] as Map? ?? const {});
+    final chain = (m['option_chain'] as List?) ?? optionChains[selectedIndex] ?? const <dynamic>[];
+    final chainRows = chain.whereType<Map>().map((row) => Map<String, dynamic>.from(row)).toList();
+    final callOi = chainRows.where((row) => (row['side'] ?? '').toString().toUpperCase() == 'CE')
+        .fold<double>(0, (sum, row) => sum + (row['oi'] is num ? (row['oi'] as num).toDouble() : 0));
+    final putOi = chainRows.where((row) => (row['side'] ?? '').toString().toUpperCase() == 'PE')
+        .fold<double>(0, (sum, row) => sum + (row['oi'] is num ? (row['oi'] as num).toDouble() : 0));
     final oi = Map<String, dynamic>.from(s['oi_summary'] as Map? ?? const {});
+    if (oi.isEmpty && chainRows.isNotEmpty) {
+      oi['call_oi'] = callOi;
+      oi['put_oi'] = putOi;
+      oi['pcr'] = callOi > 0 ? putOi / callOi : null;
+      oi['classification'] = callOi <= 0 ? 'DATA REQUIRED' : putOi / callOi >= 1.1 ? 'PUT OI HEAVY' : putOi / callOi <= 0.8 ? 'CALL OI HEAVY' : 'BALANCED';
+    }
     final validation = Map<String, dynamic>.from(s['live_validation'] as Map? ?? const {});
     final tf = Map<String, dynamic>.from(s['timeframe_analysis'] as Map? ?? const {});
     final research = Map<String, dynamic>.from(tf['research_pack'] as Map? ?? const {});
     final checks = Map<String, dynamic>.from(research['checks'] as Map? ?? const {});
     final aiRow = Map<String, dynamic>.from(ai[selectedIndex] as Map? ?? const {});
-    final chain = (m['option_chain'] as List?) ?? const <dynamic>[];
     final fresh = m['live'] == true;
 
     return ListView(padding: const EdgeInsets.all(12), children: [
