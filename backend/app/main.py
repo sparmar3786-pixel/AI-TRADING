@@ -1580,7 +1580,7 @@ def option_chain(index: str = Query(default="NIFTY"), _: str = Depends(_device))
         futures = [
             row for row in rows
             if str(row.get("exch_seg", "")).upper() == "MCX"
-            and str(row.get("name", "")).upper().replace(" ", "") == index
+            and _commodity_contract_matches(row, index)
             and str(row.get("instrumenttype", "")).upper() == "FUTCOM"
             and _expiry_date(row.get("expiry")) is not None
             and _expiry_date(row.get("expiry")) >= datetime.now(IST).date()
@@ -1608,7 +1608,7 @@ def option_chain(index: str = Query(default="NIFTY"), _: str = Depends(_device))
     contracts = [
         row for row in rows
         if str(row.get("exch_seg", "")).upper() == segment
-        and str(row.get("name", "")).upper().replace(" ", "") == option_name
+        and (_commodity_contract_matches(row, option_name) if commodity else str(row.get("name", "")).upper().replace(" ", "") == option_name)
         and str(row.get("instrumenttype", "")).upper() == option_instrument
         and _option_type(row) is not None
         and _expiry_date(row.get("expiry")) is not None
