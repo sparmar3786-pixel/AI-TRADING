@@ -147,7 +147,9 @@ class AngelOneReadOnly:
                 ) from exc
 
             otp = totp_code if totp_code else pyotp.TOTP(totp_secret).now()
-            client = SmartConnect(api_key=api_key)
+            # The SDK default is a very short 7-second timeout; Railway market-data calls can exceed it.
+            # Keep a bounded timeout so transient broker latency does not immediately break every data tab.
+            client = SmartConnect(api_key=api_key, timeout=20)
             response = _ok(client.generateSession(client_code, pin, otp))
             data = response.get("data") or {}
             # SDK generateSession may return a profile object after it has
