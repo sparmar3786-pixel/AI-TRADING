@@ -47,7 +47,10 @@ main{flex:1;min-height:0;position:relative}canvas{width:100%;height:100%;display
 <script>
 const $=i=>document.getElementById(i),cv=$('c'),ctx=cv.getContext('2d');
 const FOOTPRINT_WS_URL = '__FOOTPRINT_WS_URL__';
-let sym='NIFTY',tf=1,step=5,raw=[],mode='',colW=100,off=0,ws,dirty=1,retry=0;\nconst COMMODITY_STEPS={CRUDEOIL:1,CRUDEOILM:1,NATURALGAS:0.5,NATGASMINI:0.5,GOLD:100,GOLDM:10,SILVER:100,SILVERM:10,COPPER:1,ZINC:0.5,ALUMINIUM:0.5,LEAD:0.5,NICKEL:1,MENTHAOIL:1,CASTORSEED:10,COTTON:10,RUBBER:1};\nconst isCommodity=s=>Object.prototype.hasOwnProperty.call(COMMODITY_STEPS,s);\nconst priceStep=s=>COMMODITY_STEPS[s]||(({SENSEX:20,BANKEX:20,BANKNIFTY:10})[s]||5);
+let sym='NIFTY',tf=1,step=5,raw=[],mode='',colW=100,off=0,ws,dirty=1,retry=0;
+const COMMODITY_STEPS={CRUDEOIL:1,CRUDEOILM:1,NATURALGAS:0.5,NATGASMINI:0.5,GOLD:100,GOLDM:10,SILVER:100,SILVERM:10,COPPER:1,ZINC:0.5,ALUMINIUM:0.5,LEAD:0.5,NICKEL:1,MENTHAOIL:1,CASTORSEED:10,COTTON:10,RUBBER:1};
+const isCommodity=s=>Object.prototype.hasOwnProperty.call(COMMODITY_STEPS,s);
+const priceStep=s=>COMMODITY_STEPS[s]||(({SENSEX:20,BANKEX:20,BANKNIFTY:10})[s]||5);
 const tz={timeZone:'Asia/Kolkata',hour12:false};
 const hm=t=>new Date(t*1000).toLocaleTimeString('en-GB',{...tz,hour:'2-digit',minute:'2-digit'});
 const dm=t=>new Date(t*1000).toLocaleDateString('en-GB',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short'});
@@ -56,7 +59,8 @@ const f=n=>{const a=Math.abs(n);return a>=1e7?(n/1e7).toFixed(2)+'Cr':a>=1e5?(n/
 function connect(){
  if(ws){ws.onclose=null;ws.close()}
  raw=[];off=0;
- const endpoint=FOOTPRINT_WS_URL==='__FOOTPRINT_WS_URL__' ? ((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws') : FOOTPRINT_WS_URL;\n ws=new WebSocket(endpoint+'?symbol='+encodeURIComponent(sym));
+ const endpoint=FOOTPRINT_WS_URL==='__FOOTPRINT_WS_URL__' ? ((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws') : FOOTPRINT_WS_URL;
+ ws=new WebSocket(endpoint+'?symbol='+encodeURIComponent(sym));
  ws.onopen=()=>{retry=0};
  ws.onmessage=e=>{const m=JSON.parse(e.data);mode=String(m.mode||'').toLowerCase();
   if(m.type==='snap'){raw=Array.isArray(m.candles)?m.candles:[];step=Number(m.step)||priceStep(sym)}
