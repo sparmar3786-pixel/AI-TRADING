@@ -966,7 +966,7 @@ def angel_connect(body: ConnectRequest, _: str = Depends(_device)) -> dict[str, 
         except Exception as exc:
             # Log the exception class only. Exception text and tracebacks can
             # contain broker payloads, request URLs, headers, or credential data.
-            logger.warning("Angel One connect failed; exception_type=%s", type(exc).__name__)
+            # Do not log raw SDK exceptions; they may contain broker payloads or secrets.
             # Classify transport failures without returning raw exception text.
             error_text = str(exc)
             exc_type = type(exc).__name__.lower()
@@ -986,6 +986,10 @@ def angel_connect(body: ConnectRequest, _: str = Depends(_device)) -> dict[str, 
                 r"\1=[redacted]", safe_error_text,
             )
             safe_error_text = re.sub(r"[^A-Za-z0-9 .,;:_()/-]", " ", safe_error_text)[:180].strip()
+            logger.warning(
+                "Angel One connect failed; exception_type=%s module=%s diagnostic=%s",
+                type(exc).__name__, type(exc).__module__, safe_error_text or "unavailable",
+            )
             transport_error = any(
                 name in exc_type or name in exc_module
                 for name in ("timeout", "connection", "ssl", "socket", "network", "httpx", "urllib3")
@@ -1019,7 +1023,7 @@ def angel_connect(body: ConnectRequest, _: str = Depends(_device)) -> dict[str, 
                 # Network errors and unexpected SDK exceptions stay generic; never
                 # return exception text that could contain request headers or secrets.
                 detail = {
-                    "message": "Angel One login failed before session verification.",
+                    "message": "Angel One login failed before session verification. Diagnostic: " + (safe_error_text or "No safe diagnostic text was available."),
                     "stage": "broker_request_or_profile_verification",
                     "error_type": type(exc).__name__[:64],
                     "error_module": type(exc).__module__[:100],
