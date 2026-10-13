@@ -151,6 +151,40 @@ Future<void> _pollQualifiedSetups(FlutterLocalNotificationsPlugin notifications)
     final stamp = row['source_timestamp'] ?? row['timestamp'] ?? decoded['generated_at'] ?? '';
     final key = '${entry.key}|$decision|$strike|$entryPrice|$stamp';
     if (seen.contains(key)) continue;
+
+    // Ask Gemini only for a new, deterministic PASS candidate, and throttle
+    // repeated review attempts for the same setup to avoid request storms.
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    Map<String, int> cooldowns = <String, int>{};
+    try {
+      final decodedCooldowns = jsonDecode(prefs.getString('ai_trading_review_cooldowns') ?? '{}');
+      if (decodedCooldowns is Map) {
+        cooldowns = decodedCooldowns.map((key, value) =>
+            MapEntry(key.toString(), int.tryParse(value.toString()) ?? 0));
+      }
+    } catch (_) {}
+    final lastReview = cooldowns[key] ?? 0;
+    if (nowMs - lastReview < 120000) continue;
+    cooldowns[key] = nowMs;
+    if (cooldowns.length > 50) {
+      final ordered = cooldowns.entries.toList()..sort((a, b) => a.value.compareTo(b.value));
+      for (final old in ordered.take(cooldowns.length - 50)) {
+        cooldowns.remove(old.key);
+      }
+    }
+    await prefs.setString('ai_trading_review_cooldowns', jsonEncode(cooldowns));
+    final reviewResponse = await http.post(
+      Uri.parse('$base/v1/ai/review-signal'),
+      headers: {'accept': 'application/json', 'content-type': 'application/json', 'X-Device-Id': deviceId},
+      body: jsonEncode({'index': entry.key}),
+    ).timeout(const Duration(seconds: 40));
+    if (reviewResponse.statusCode != 200) continue;
+    final reviewJson = jsonDecode(reviewResponse.body);
+    if (reviewJson is! Map ||
+        reviewJson['verdict'] != 'PASS' ||
+        reviewJson['decision'] != decision ||
+        reviewJson['ai_direction_consistent'] != true) continue;
+
     seen.add(key);
     changed = true;
     final id = key.hashCode & 0x7fffffff;
