@@ -117,7 +117,7 @@ class _AiChatPageState extends State<AiChatPage> {
       setState(() {
         _aiProvider = (response['provider'] ?? _aiProvider).toString();
         _aiModel = (response['model'] ?? _aiModel).toString();
-        _providerStatus = 'CONNECTED';
+        _providerStatus = response['llm_used'] == true ? 'CONNECTED' : 'FALLBACK';
         _messages.add({'role': 'assistant', 'content': displayAnswer});
       });
       _scrollToBottom();
@@ -164,7 +164,14 @@ class _AiChatPageState extends State<AiChatPage> {
           children: [
             const Icon(Icons.auto_awesome, color: Color(0xFF12D6FF)),
             const Text('AI MARKET CHAT', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
-            const Chip(avatar: Icon(Icons.cloud_done, size: 16, color: Color(0xFF32D583)), label: Text('CLOUD AI • AUTO FAILOVER')),
+            Chip(
+              avatar: Icon(
+                _providerStatus == 'CONNECTED' ? Icons.cloud_done : Icons.cloud_off,
+                size: 16,
+                color: _providerStatus == 'CONNECTED' ? const Color(0xFF32D583) : Colors.orangeAccent,
+              ),
+              label: Text(_providerStatus == 'CONNECTED' ? 'CLOUD AI • CONNECTED' : 'CLOUD AI • NOT VERIFIED'),
+            ),
             Text('Provider: $_aiProvider • Model: $_aiModel • $_providerStatus', style: const TextStyle(fontSize: 10, color: Colors.white60)),
           ],
         ),
