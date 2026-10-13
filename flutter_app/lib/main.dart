@@ -1180,11 +1180,13 @@ class ResearchEnginesPage extends StatelessWidget {
         if (commodity != null) ...[
           InfoRow('MCX CE quotes', chainRows.where((row) => (row['side'] ?? '').toString().toUpperCase() == 'CE').length.toString()),
           InfoRow('MCX PE quotes', chainRows.where((row) => (row['side'] ?? '').toString().toUpperCase() == 'PE').length.toString()),
-          InfoRow(
-            'Commodity options gate',
-            chainRows.isEmpty
-                ? 'WAIT — no broker option quotes'
-                : 'WAIT — Greeks/ATR required',
+          InfoRow('Commodity options gate', 'WAIT'),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+            child: Text(
+              'Commodity CE/PE entries remain blocked until option Greeks, option ATR and risk inputs are verified. No signal is fabricated.',
+              style: TextStyle(color: Colors.orangeAccent, fontSize: 11),
+            ),
           ),
         ],
         const Divider(height: 22),
