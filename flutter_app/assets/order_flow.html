@@ -132,10 +132,11 @@ function draw(){
    ctx.fillStyle=r[2];ctx.textAlign='right';ctx.fillText(r[1],x0+cw,ch+8+k*lh)});
   ctx.fillStyle='#1f2733';ctx.fillRect(x0+colW-2,top,1,H-top)});
  // current price
+ const hasDepth=vis.some(c=>Object.keys(c.lv||{}).length>0);
  const l=all[all.length-1],yp=y(l.c)+rh/2;
  if(l.c<=hB&&l.c>=lB){ctx.setLineDash([3,3]);ctx.strokeStyle='#f0b429';ctx.beginPath();ctx.moveTo(0,yp);ctx.lineTo(W-pw,yp);ctx.stroke();ctx.setLineDash([]);
   ctx.fillStyle='#f0b429';ctx.fillRect(W-pw,yp-8,pw,16);ctx.fillStyle='#000';ctx.textAlign='left';ctx.font='11px system-ui';ctx.fillText(l.c.toFixed(2),W-pw+3,yp)}
- $('info').innerHTML=`<span>LTP <b>${l.c.toFixed(2)}</b></span><span>Δ <b style="color:${l.d==null?'#7d8896':l.d>=0?'#26c281':'#ef4b5b'}">${l.d==null?'—':f(l.d)}</b></span><span>Vol <b>${f(l.v)}</b></span><span>Buy orders <b style="color:#26c281">${l.bo==null?'—':l.bo}</b></span><span>Sell orders <b style="color:#ef4b5b">${l.so==null?'—':l.so}</b></span><span>Cell = Sell × Buy</span><span style="color:#f0b429">▭ POC</span>`;
+ $('info').innerHTML=`<span>LTP <b>${l.c.toFixed(2)}</b></span><span>Δ <b style="color:${l.d==null?'#7d8896':l.d>=0?'#26c281':'#ef4b5b'}">${l.d==null?'—':f(l.d)}</b></span><span>Vol <b>${f(l.v)}</b></span><span>Buy orders <b style="color:#26c281">${l.bo==null?'—':l.bo}</b></span><span>Sell orders <b style="color:#ef4b5b">${l.so==null?'—':l.so}</b></span><span>Cell = Sell × Buy</span><span style="color:${hasDepth?'#26c281':'#f0b429'}">${hasDepth?'Depth: broker best-five':'Depth unavailable: no broker depth in selected bars'}</span><span style="color:#f0b429">▭ POC</span>`;
 }
 (function loop(){if(dirty){dirty=0;draw()}requestAnimationFrame(loop)})();
 new ResizeObserver(()=>dirty=1).observe(document.querySelector('main'));addEventListener('orientationchange',()=>setTimeout(()=>dirty=1,200));
