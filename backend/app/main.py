@@ -1231,6 +1231,18 @@ def diagnostics(_: str = Depends(_device)) -> dict[str, Any]:
         "market_data": {
             "snapshot_count": len((_signal_cache or {}).get("market", {})),
             "fresh_snapshot_count": fresh_count, "live_snapshot_count": fresh_count,
+            "index_status": {
+                key: {
+                    "ltp_available": row.get("ltp") is not None,
+                    "live": row.get("live") is True,
+                    "age_seconds": row.get("age_seconds"),
+                    "signal_error": row.get("signal_error") or row.get("error"),
+                    "option_chain_count": len(row.get("option_chain") or []),
+                    "candle_5m_count": len(((row.get("timeframes") or {}).get("5m") or [])),
+                }
+                for key, row in ((_signal_cache or {}).get("market") or {}).items()
+                if isinstance(row, dict)
+            },
         },
         "ai": {"configured": False, "model": "deterministic-five-layer", "error_indexes": []},
         "credentials_encryption_configured": bool(os.getenv("CREDENTIALS_ENCRYPTION_KEY")),
