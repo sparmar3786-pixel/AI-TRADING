@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'api.dart';
+import 'order_flow_page.dart';
 
 /// Cross-tab transport and validation monitor. Values are measured at runtime;
 /// missing metrics stay unavailable rather than being guessed.
@@ -185,6 +186,21 @@ class _FlowMonitorPageState extends State<FlowMonitorPage> {
               title: Text(entry.key, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
               subtitle: Text('Last ${fmt(entry.value['last_ms'], ' ms')} • avg ${fmt(entry.value['average_ms'], ' ms')} • status ${entry.value['last_status'] ?? '—'}\nRequest ${fmt(entry.value['last_request_bytes'], ' B')} → response ${fmt(entry.value['last_response_bytes'], ' B')} • ${fmt(entry.value['last_client_throughput_bytes_per_second'], ' B/s')} • errors ${entry.value['errors'] ?? 0}', style: const TextStyle(fontSize: 10)),
             )),
+          const SizedBox(height: 8),
+          const Text('ORDER FLOW WEBSOCKET TRANSPORT', style: TextStyle(fontWeight: FontWeight.w900)),
+          const SizedBox(height: 4),
+          Builder(builder: (context) {
+            final ws = OrderFlowTelemetry.latest;
+            if (ws.isEmpty) {
+              return const Card(child: Padding(padding: EdgeInsets.all(12), child: Text('Open the Order Flow tab to collect WebSocket payload speed and quote-age measurements.')));
+            }
+            return Card(child: Column(children: [
+              ListTile(leading: const Icon(Icons.swap_horiz, color: Color(0xFF12D6FF)), title: Text('Mode: ${ws['mode'] ?? 'wait'}'), subtitle: Text('Latest payload ${fmt(ws['payload_bytes'], ' B')} • ${fmt(ws['bytes_per_second'], ' B/s')} • ${fmt(ws['messages_per_second'], ' msg/s')}')),
+              ListTile(dense: true, title: const Text('Quote freshness', style: TextStyle(fontSize: 11)), subtitle: Text('Age ${fmt(ws['quote_age_ms'], ' ms')} • inter-message ${fmt(ws['inter_message_ms'], ' ms')}')),
+              ListTile(dense: true, title: const Text('Source timestamp', style: TextStyle(fontSize: 11)), subtitle: Text('${ws['source_timestamp'] ?? 'not available'}')),
+              ListTile(dense: true, title: const Text('Depth semantics', style: TextStyle(fontSize: 11)), subtitle: Text('${ws['level_semantics'] ?? 'No broker depth metadata received'}')),
+            ]));
+          }),
           const SizedBox(height: 8),
           const Text('PER-INDEX ENGINE VALIDATION TIMINGS', style: TextStyle(fontWeight: FontWeight.w900)),
           const SizedBox(height: 4),
