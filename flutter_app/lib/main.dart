@@ -1888,7 +1888,7 @@ class SignalPage extends StatelessWidget {
       Card(child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          InfoRow('AI mode', (agentAnalysis['mode'] ?? 'WAITING FOR OPENAI / OPENROUTER').toString()),
+          InfoRow('AI mode', (agentAnalysis['mode'] ?? (openaiProvider['ok'] == true ? 'OPENAI CONNECTED • SECONDARY REVIEW' : openrouterProvider['ok'] == true ? 'OPENROUTER CONNECTED • SECONDARY REVIEW' : 'WAITING FOR A REAL PROVIDER TEST')).toString()),
           InfoRow('OpenAI provider', (openaiProvider['status'] ?? 'STATUS NOT CHECKED').toString()),
           InfoRow('OpenAI model', (openaiProvider['model'] ?? '—').toString()),
           InfoRow('OpenRouter provider', (openrouterProvider['status'] ?? 'STATUS NOT CHECKED').toString()),
