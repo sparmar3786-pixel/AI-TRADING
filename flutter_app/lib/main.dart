@@ -639,7 +639,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         OIPage(signals:signals, market:market, commodities:commodities, optionChains:optionChainsByIndex),
         IndicatorsPage(selected:selectedIndex,signal:_signal(selectedIndex),fast:emaFast,slow:emaSlow,onChanged:(f,s){setState((){emaFast=f;emaSlow=s;});refresh();},onIndex:(v)=>setState(()=>selectedIndex=v)),
         SignalPage(backendUrl:backendUrl,liveStatus:liveTrading,index:selectedIndex,signals:signals,ai:ai,aiProviders:aiProviderStatus,tradePlans:tradePlans,market:market,onChanged:(v)=>setState(()=>selectedIndex=v)),
-        RiskPage(index:selectedIndex,signal:_signal(selectedIndex),plans:tradePlans,market:market,commodities:commodities,signalsByIndex:signals),
+        RiskPage(index:selectedIndex,signal:_signal(selectedIndex),plans:tradePlans,market:market,commodities:commodities),
         CommodityPage(items:commodities),
         BacktestingPage(backendUrl: backendUrl),
         ApiPage(backendUrl:backendUrl,signalBackendUrl:signalBackendUrl,feed:feed,storeDiagnostics:storeDiagnostics,market:market,onSaved:(url){setState(()=>backendUrl=url);refresh();}),
@@ -1959,13 +1959,12 @@ class SignalPage extends StatelessWidget {
 }
 
 class RiskPage extends StatelessWidget {
-  const RiskPage({required this.index, required this.signal, required this.plans, required this.market, required this.commodities, required this.signalsByIndex, super.key});
+  const RiskPage({required this.index, required this.signal, required this.plans, required this.market, required this.commodities, super.key});
   final String index;
   final Map<String, dynamic> signal;
   final List<dynamic> plans;
   final Map<String, dynamic> market;
   final List<dynamic> commodities;
-  final Map<String, dynamic> signalsByIndex;
 
   @override
   Widget build(BuildContext context) {
@@ -1979,7 +1978,6 @@ class RiskPage extends StatelessWidget {
           selectedIndex: index,
           marketByIndex: market,
           commodities: commodities,
-          signalsByIndex: signalsByIndex,
         ),
         InfoRow('Entry', _val(signal['entry'])),
         InfoRow('Stop Loss', _val(signal['stop_loss'])),
