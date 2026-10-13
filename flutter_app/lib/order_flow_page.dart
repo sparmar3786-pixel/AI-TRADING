@@ -107,8 +107,8 @@ class _OrderFlowPageState extends State<OrderFlowPage> {
       Padding(padding:const EdgeInsets.fromLTRB(8,5,8,5),child:Row(children:[
         Expanded(child:DropdownButtonHideUnderline(child:DropdownButton<String>(isExpanded:true,value:symbol,dropdownColor:const Color(0xFF121821),items:symbols.map((s)=>DropdownMenuItem(value:s,child:Text(s))).toList(),onChanged:(v){if(v!=null)setState((){symbol=v;candles=[];});connect();}))),
         DropdownButtonHideUnderline(child:DropdownButton<int>(value:timeframe,dropdownColor:const Color(0xFF121821),items:frames.entries.map((e)=>DropdownMenuItem(value:e.key,child:Text(e.value))).toList(),onChanged:(v){if(v!=null)setState(()=>timeframe=v);})),
-        IconButton(tooltip:'Zoom out',onPressed:()=>setState(()=>zoom=(zoom-1).clamp(-4,8)),icon:const Icon(Icons.remove)),
-        IconButton(tooltip:'Zoom in',onPressed:()=>setState(()=>zoom=(zoom+1).clamp(-4,8)),icon:const Icon(Icons.add)),
+        IconButton(tooltip:'Zoom out',onPressed:()=>setState(()=>zoom=(zoom-1).clamp(-4,8).toInt()),icon:const Icon(Icons.remove)),
+        IconButton(tooltip:'Zoom in',onPressed:()=>setState(()=>zoom=(zoom+1).clamp(-4,8).toInt()),icon:const Icon(Icons.add)),
         IconButton(tooltip:'Live / reconnect',onPressed:connect,icon:const Icon(Icons.refresh)),
         IconButton(tooltip:'Manual',onPressed:()=>showDialog<void>(context:context,builder:(c)=>AlertDialog(title:const Text('Order Flow / Footprint'),content:const SingleChildScrollView(child:Text('Cell = Sell × Buy. Green means bid/ask buy quantity is higher; red means sell quantity is higher. Yellow outline marks POC; bold cells require 3× imbalance. Delta = Buy − Sell. Live status requires a fresh broker timestamp. If the backend sends aggregate top-five depth only, price-level cells cannot be computed and are intentionally not fabricated.')),actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Close'))])),icon:const Icon(Icons.help_outline)),
         Container(padding:const EdgeInsets.symmetric(horizontal:7,vertical:4),decoration:BoxDecoration(color:live?const Color(0xFF12432E):const Color(0xFF333333),borderRadius:BorderRadius.circular(16)),child:Text(status,style:TextStyle(fontSize:9,fontWeight:FontWeight.bold,color:live?green:Colors.orangeAccent))),
@@ -161,7 +161,7 @@ class FootprintPainter extends CustomPainter {
         if(pair is! List||pair.length<2)continue;
         final sell=n(pair[0]),buy=n(pair[1]),total=sell+buy;if(total>pocVol){pocVol=total;poc=p;}
         final yy=y(p);if(yy<top-rh||yy>top+plot)continue;
-        canvas.drawRect(Rect.fromLTWH(x,yy,w,rh.clamp(1.0,100.0)),Paint()..color=(buy>=sell?green:red).withValues(alpha:(.12+.65*total/maxVol).clamp(.12,.77)));
+        canvas.drawRect(Rect.fromLTWH(x,yy,w,rh.clamp(1.0,100.0).toDouble()),Paint()..color=(buy>=sell?green:red).withValues(alpha:(.12+.65*total/maxVol).clamp(.12,.77).toDouble()));
         if(rh>=10&&cw>=76){
           final st=TextPainter(textDirection:TextDirection.ltr)..text=TextSpan(text:fmt(sell),style:TextStyle(color:red,fontSize:9,fontWeight:sell>=3*_neighbor(lv,p+step,1)?FontWeight.bold:FontWeight.normal));
           st.layout(maxWidth:w/2);st.paint(canvas,Offset(x+1,yy+1));
