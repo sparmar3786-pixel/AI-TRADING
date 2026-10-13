@@ -2715,6 +2715,7 @@ def review_signal_with_gemini(payload: dict[str, Any], _: str = Depends(_device)
         "index": index, "candidate_decision": expected,
         "market": {key: market.get(key) for key in ("ltp", "source", "source_timestamp", "timestamp", "age_seconds", "live")},
         "signal": {key: signal.get(key) for key in ("decision", "strike", "option_side", "entry", "stop_loss", "target", "data_fresh")},
+        "strategy_suite": signal.get("strategy_suite"),
         "live_validation": validation,
     }
     messages = [
@@ -3020,9 +3021,20 @@ def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
                         provider="openrouter",
                         endpoint=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1/chat/completions").strip(),
                     )
+                suite = dict(market.get("strategy_suite") or signal.get("strategy_suite") or {})
+                suite_trace = dict(suite.get("trace") or {})
+                suite_trace["ai_context_sent"] = bool(suite)
+                suite_trace["ai_semantic_use_verifiable"] = False
+                suite_trace["ai_provider"] = provider if suite else None
+                suite_trace["ai_model"] = result.get("model") if suite else None
+                suite_trace["ai_context_status"] = (
+                    "STRATEGY_OUTPUT_INCLUDED_IN_PROMPT_CONTEXT"
+                    if suite else "STRATEGY_OUTPUT_NOT_AVAILABLE"
+                )
                 return {
                     **result, "index": index, "question": question,
                     "market": market, "signal": signal, "validation": validation,
+                    "strategy_consumption_trace": suite_trace,
                     "search_attempted": bool(os.getenv("EXA_API_KEY", "").strip() or os.getenv("TAVILY_API_KEY", "").strip()),
                     "search_evidence": list(news.get("articles") or [])[:8],
                     "provider_failures": failures, "signal_only": True,
