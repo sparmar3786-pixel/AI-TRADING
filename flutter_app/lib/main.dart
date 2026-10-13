@@ -757,7 +757,7 @@ class DataHealthPage extends StatelessWidget {
           Card(child: ListTile(
             leading: const Icon(Icons.speed, color: Color(0xFF12D6FF)),
             title: Text(entry.key),
-            subtitle: Text('HTTP ${entry.value['status_code']} • ${entry.value['duration_ms']} ms • ${entry.value['response_bytes']} bytes • ${entry.value['bytes_per_second'] ?? 'n/a'} B/s\\nReceived: ${entry.value['received_at']}'),
+            subtitle: Text('HTTP ${entry.value['status_code']} • ${entry.value['duration_ms']} ms • ${entry.value['response_bytes']} bytes • ${entry.value['bytes_per_second'] ?? 'n/a'} B/s • Received: ${entry.value['received_at']}'),
           )),
       const Section('ENGINE VALIDATION TIME BY INDEX'),
       for (final index in indexes)
