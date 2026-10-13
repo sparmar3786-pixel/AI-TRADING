@@ -280,10 +280,12 @@ class FreshApi {
     for (final route in routes) {
       final uri = _uri(route);
       final headers = await _headers();
+      // Signal snapshots can be slower on a cold broker cache; avoid turning
+      // a valid but delayed response into a misleading API DATA ERROR.
       final response = await (_testClient == null
               ? http.get(uri, headers: headers)
               : _testClient.get(uri, headers: headers))
-          .timeout(const Duration(seconds: 30));
+          .timeout(const Duration(seconds: 80));
       if (response.statusCode == 404) {
         last404 = 'HTTP 404 from ${Uri.parse(signalBackendUrl).host}${route.split('?').first}';
         continue;
