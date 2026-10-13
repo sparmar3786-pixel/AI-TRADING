@@ -93,7 +93,7 @@ class _SmcChartPageState extends State<SmcChartPage> {
       const SizedBox(height:8),
       DropdownButtonFormField<String>(initialValue:widget.index,decoration:const InputDecoration(labelText:'Indian Index / MCX'),items:_smcUnderlyings.map((s)=>DropdownMenuItem(value:s,child:Text(_smcCommodities.contains(s)?'MCX • $s':s))).toList(),onChanged:(v){if(v!=null)widget.onIndexChanged(v);}),
       const SizedBox(height:8),
-      SegmentedButton<String>(segments:const [ButtonSegment(value:'5m',label:Text('5m')),ButtonSegment(value:'15m',label:Text('15m')),ButtonSegment(value:'1H',label:Text('1H')),ButtonSegment(value:'1D',label:Text('1D'))],selected:{tf},onSelectionChanged:(v)=>setState(()=>tf=v.first)),
+      Wrap(spacing:6,runSpacing:4,children:[for(final period in const ['1m','3m','5m','15m','30m','1H','2H','4H','1D','1W','1M']) ChoiceChip(label:Text(period),selected:tf==period,onSelected:(_)=>setState(()=>tf=period))]),
       const SizedBox(height:8),
       Card(child:Padding(padding:const EdgeInsets.all(10),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
         Row(children:[Expanded(child:Text(widget.index,style:const TextStyle(fontWeight:FontWeight.w800,fontSize:15))),Text(_last?.toStringAsFixed(2)??'—',style:const TextStyle(fontWeight:FontWeight.w900,fontSize:18))]),
