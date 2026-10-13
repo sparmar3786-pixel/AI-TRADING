@@ -1164,7 +1164,7 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
                 adapter = _current_adapter()
                 if not adapter or adapter.status().get("authenticated") is not True:
                     await websocket.send_json({
-                        "type": "snap", "symbol": symbol, "candles": candles, "step": 5,
+                        "type": "snap", "symbol": symbol, "candles": candles, "step": _footprint_chart_step(symbol),
                         "mode": "wait", "live": False, "source_timestamp": None,
                         "message": "Angel One is not authenticated. Connect the broker to receive footprint data.",
                         "level_semantics": "broker_best5_bid_ask_depth_not_trade_prints",
@@ -1177,7 +1177,7 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
                     future = _find_nearest_future(rows, symbol)
                 if future is None:
                     await websocket.send_json({
-                        "type": "snap", "symbol": symbol, "candles": candles, "step": 5,
+                        "type": "snap", "symbol": symbol, "candles": candles, "step": _footprint_chart_step(symbol),
                         "mode": "wait", "live": False, "source_timestamp": None,
                         "message": "No unexpired index-futures contract found in the Angel One instrument master.",
                         "level_semantics": "broker_best5_bid_ask_depth_not_trade_prints",
@@ -1256,7 +1256,7 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
                         _footprint_history[symbol] = [dict(item) for item in candles[-250:]]
                 mode = "live" if live else ("closed" if candles else "wait")
                 await websocket.send_json({
-                    "type": "snap", "symbol": symbol, "candles": candles, "step": 5,
+                    "type": "snap", "symbol": symbol, "candles": candles, "step": _footprint_chart_step(symbol),
                     "mode": mode, "live": live, "ltp": ltp if live else None,
                     "source_timestamp": source_timestamp, "tick_age_ms": int(age * 1000) if age is not None else None,
                     "future_symbol": future["symbol"], "future_expiry": future["expiry"],
