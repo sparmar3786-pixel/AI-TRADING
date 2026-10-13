@@ -139,18 +139,18 @@ class FootprintPainter extends CustomPainter {
   void paint(Canvas canvas,Size size){
     if(candles.isEmpty||size.width<=0||size.height<=0)return;
     final hasLevels=candles.any((c)=>c['lv'] is Map&&(c['lv'] as Map).isNotEmpty);
-    final cw=(100.0+zoom*8).clamp(64.0,180.0), count=(size.width/cw).floor().clamp(1,60);
+    final double cw=(100.0+zoom*8).clamp(64.0,180.0).toDouble(); final int count=(size.width/cw).floor().clamp(1,60).toInt();
     final vis=candles.length>count?candles.sublist(candles.length-count):candles;
     final lo=vis.map((c)=>n(c['l'])).reduce((a,b)=>a<b?a:b), hi=vis.map((c)=>n(c['h'])).reduce((a,b)=>a>b?a:b);
     final step=vis.map((c)=>n(c['step'])).firstWhere((v)=>v>0,orElse:()=>1.0);
     final low=(lo/step).floor()*step-step, high=(hi/step).ceil()*step+step;
-    const top=20.0,bottom=54.0;final plot=(size.height-top-bottom).clamp(1.0,size.height);
-    final rows=((high-low)/step).ceil().clamp(1,500), rh=plot/rows;
+    const top=20.0,bottom=54.0;final plot=(size.height-top-bottom).clamp(1.0,size.height).toDouble();
+    final int rows=((high-low)/step).ceil().clamp(1,500).toInt(); final double rh=plot/rows;
     final maxVol=vis.fold<double>(1,(m,c){final lv=c['lv'];if(lv is Map){for(final v in lv.values){if(v is List&&v.length>=2){final total=n(v[0])+n(v[1]);if(total>m)m=total;}}}return m;});
     final grid=Paint()..color=const Color(0xFF26313E)..strokeWidth=.5;
     for(var r=0;r<=rows;r++){final y=top+r*rh;canvas.drawLine(Offset(0,y),Offset(size.width-45,y),grid);}
     final axis=TextPainter(textDirection:TextDirection.ltr);
-    final skip=(rows/12).ceil().clamp(1,100);
+    final int skip=(rows/12).ceil().clamp(1,100).toInt();
     for(var r=0;r<=rows;r+=skip){final p=high-r*step;axis.text=TextSpan(text:p.toStringAsFixed(p.abs()<100?2:0),style:const TextStyle(color:Color(0xFF7D8896),fontSize:9));axis.layout();axis.paint(canvas,Offset(size.width-42,top+r*rh));}
     for(var i=0;i<vis.length;i++){
       final c=vis[i], x=i*cw+8, w=cw-12, lv=c['lv'];double y(double p)=>top+(high-p)/step*rh;
