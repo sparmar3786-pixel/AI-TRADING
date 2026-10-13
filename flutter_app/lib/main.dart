@@ -599,6 +599,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           diagnostics: systemDiagnostics,
           diagnosticsError: systemDiagnosticsError,
           market: market,
+          signals: signals,
           lastFetch: lastFetch,
           onRefresh: refresh,
         ),
@@ -681,6 +682,7 @@ class DataHealthPage extends StatelessWidget {
     required this.diagnostics,
     required this.diagnosticsError,
     required this.market,
+    required this.signals,
     required this.lastFetch,
     required this.onRefresh,
     super.key,
@@ -692,6 +694,7 @@ class DataHealthPage extends StatelessWidget {
   final Map<String, dynamic> diagnostics;
   final String? diagnosticsError;
   final Map<String, dynamic> market;
+  final Map<String, dynamic> signals;
   final String? lastFetch;
   final Future<void> Function() onRefresh;
 
@@ -746,6 +749,28 @@ class DataHealthPage extends StatelessWidget {
         if ((diagnostics['restore_errors'] as List?)?.isNotEmpty == true)
           ListTile(leading: const Icon(Icons.warning_amber), title: const Text('Settings restore warnings'), subtitle: Text((diagnostics['restore_errors'] as List).join(' • '))),
       ])),
+      const Section('API TRANSFER SPEED BY ENDPOINT'),
+      if (FreshApi.requestMetricsByPath.isEmpty)
+        const Card(child: ListTile(title: Text('Waiting for first completed API response'), subtitle: Text('Route latency and receive speed will appear here after a request completes.')))
+      else
+        for (final entry in FreshApi.requestMetricsByPath.entries)
+          Card(child: ListTile(
+            leading: const Icon(Icons.speed, color: Color(0xFF12D6FF)),
+            title: Text(entry.key),
+            subtitle: Text('HTTP ${entry.value['status_code']} • ${entry.value['duration_ms']} ms • ${entry.value['response_bytes']} bytes • ${entry.value['bytes_per_second'] ?? 'n/a'} B/s\\nReceived: ${entry.value['received_at']}'),
+          )),
+      const Section('ENGINE VALIDATION TIME BY INDEX'),
+      for (final index in indexes)
+        Builder(builder: (context) {
+          final signal = Map<String, dynamic>.from(signals[index] as Map? ?? const {});
+          final validation = Map<String, dynamic>.from(signal['live_validation'] as Map? ?? const {});
+          final elapsed = validation['validation_timing_ms'] ?? signal['validation_timing_ms'];
+          return Card(child: ListTile(
+            leading: const Icon(Icons.rule, color: Color(0xFF12D6FF)),
+            title: Text(index),
+            subtitle: Text('Deterministic engine validation: ${elapsed ?? 'n/a'} ms • Decision: ${signal['decision'] ?? 'WAIT'}'),
+          ));
+        }),
       const Section('Index feed status'),
       for (final index in indexes)
         Builder(builder: (context) {
