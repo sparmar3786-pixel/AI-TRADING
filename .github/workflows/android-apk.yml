@@ -116,7 +116,17 @@ jobs:
             "$AAPT" dump badging "$APK" | grep -F "application-label:'AI Trading Signals'" >/dev/null
           done
           ls -lh "$UNIVERSAL" "$ARM64"
-      - name: Publish rolling APK release (avoids Actions artifact quota)
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-trading-apk-${{ github.run_number }}
+          path: |
+            flutter_app/build/app/outputs/flutter-apk/app-release.apk
+            flutter_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish rolling APK release (and upload APK artifacts)
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         working-directory: .
         env:
