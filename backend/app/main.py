@@ -971,6 +971,21 @@ def angel_connect(body: ConnectRequest, _: str = Depends(_device)) -> dict[str, 
             error_text = str(exc)
             exc_type = type(exc).__name__.lower()
             exc_module = type(exc).__module__.lower()
+            # Keep useful SDK diagnostics while redacting submitted credentials,
+            # OTP seeds/codes, JWT-like values, and header-style secret fields.
+            safe_error_text = error_text
+            for secret in list(supplied.values()) + list(base.values()):
+                if isinstance(secret, str) and len(secret) >= 4:
+                    safe_error_text = safe_error_text.replace(secret, "[redacted]")
+            safe_error_text = re.sub(
+                r"(?i)(?:eyJ[a-zA-Z0-9_=-]{12,}\.[a-zA-Z0-9_=-]{12,}(?:\.[a-zA-Z0-9_=-]{8,})?|Bearer\\s+\\S+)",
+                "[redacted-token]", safe_error_text,
+            )
+            safe_error_text = re.sub(
+                r"(?i)(api[_ -]?key|authorization|password|pin|totp|refresh[_ -]?token|feed[_ -]?token|jwt[_ -]?token)\\s*[:=]\\s*[^,;\\s]+",
+                r"\\1=[redacted]", safe_error_text,
+            )
+            safe_error_text = re.sub(r"[^A-Za-z0-9 .,;:_()/-]", " ", safe_error_text)[:180].strip()
             transport_error = any(
                 name in exc_type or name in exc_module
                 for name in ("timeout", "connection", "ssl", "socket", "network", "httpx", "urllib3")
@@ -1006,7 +1021,10 @@ def angel_connect(body: ConnectRequest, _: str = Depends(_device)) -> dict[str, 
                 detail = {
                     "message": "Angel One login failed before session verification.",
                     "stage": "broker_request_or_profile_verification",
-                    "next_step": "Check Railway outbound connectivity and SmartAPI status, then retry with a fresh TOTP.",
+                    "error_type": type(exc).__name__[:64],
+                    "error_module": type(exc).__module__[:100],
+                    "diagnostic": safe_error_text or "No safe diagnostic text was available.",
+                    "next_step": "Use the diagnostic to distinguish a broker authentication rejection from an SDK/profile failure; do not share API keys, PINs, OTPs, or tokens.",
                 }
             raise HTTPException(status_code=502, detail=detail) from exc
         status = adapter.status()
