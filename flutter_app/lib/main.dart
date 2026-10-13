@@ -252,9 +252,8 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     Map<String, dynamic> latestSystemDiagnostics = const {};
     String? latestSystemDiagnosticsError;
     try {
-      // Both configured URLs should resolve to the same AI-TRADING service.
-      // Keep separate clients for general page requests and signal/feed routes,
-      // but never split the workspace across Fresh-Apk and AI-TRADING backends.
+      // Keep the existing AI/chat backend separate. Market, Angel One, account
+      // and paper-ledger routes are dispatched by FreshApi to AI-TRADING.
       final api = FreshApi(backendUrl);
       final signalApi = FreshApi(signalBackendUrl);
       await api.health();
@@ -555,7 +554,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         RiskPage(index:selectedIndex,signal:_signal(selectedIndex),plans:tradePlans),
         CommodityPage(items:commodities),
         BacktestingPage(backendUrl: backendUrl),
-        ApiPage(backendUrl:backendUrl,signalBackendUrl:signalBackendUrl,feed:feed,storeDiagnostics:storeDiagnostics,market:market,onSaved:(url){setState((){backendUrl=url;signalBackendUrl=url;});refresh();}),
+        ApiPage(backendUrl:backendUrl,signalBackendUrl:signalBackendUrl,feed:feed,storeDiagnostics:storeDiagnostics,market:market,onSaved:(url){setState(()=>backendUrl=url);refresh();}),
         AiAccessPage(backendUrl:backendUrl),
         DataHealthPage(
           backendUrl: backendUrl,
