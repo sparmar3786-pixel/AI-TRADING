@@ -80,7 +80,8 @@ class FreshApi {
   Uri _uri(String path) {
     final suffix = path.startsWith('/') ? path : '/' + path;
     final suffixUri = Uri.parse(suffix);
-    final useSignalBackend = _signalRoutes.contains(suffixUri.path) || suffixUri.path.startsWith('/v1/paper/trades/');
+    final useSignalBackend = suffixUri.path != '/v1/ai/chat' &&
+        (_signalRoutes.contains(suffixUri.path) || suffixUri.path.startsWith('/v1/paper/trades/'));
     final routeBase = useSignalBackend ? signalBackendUrl : baseUrl;
     var normalized = routeBase.trim();
     while (normalized.endsWith('/')) {
