@@ -1291,7 +1291,7 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
     timeframe = (websocket.query_params.get("tf") or "1").strip().lower()
     daily_mode = timeframe in {"1440", "10080", "1d", "1w", "d", "day", "week", "w"}
     history_mode = "ONE_DAY" if daily_mode else "ONE_MINUTE"
-    max_candles = 2000 if daily_mode else 250
+    max_candles = 2000 if daily_mode else 500
     supported_symbols = set(INDEXES) | {"CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM", "SILVER", "SILVERM", "COPPER", "ZINC", "ALUMINIUM", "LEAD", "NICKEL", "MENTHAOIL", "CASTORSEED", "COTTON", "RUBBER"}
     if symbol not in supported_symbols:
         await websocket.send_json({"type": "status", "mode": "wait", "message": "Unsupported index or commodity symbol"})
@@ -1302,11 +1302,19 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
             [dict(item) for item in _footprint_history.get(symbol, [])]
             if _footprint_history_interval.get(symbol) == history_mode else []
         )
+    if not daily_mode:
+        # Intraday views must show this whole session, not the last 250 minutes
+        # carried over from a prior day. Keep same-day cached candles on tab changes.
+        today = datetime.now(IST).date()
+        candles = [
+            item for item in candles
+            if datetime.fromtimestamp(int(item.get("t") or 0), IST).date() == today
+        ]
     last_trade_volume: float | None = None
     last_source_timestamp: str | None = None
     future: dict[str, str] | None = None
     rows: list[dict[str, Any]] = []
-    history_loaded = False
+    history_loaded = bool(candles)
     daily_history_sent = False
     try:
         while True:
