@@ -498,7 +498,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       body: TabBarView(children: [
         DashboardPage(index:selectedIndex, connected:status == 'LIVE market feed connected.', status:status, signals:signals, market:market, tradePlans:tradePlans, qualifiedCount:qualifiedCount, lastFetch:lastFetch, onSelected:(v)=>setState(()=>selectedIndex=v)),
         MarketPage(selected:selectedIndex,onChanged:(v)=>setState(()=>selectedIndex=v), signal:_signal(selectedIndex), market:_market(selectedIndex)),
-        ChainPage(selected:selectedIndex,onChanged:(v)=>setState(()=>selectedIndex=v), market:_market(selectedIndex)),
+        ChainPage(selected:selectedIndex,onChanged:(v)=>setState(()=>selectedIndex=v), market:_market(selectedIndex), error:optionChainError),
         OIPage(signals:signals, market:market),
         IndicatorsPage(selected:selectedIndex,signal:_signal(selectedIndex),fast:emaFast,slow:emaSlow,onChanged:(f,s){setState((){emaFast=f;emaSlow=s;});refresh();},onIndex:(v)=>setState(()=>selectedIndex=v)),
         SignalPage(backendUrl:backendUrl,liveStatus:liveTrading,index:selectedIndex,signals:signals,ai:ai,tradePlans:tradePlans,market:market,onChanged:(v)=>setState(()=>selectedIndex=v)),
@@ -1419,16 +1419,18 @@ class MarketPage extends StatelessWidget {
     InfoRow('ATR(14)',_val((signal['indicators'] as Map?)?['atr14'])),
     InfoRow('Decision',signal['decision']?.toString()??'NO DATA'),
     InfoRow('Last fetch',market['timestamp']?.toString()??'—'),
+    if (market['signal_error'] != null) InfoRow('Signal pipeline status', market['signal_error'].toString()),
     const Section('Timeframe Data • broker candles only'),
     ...['15m','5m','1m'].map((tf){final arr=((market['timeframes'] as Map?)?[tf] as List?)??const[];final last=arr.isEmpty?null:Map<String,dynamic>.from(arr.last as Map);return Card(child:ListTile(title:Text(tf+' • '+arr.length.toString()+' bars'),subtitle:Text('O '+_val(last?['open'])+' H '+_val(last?['high'])+' L '+_val(last?['low'])+' C '+_val(last?['close'])+' • '+_val(last?['count'])+' ticks')));}),
   ]);
 }
 
 class ChainPage extends StatefulWidget {
-  const ChainPage({required this.selected, required this.onChanged, required this.market, super.key});
+  const ChainPage({required this.selected, required this.onChanged, required this.market, required this.error, super.key});
   final String selected;
   final ValueChanged<String> onChanged;
   final Map<String, dynamic> market;
+  final String? error;
   @override
   State<ChainPage> createState() => _ChainPageState();
 }
@@ -1515,6 +1517,8 @@ class _ChainPageState extends State<ChainPage> {
           onChanged: (v) { if (v != null) setState(() => _sort = v); },
         )),
       ]),
+      if (rows.isEmpty && widget.error != null)
+        Card(child: Padding(padding: const EdgeInsets.all(12), child: Text('Option-chain request: ${widget.error}', style: const TextStyle(color: Colors.orangeAccent, fontSize: 12)))),
       if (rows.isEmpty)
         const StatusCard(text: 'No option-chain quotes are available yet. Connect Angel One, sync the instrument master, and wait for live or historical quotes.', good: false)
       else
