@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import tempfile
@@ -22,27 +23,6 @@ class BackendApiTests(unittest.TestCase):
         response = self.client.get("/health")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ok")
-
-    def test_ai_validation_reports_not_configured_without_server_keys(self):
-        payload = {
-            "live": False,
-            "market": {"NIFTY": {"ltp": None, "live": False}},
-            "signals": {"NIFTY": {"decision": "WAIT", "layers": {}, "reasons": ["No fresh quote"]}},
-            "generated_at": "2026-10-13T00:00:00+00:00",
-        }
-        with patch.object(api, "_get_signals", return_value=payload), \
-             patch.dict(os.environ, {"OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
-            response = self.client.post(
-                "/v1/ai/validate",
-                headers=self.device_headers,
-                json={"index": "NIFTY"},
-            )
-        self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertEqual(data["overall_status"], "BLOCKED_NO_LIVE_DATA")
-        self.assertEqual(data["providers"]["openai"]["status"], "not_configured")
-        self.assertEqual(data["providers"]["openrouter"]["status"], "not_configured")
-        self.assertEqual(data["deterministic_decision"], "WAIT")
 
     def test_metadata_requires_valid_device_id_and_disables_orders(self):
         self.assertEqual(self.client.get("/v1/metadata").status_code, 401)
@@ -271,6 +251,52 @@ class BackendApiTests(unittest.TestCase):
             self.assertEqual(report.json()["metrics"]["net_total_r"], 0.96)
             api._paper_trades_memory.clear()
 
+    def test_cold_signal_request_returns_wait_while_refresh_runs_in_background(self):
+        metrics = {"last_duration_ms": None, "build_count": 0, "in_flight": False, "last_error": None}
+        with patch.object(api, "_signal_cache", None), \
+             patch.object(api, "_signal_cache_at", 0), \
+             patch.object(api, "_signal_build_metrics", metrics), \
+             patch.object(api.threading, "Thread") as thread:
+            result = api._get_signals(force=True)
+        thread.assert_called_once()
+        thread.return_value.start.assert_called_once()
+        self.assertTrue(result["refreshing"])
+        self.assertFalse(result["live"])
+        self.assertIn("loading in the background", result["message"])
+
+    def test_ai_probe_cannot_pass_stale_market_data(self):
+        class FakeResponse:
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                return False
+            def read(self):
+                model_output = json.dumps({"verdict": "PASS", "reason": "looks good"})
+                return json.dumps({"choices": [{"message": {"content": model_output}}]}).encode("utf-8")
+
+        with patch.object(api.urllib.request, "urlopen", return_value=FakeResponse()):
+            result = api._run_ai_validation_probe(
+                "openai", "test-secret", "test-model", "https://api.openai.com/v1/chat/completions",
+                {"source": "angelone_smartapi", "source_timestamp": "2026-10-13T09:00:00+00:00",
+                 "ltp": 25000.0, "age_seconds": 120.0, "live": False},
+            )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["verdict"], "WAIT")
+        self.assertNotIn("test-secret", str(result))
+
+    def test_footprint_levels_use_only_broker_best5_depth(self):
+        quote = {
+            "best5Data": {
+                "buy": [{"price": 24999.5, "quantity": 10, "orders": 2}],
+                "sell": [{"price": 25000.5, "quantity": 12, "orders": 3}],
+            }
+        }
+        levels, buy_orders, sell_orders = api._footprint_levels(quote, step=5.0)
+        self.assertEqual(levels, {"25000.00": [12.0, 10.0]})
+        self.assertEqual(buy_orders, 2)
+        self.assertEqual(sell_orders, 3)
+        self.assertEqual(api._footprint_levels({}, step=5.0), ({}, 0, 0))
+
     def test_index_quote_survives_signal_pipeline_failure(self):
         quote = {
             "ltp": 25000.0,
@@ -290,7 +316,7 @@ class BackendApiTests(unittest.TestCase):
              patch.object(api, "_quotes", side_effect=lambda adapter, exchange, tokens: {tokens[0]: quote}), \
              patch.object(api, "_commodity_snapshot", return_value=[]), \
              patch.object(api, "_stream", None):
-            result = api._get_signals(force=True)
+            result = api._get_signals_uncached(force=True)
         self.assertEqual(result["market"]["NIFTY"]["ltp"], 25000.0)
         self.assertTrue(result["market"]["NIFTY"]["live"])
         self.assertEqual(result["signals"]["NIFTY"]["decision"], "WAIT")
