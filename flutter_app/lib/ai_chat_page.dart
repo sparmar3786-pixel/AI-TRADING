@@ -25,9 +25,16 @@ class _AiChatPageState extends State<AiChatPage> {
   String? _error;
   String _selectedIndex = 'NIFTY';
 
+  static const _symbols = [
+    'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX',
+    'CRUDEOIL', 'CRUDEOILM', 'NATURALGAS', 'NATGASMINI', 'GOLD', 'GOLDM',
+    'SILVER', 'SILVERM', 'COPPER', 'ZINC', 'ALUMINIUM', 'LEAD', 'NICKEL',
+  ];
+
   static const _suggestions = [
     'Validate current engine signal, entry, exit, stop-loss, target and strike against the supplied live data. Return PASS, WARN or REJECT and explain every missing field.',
     'NIFTY ka current market context samjhao',
+    'CRUDEOILM MCX live data, OI buildup, support resistance aur risk gates explain karo',
     'Current signal aur uske risk explain karo',
     'Aaj ke market data mein kya missing hai?',
   ];
@@ -173,6 +180,14 @@ class _AiChatPageState extends State<AiChatPage> {
           children: [
             const Icon(Icons.auto_awesome, color: Color(0xFF12D6FF)),
             const Text('AI MARKET CHAT', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
+            DropdownButton<String>(
+              value: _symbols.contains(_selectedIndex) ? _selectedIndex : 'NIFTY',
+              dropdownColor: const Color(0xFF101722),
+              items: _symbols.map((symbol) => DropdownMenuItem<String>(value: symbol, child: Text(symbol, style: const TextStyle(fontSize: 12)))).toList(),
+              onChanged: _busy ? null : (value) {
+                if (value != null) setState(() => _selectedIndex = value);
+              },
+            ),
             Chip(
               avatar: Icon(
                 _providerStatus == 'CONNECTED' ? Icons.cloud_done : Icons.cloud_off,
