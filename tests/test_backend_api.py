@@ -250,6 +250,19 @@ class BackendApiTests(unittest.TestCase):
             self.assertEqual(report.json()["metrics"]["net_total_r"], 0.96)
             api._paper_trades_memory.clear()
 
+    def test_footprint_levels_use_only_broker_best5_depth(self):
+        quote = {
+            "best5Data": {
+                "buy": [{"price": 24999.5, "quantity": 10, "orders": 2}],
+                "sell": [{"price": 25000.5, "quantity": 12, "orders": 3}],
+            }
+        }
+        levels, buy_orders, sell_orders = api._footprint_levels(quote, step=5.0)
+        self.assertEqual(levels, {"25000.00": [12.0, 10.0]})
+        self.assertEqual(buy_orders, 2)
+        self.assertEqual(sell_orders, 3)
+        self.assertEqual(api._footprint_levels({}, step=5.0), ({}, 0, 0))
+
     def test_index_quote_survives_signal_pipeline_failure(self):
         quote = {
             "ltp": 25000.0,
