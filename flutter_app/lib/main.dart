@@ -68,6 +68,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
   bool angelOnline = false;
   Map<String,dynamic> liveTrading = const {};
   Map<String,dynamic> ai = const {};
+  Map<String,dynamic> aiProviderStatus = const {};
   Map<String,dynamic> feed = const {};
   Map<String,dynamic> storeDiagnostics = const {};
   Map<String,dynamic> systemDiagnostics = const {};
@@ -271,6 +272,8 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       }
       Map<String,dynamic> liveStatus = const {};
       try { liveStatus = await signalApi.liveExecutionStatus(); } catch (_) {}
+      Map<String,dynamic> providerStatus = const {};
+      try { providerStatus = await signalApi.aiStatus(); } catch (providerError) { debugPrint('AI_PROVIDER_STATUS_FAILED: $providerError'); }
       Map<String,dynamic> s;
       try {
         await signalApi.health();
@@ -335,6 +338,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         systemDiagnosticsError = latestSystemDiagnosticsError;
         angelOnline = a['authenticated'] == true;
         liveTrading = liveStatus;
+        aiProviderStatus = providerStatus;
         ai = (s['ai'] as Map?)?.cast<String,dynamic>() ?? {};
         feed = (s['feed'] as Map?)?.cast<String,dynamic>() ?? {};
         storeDiagnostics = (s['store'] as Map?)?.cast<String,dynamic>() ?? {};
@@ -551,7 +555,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         bottom: TabBar(isScrollable: true, tabAlignment: TabAlignment.start, tabs: tabs.map((t)=>Tab(text:t)).toList()),
       ),
       body: TabBarView(children: [
-        DashboardPage(index:selectedIndex, connected:status == 'LIVE market feed connected.', status:status, signals:signals, market:market, tradePlans:tradePlans, qualifiedCount:qualifiedCount, lastFetch:lastFetch, onSelected:(v)=>setState(()=>selectedIndex=v)),
+        DashboardPage(index:selectedIndex, connected:status == 'LIVE market feed connected.', status:status, signals:signals, market:market, aiProviders:aiProviderStatus, tradePlans:tradePlans, qualifiedCount:qualifiedCount, lastFetch:lastFetch, onSelected:(v)=>setState(()=>selectedIndex=v)),
         MarketPage(selected:selectedIndex,onChanged:(v)=>setState(()=>selectedIndex=v), signal:_signal(selectedIndex), market:_market(selectedIndex)),
         ChainPage(selected:selectedIndex,onChanged:(v)=>setState(()=>selectedIndex=v), market:_market(selectedIndex), error:optionChainError),
         OIPage(signals:signals, market:market),
@@ -1295,14 +1299,14 @@ Future<void> _openExternal(BuildContext context, String url) async {
 }
 
 class DashboardPage extends StatelessWidget {
-  const DashboardPage({required this.index,required this.connected,required this.status,required this.signals,required this.market,required this.tradePlans,required this.qualifiedCount,required this.lastFetch,required this.onSelected,super.key});
+  const DashboardPage({required this.index,required this.connected,required this.status,required this.signals,required this.market,required this.aiProviders,required this.tradePlans,required this.qualifiedCount,required this.lastFetch,required this.onSelected,super.key});
   final String index; final bool connected; final String status;
-  final Map<String,dynamic> signals,market; final List<dynamic> tradePlans; final int qualifiedCount; final String? lastFetch; final ValueChanged<String> onSelected;
+  final Map<String,dynamic> signals,market,aiProviders; final List<dynamic> tradePlans; final int qualifiedCount; final String? lastFetch; final ValueChanged<String> onSelected;
   bool _has(dynamic v)=>v!=null&&v.toString().trim().isNotEmpty;
   double _n(dynamic v)=>v is num?v.toDouble():double.tryParse(v?.toString()??'')??0;
   @override Widget build(BuildContext context){
     final s=Map<String,dynamic>.from(signals[index] as Map? ?? const{}),m=Map<String,dynamic>.from(market[index] as Map? ?? const{});
-    final f=Map<String,dynamic>.from(s['order_flow'] as Map? ?? m['order_flow'] as Map? ?? const{}),i=Map<String,dynamic>.from(s['indicators'] as Map? ?? const{}),v=Map<String,dynamic>.from(s['live_validation'] as Map? ?? const{}),g=(s['guards'] as List? ?? const[]);
+    final f=Map<String,dynamic>.from(s['order_flow'] as Map? ?? m['order_flow'] as Map? ?? const{}),i=Map<String,dynamic>.from(s['indicators'] as Map? ?? const{}),v=Map<String,dynamic>.from(s['live_validation'] as Map? ?? const{}),g=(s['guards'] as List? ?? const[]);\n    final providers=Map<String,dynamic>.from(aiProviders['providers'] as Map? ?? const{});\n    final openai=Map<String,dynamic>.from(providers['openai'] as Map? ?? const{});\n    final openrouter=Map<String,dynamic>.from(providers['openrouter'] as Map? ?? const{});
     final d=(s['decision']??'WAIT').toString().toUpperCase(),fresh=s['data_fresh']==true&&connected,buy=_n(f['buy_volume']),sell=_n(f['sell_volume']),total=buy+sell;
     final layers=<List<dynamic>>[
       ['Market data integrity','Angel One quote + freshness',_has(m['ltp'])&&fresh],
@@ -1727,7 +1731,7 @@ class SignalPage extends StatelessWidget {
       Card(child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          InfoRow('AI mode', (agentAnalysis['mode'] ?? 'WAITING FOR OPENAI').toString()),
+          InfoRow('AI mode', (agentAnalysis['mode'] ?? 'WAITING FOR OPENAI / OPENROUTER').toString()),
           InfoRow('Evidence supplied', (agentAnalysis['source_evidence_count'] ?? aiDecision['evidence_count'] ?? 0).toString()),
           ...specialists.entries.map((entry) {
             final report = Map<String, dynamic>.from(entry.value as Map? ?? const {});
