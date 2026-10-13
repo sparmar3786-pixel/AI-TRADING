@@ -44,6 +44,39 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
         self.assertNotIn("ANGEL_API_KEY", response.text)
 
+    def test_angel_connect_returns_safe_smartapi_auth_error_code(self):
+        class FailingAdapter:
+            def __init__(self, credentials):
+                pass
+
+            def profile(self):
+                raise RuntimeError("Angel One SmartAPI error (AB1050): Invalid totp")
+
+        with patch.object(api, "_adapter", None), \
+             patch.object(api, "_load_credentials", return_value={}), \
+             patch.object(api, "_credentials_from_env", return_value={}), \
+             patch.object(api, "_forget_credentials"), \
+             patch.object(api, "AngelOneReadOnly", FailingAdapter):
+            response = self.client.post(
+                "/v1/angel/connect",
+                headers=self.device_headers,
+                json={
+                    "angel_api_key": "test-api-key",
+                    "angel_client_code": "test-client",
+                    "angel_pin": "test-pin",
+                    "angel_totp": "123456",
+                    "remember_credentials": False,
+                },
+            )
+        self.assertEqual(response.status_code, 502)
+        detail = response.json()["detail"]
+        self.assertEqual(detail["stage"], "smartapi_authentication")
+        self.assertEqual(detail["error_code"], "AB1050")
+        self.assertEqual(detail["broker_message"], "Invalid totp")
+        self.assertNotIn("test-api-key", response.text)
+        self.assertNotIn("test-pin", response.text)
+        self.assertNotIn("123456", response.text)
+
     def test_encryption_key_is_required_for_remembered_credentials(self):
         with patch.dict(os.environ, {"CREDENTIALS_ENCRYPTION_KEY": ""}, clear=False):
             with self.assertRaises(Exception):
