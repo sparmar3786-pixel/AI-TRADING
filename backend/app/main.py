@@ -3226,12 +3226,41 @@ def evaluate_strategies(body: dict[str, Any], _: str = Depends(_device)) -> dict
         "ai_consumption_status": "NOT_CONNECTED_TO_THIS_ENDPOINT",
         "research_engine_received": False,
         "trading_setup_received": False,
+        "downstream_status": "NOT_CONNECTED",
     }
+    # Per-strategy trace records the actual returned rule output. A catalogue
+    # entry alone is never treated as an execution, and scores are not fabricated.
+    strategy_outputs = result.get("strategies") if isinstance(result.get("strategies"), dict) else {}
+    strategy_trace = []
+    for strategy_name, strategy_signal in strategy_outputs.items():
+        signal_text = str(strategy_signal or "WAIT").upper()
+        strategy_trace.append({
+            "strategy_id": f"{execution_id}:{strategy_name}",
+            "strategy_name": strategy_name,
+            "strategy_version": "strategy-suite-v1",
+            "execution_id": execution_id,
+            "signal": signal_text,
+            "score": None,
+            "score_status": "NOT_COMPUTED_BY_RULE",
+            "input_candle_count": len(candles),
+            "input_sha256": input_hash,
+            "source": "submitted_completed_candles",
+            "status": "evaluated",
+            "rejection_reason": (
+                None if signal_text in ("LONG", "SHORT")
+                else "No directional LONG/SHORT event was returned for the final evaluated candle; WAIT is not a trade."
+            ),
+            "ai_consumed": False,
+            "research_engine_received": False,
+            "trading_setup_received": False,
+            "order_placement_enabled": False,
+        })
     return {
         **result,
         "source": "submitted_completed_candles",
         "execution_id": execution_id,
         "trace": trace,
+        "strategy_trace": strategy_trace,
         "order_placement_enabled": False,
     }
 
