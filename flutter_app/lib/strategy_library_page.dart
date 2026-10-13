@@ -71,7 +71,42 @@ class _StrategyLibraryPageState extends State<StrategyLibraryPage> {
             Text('Signal: ${signalRow['decision'] ?? 'WAIT'} • Layers passed: $passedLayers / ${layers.length}', style: const TextStyle(color: Colors.white70, fontSize: 12)),
             Text('Strategy consumption: ${suiteStrategies.length} outputs • LONG votes ${suiteVotes['LONG'] ?? 0} • SHORT votes ${suiteVotes['SHORT'] ?? 0} • status ${suite['status'] ?? 'NOT RETURNED'}',
               style: const TextStyle(color: Color(0xFF12D6FF), fontSize: 11, fontWeight: FontWeight.w700)),
-            const Text('This panel reads the shared backend signal snapshot. Empty strategy outputs mean the suite did not return results; catalogue entries alone do not prove execution.',
+            if (suiteStrategies.isEmpty)
+              const Padding(
+                padding: EdgeInsets.only(top: 6),
+                child: Text('EXECUTION TRACE UNAVAILABLE • backend returned no per-strategy outputs. Catalogue entries below are not execution evidence.',
+                  style: TextStyle(color: Colors.orangeAccent, fontSize: 11, fontWeight: FontWeight.w700)),
+              )
+            else ...suiteStrategies.entries.map((entry) {
+              final value = entry.value;
+              final details = value is Map ? Map<String, dynamic>.from(value) : <String, dynamic>{'signal': value};
+              final trace = details['trace'] is Map
+                  ? Map<String, dynamic>.from(details['trace'] as Map)
+                  : <String, dynamic>{};
+              final signal = details['signal'] ?? details['decision'] ?? details['direction'] ?? 'NOT RETURNED';
+              final score = details['score'] ?? details['confidence'] ?? details['alignment_score'] ?? '—';
+              final reason = details['reason'] ?? details['reason_code'] ?? details['rejection_reason'] ?? 'No reason supplied';
+              return Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(color: const Color(0xFF080E17), borderRadius: BorderRadius.circular(8)),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(entry.key, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
+                    Text('Signal: $signal • Score: $score', style: const TextStyle(fontSize: 11, color: Colors.white70)),
+                    Text('Reason: $reason', style: const TextStyle(fontSize: 10, color: Colors.white60)),
+                    Text('Execution ID: ${trace['execution_id'] ?? details['execution_id'] ?? 'not supplied'}',
+                      style: const TextStyle(fontSize: 10, color: Colors.white54)),
+                    Text('Version: ${trace['strategy_version'] ?? details['strategy_version'] ?? 'not supplied'} • Input candles: ${trace['input_candle_count'] ?? 'not supplied'}',
+                      style: const TextStyle(fontSize: 10, color: Colors.white54)),
+                    Text('AI consumed: ${trace['ai_consumed'] ?? 'not proven'} • Research propagated: ${trace['research_engine_received'] ?? 'not proven'}',
+                      style: const TextStyle(fontSize: 10, color: Colors.orangeAccent)),
+                  ]),
+                ),
+              );
+            }),
+            const Text('This panel reads the shared backend signal snapshot. Only fields actually returned by the backend are displayed; missing execution IDs, versions, AI-consumption and propagation evidence are explicitly marked unverified.',
               style: TextStyle(color: Colors.white60, fontSize: 10)),
             Text('Source: ${marketRow['source'] ?? 'not available'} • Quote age: ${marketRow['age_seconds'] ?? 'unknown'} sec', style: const TextStyle(color: Colors.white54, fontSize: 11)),
             if (marketRow['signal_error'] != null || marketRow['error'] != null)
