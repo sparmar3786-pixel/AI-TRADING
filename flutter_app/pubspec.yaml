@@ -24,3 +24,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/order_flow.html
+    - assets/order_flow_footprint.html
