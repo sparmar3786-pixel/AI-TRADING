@@ -115,18 +115,21 @@ class _AiChatPageState extends State<AiChatPage> {
       } else {
         displayAnswer += '\n\n**Live Search Evidence:** Search providers are not configured for this chat request.';
       }
+      final providerName = (response['provider'] ?? '').toString().toLowerCase();
+      final actualCloudResponse = response['llm_used'] == true ||
+          (response['ok'] == true && const {'gemini', 'openai', 'openrouter'}.contains(providerName));
       unawaited(DailyAiMemory.saveChatTurn(
         question: question,
         answer: displayAnswer,
         provider: (response['provider'] ?? 'unknown').toString(),
         model: (response['model'] ?? 'unknown').toString(),
-        llmUsed: response['llm_used'] == true,
+        llmUsed: actualCloudResponse,
       ));
       if (!mounted) return;
       setState(() {
         _aiProvider = (response['provider'] ?? _aiProvider).toString();
         _aiModel = (response['model'] ?? _aiModel).toString();
-        _providerStatus = response['llm_used'] == true ? 'CONNECTED' : 'FALLBACK';
+        _providerStatus = actualCloudResponse ? 'CONNECTED' : 'FALLBACK';
         _messages.add({'role': 'assistant', 'content': displayAnswer});
       });
       _scrollToBottom();
