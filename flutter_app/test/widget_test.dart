@@ -92,9 +92,19 @@ void main() {
     final tabBarContext = tester.element(find.byType(TabBar).first);
     DefaultTabController.of(tabBarContext).animateTo(tabs.indexOf('Research Engines'));
     await tester.pumpAndSettle();
-    expect(find.text('RESEARCH ENGINES • LIVE BACKEND OUTPUT'), findsOneWidget);
-    expect(find.text('TECHNICAL INDICATOR ENGINE'), findsOneWidget);
-    expect(find.text('OPTIONS / OPEN INTEREST ENGINE'), findsOneWidget);
+    final researchScrollable = find.descendant(
+      of: find.byType(ListView).last,
+      matching: find.byType(Scrollable),
+    ).first;
+    final researchHeader = find.text('RESEARCH ENGINES • LIVE BACKEND OUTPUT');
+    await tester.scrollUntilVisible(researchHeader, 200, scrollable: researchScrollable);
+    expect(researchHeader, findsOneWidget);
+    final technicalHeader = find.text('TECHNICAL INDICATOR ENGINE');
+    await tester.scrollUntilVisible(technicalHeader, 200, scrollable: researchScrollable);
+    expect(technicalHeader, findsOneWidget);
+    final optionsHeader = find.text('OPTIONS / OPEN INTEREST ENGINE');
+    await tester.scrollUntilVisible(optionsHeader, 200, scrollable: researchScrollable);
+    expect(optionsHeader, findsOneWidget);
     expect(find.textContaining('github.com'), findsNothing);
     expect(find.text('VALIDATION PERFORMANCE'), findsNothing);
   });
@@ -130,9 +140,19 @@ void main() {
       ),
     ));
 
-    expect(find.text('TECHNICAL INDICATOR ENGINE'), findsOneWidget);
-    expect(find.text('OPTIONS / OPEN INTEREST ENGINE'), findsOneWidget);
-    expect(find.text('MCX CE quotes'), findsOneWidget);
+    final researchScrollable = find.descendant(
+      of: find.byType(ListView).last,
+      matching: find.byType(Scrollable),
+    ).first;
+    final technicalHeader = find.text('TECHNICAL INDICATOR ENGINE');
+    await tester.scrollUntilVisible(technicalHeader, 200, scrollable: researchScrollable);
+    expect(technicalHeader, findsOneWidget);
+    final optionsHeader = find.text('OPTIONS / OPEN INTEREST ENGINE');
+    await tester.scrollUntilVisible(optionsHeader, 200, scrollable: researchScrollable);
+    expect(optionsHeader, findsOneWidget);
+    final ceQuotes = find.text('MCX CE quotes');
+    await tester.scrollUntilVisible(ceQuotes, 200, scrollable: researchScrollable);
+    expect(ceQuotes, findsOneWidget);
     expect(find.text('MCX PE quotes'), findsOneWidget);
     expect(find.text('WAIT'), findsWidgets);
     expect(find.textContaining('Commodity CE/PE entries remain blocked'), findsOneWidget);
