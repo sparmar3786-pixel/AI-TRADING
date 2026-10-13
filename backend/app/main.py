@@ -85,6 +85,8 @@ _master_rows: list[dict[str, Any]] = []
 _master_loaded_at = 0.0
 _signal_cache: dict[str, Any] | None = None
 _signal_cache_at = 0.0
+# Prevent concurrent cache misses from launching duplicate broker fan-out.
+_signal_build_lock = threading.Lock()
 _confirmation_states: dict[str, dict[str, Any]] = {}
 _last_market: dict[str, Any] = {}
 _option_history: dict[str, dict[str, float]] = {}
@@ -1406,6 +1408,18 @@ def market_sentiment(index: str = Query(default="NIFTY"), _: str = Depends(_devi
 
 
 def _get_signals(force: bool = False) -> dict[str, Any]:
+    """Single-flight cache refresh shared by HTTP and WebSocket callers."""
+    with _lock:
+        if _signal_cache is not None and not force and time.monotonic() - _signal_cache_at < SIGNAL_CACHE_SECONDS:
+            return _signal_cache
+    with _signal_build_lock:
+        with _lock:
+            if _signal_cache is not None and not force and time.monotonic() - _signal_cache_at < SIGNAL_CACHE_SECONDS:
+                return _signal_cache
+        return _get_signals_uncached(force=True)
+
+
+def _get_signals_uncached(force: bool = False) -> dict[str, Any]:
     global _signal_cache, _signal_cache_at, _last_market
     with _lock:
         if _signal_cache is not None and not force and time.monotonic() - _signal_cache_at < SIGNAL_CACHE_SECONDS:
