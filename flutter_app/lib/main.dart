@@ -1083,11 +1083,11 @@ class MarketDiagnosticsPage extends StatelessWidget {
             ],
           ));
         }),
-      const Text('ENGINE MODULES PRESENT IN THIS REPOSITORY', style: TextStyle(fontWeight: FontWeight.w900)),
+      const Text('ENGINE MODULES STATUS', style: TextStyle(fontWeight: FontWeight.w900)),
       const SizedBox(height: 6),
-      const Text('These are Fresh-Apk modules, not proof that every external repository has been imported: Angel One SmartAPI/WebSocket, normalized market store, trend/technical indicators, OI classification, strategy ensemble/conflict checks, signal-quality gates, historical backtesting, risk gates and AI/search evidence integration.', style: TextStyle(color: Colors.white70)),
+      const Text('Operational modules: Angel One SmartAPI/WebSocket, normalized market store, trend/technical indicators, OI classification, strategy ensemble/conflict checks, signal-quality gates, historical backtesting, risk gates and AI/search evidence integration. Status is based on runtime diagnostics, not file presence.', style: TextStyle(color: Colors.white70)),
       const SizedBox(height: 14),
-      const Text('Runtime modules and status are shown above. External repository URLs are intentionally hidden from operational tabs.', style: TextStyle(color: Colors.white70, fontSize: 12)),
+      const Text('Runtime module status is shown above. This page focuses on live diagnostics and working app functions.', style: TextStyle(color: Colors.white70, fontSize: 12)),
     ],
   );
 }
@@ -1124,7 +1124,7 @@ class ResearchEnginesPage extends StatelessWidget {
     return ListView(padding: const EdgeInsets.all(12), children: [
       const Text('RESEARCH ENGINES • LIVE BACKEND OUTPUT', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
       const SizedBox(height: 6),
-      const Text('This tab surfaces actual indicator, OI, confluence and validation outputs. Repository links are not displayed in operational pages.', style: TextStyle(color: Colors.white70, fontSize: 12)),
+      const Text('This tab surfaces actual indicator, OI, confluence and validation outputs from available market data.', style: TextStyle(color: Colors.white70, fontSize: 12)),
       const SizedBox(height: 10),
       IndexPicker(selected: selectedIndex, onChanged: onIndexChanged),
       Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
