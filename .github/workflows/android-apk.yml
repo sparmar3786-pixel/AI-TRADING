@@ -92,7 +92,7 @@ jobs:
             sed -i 's#<application#<uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n    <application#' "$MANIFEST"
           fi
           if ! grep -q 'id.flutter.flutter_background_service.BackgroundService' "$MANIFEST"; then
-            sed -i 's#</application>#<service android:name="id.flutter.flutter_background_service.BackgroundService" android:foregroundServiceType="dataSync" android:exported="false" />\n    </application>#' "$MANIFEST"
+            sed -i 's#</application>#<service android:name="id.flutter.flutter_background_service.BackgroundService" android:foregroundServiceType="dataSync" android:exported="true" />\n    </application>#' "$MANIFEST"
           fi
           sed -i 's/android:label="ai_trading_signal"/android:label="AI Trading Signals"/' "$MANIFEST"
           GRADLE=android/app/build.gradle.kts
