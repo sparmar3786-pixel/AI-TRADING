@@ -52,6 +52,11 @@ class FreshApi {
 
   static const Set<String> _signalRoutes = <String>{
     '/v1/system/diagnostics',
+    '/v1/ai/status',
+    '/v1/ai/chat',
+    '/v1/providers/ai/test',
+    '/v1/providers/search/status',
+    '/v1/providers/search/test',
     '/v1/metadata',
     '/v1/ai/validate',
     '/v1/angel/status',
