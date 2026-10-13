@@ -2218,7 +2218,7 @@ class _AiAccessState extends State<AiAccessPage>{
         '${providers['gemini']?['status'] ?? 'not tested'} • AI remains advisory; deterministic freshness and risk gates control trade eligibility.',
       ),
     )),
-    FilledButton.icon(onPressed: working ? null : test, icon: const Icon(Icons.psychology), label: Text(working ? 'TESTING OPENAI + OPENROUTER…' : 'TEST OPENAI + OPENROUTER')),
+    FilledButton.icon(onPressed: working ? null : test, icon: const Icon(Icons.psychology), label: Text(working ? 'TESTING GEMINI + OPENAI + OPENROUTER…' : 'TEST GEMINI + OPENAI + OPENROUTER')),
     const SizedBox(height: 10),
     Card(child: Padding(padding: const EdgeInsets.all(12), child: Text(message))),
     const Section('LLM PROVIDERS • OPENAI + OPENROUTER'),
