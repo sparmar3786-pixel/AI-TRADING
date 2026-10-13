@@ -25,6 +25,13 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: Verify Android CI SDK guards without building an APK
+        run: |
+          set -euo pipefail
+          grep -F 'uses: android-actions/setup-android@v3' .github/workflows/android-apk.yml
+          grep -F "packages: 'cmdline-tools;latest platform-tools'" .github/workflows/android-apk.yml
+          grep -F 'name: Enforce Android minSdk 26' .github/workflows/android-apk.yml
+          grep -F 'command -v sdkmanager' .github/workflows/android-apk.yml
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
