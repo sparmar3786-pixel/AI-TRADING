@@ -350,6 +350,42 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(result["verdict"], "WAIT")
         self.assertNotIn("test-secret", str(result))
 
+    def test_mcx_option_chain_returns_broker_ce_pe_quotes_without_fabricated_greeks(self):
+        expiry = (api.datetime.now(api.IST).date() + api.timedelta(days=7)).strftime("%d%b%Y").upper()
+        rows = [
+            {"exch_seg": "MCX", "name": "CRUDEOIL", "symbol": f"CRUDEOIL{expiry}FUT",
+             "instrumenttype": "FUTCOM", "token": "mcx-future", "expiry": expiry},
+            {"exch_seg": "MCX", "name": "CRUDEOIL", "symbol": f"CRUDEOIL{expiry}550000CE",
+             "instrumenttype": "OPTFUT", "token": "mcx-call", "expiry": expiry, "strike": "550000"},
+            {"exch_seg": "MCX", "name": "CRUDEOIL", "symbol": f"CRUDEOIL{expiry}550000PE",
+             "instrumenttype": "OPTFUT", "token": "mcx-put", "expiry": expiry, "strike": "550000"},
+        ]
+        stamp = api._utc_now().isoformat()
+        quotes = {
+            "mcx-future": {"ltp": 5500.0, "exchange_timestamp": stamp},
+            "mcx-call": {"ltp": 100.0, "exchange_timestamp": stamp,
+                         "best5Data": {"buy": [{"price": 99.5, "quantity": 20}],
+                                       "sell": [{"price": 100.5, "quantity": 25}]}},
+            "mcx-put": {"ltp": 110.0, "exchange_timestamp": stamp,
+                        "best5Data": {"buy": [{"price": 109.5, "quantity": 18}],
+                                      "sell": [{"price": 110.5, "quantity": 22}]}},
+        }
+        with patch.object(api, "_require_adapter", return_value=object()), \\
+             patch.object(api, "_load_master", return_value=rows), \\
+             patch.object(api, "_quotes", side_effect=lambda _adapter, _exchange, tokens: {
+                 token: quotes[token] for token in tokens if token in quotes
+             }):
+            response = self.client.get("/v1/option-chain?index=CRUDEOIL", headers=self.device_headers)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        data = response.json()
+        self.assertEqual(data["source"], "angelone_smartapi")
+        self.assertEqual(data["underlying_type"], "MCX_FUTURE")
+        sides = {row["side"] for row in data["option_chain"]}
+        self.assertEqual(sides, {"CE", "PE"})
+        self.assertTrue(all(row["timestamp"] == stamp for row in data["option_chain"]))
+        self.assertTrue(all(row["delta"] is None and row["iv"] is None for row in data["option_chain"]))
+
     def test_commodity_footprint_uses_mcx_future_and_symbol_specific_price_step(self):
         expiry = (api.datetime.now(api.IST).date() + api.timedelta(days=7)).strftime("%d%b%Y").upper()
         rows = [
