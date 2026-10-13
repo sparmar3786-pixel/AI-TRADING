@@ -185,6 +185,17 @@ def _device(x_device_id: str = Header(default="")) -> str:
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
+def _is_market_session_open(symbol: str, now: datetime | None = None) -> bool:
+    """Conservative weekday session clock; quote freshness remains an independent required gate."""
+    local = (now or datetime.now(IST)).astimezone(IST)
+    if local.weekday() >= 5:
+        return False
+    clock = local.time().replace(tzinfo=None)
+    key = symbol.strip().upper()
+    if key in COMMODITY_NAMES:
+        return dt_time(9, 0) <= clock <= dt_time(23, 30)
+    return dt_time(9, 15) <= clock <= dt_time(15, 30)
+
 
 def _iso(value: Any) -> str | None:
     if value is None:
@@ -1233,7 +1244,7 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
                 source_timestamp = _quote_timestamp(quote or {})
                 parsed = datetime.fromisoformat(source_timestamp) if source_timestamp else None
                 age = (_utc_now() - parsed).total_seconds() if parsed else None
-                live = ltp is not None and ltp > 0 and age is not None and 0 <= age <= 60
+                live = ltp is not None and ltp > 0 and age is not None and 0 <= age <= 60 and _is_market_session_open(symbol)
                 if live and parsed and source_timestamp:
                     epoch = int(parsed.timestamp())
                     minute = epoch - epoch % 60
