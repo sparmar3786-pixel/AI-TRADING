@@ -117,7 +117,7 @@ class _AiChatPageState extends State<AiChatPage> {
       }
       final providerName = (response['provider'] ?? '').toString().toLowerCase();
       final actualCloudResponse = response['llm_used'] == true ||
-          (response['ok'] == true && const {'gemini', 'openai', 'openrouter'}.contains(providerName));
+          (response['ok'] == true && const {'gemini', 'openrouter'}.contains(providerName));
       unawaited(DailyAiMemory.saveChatTurn(
         question: question,
         answer: displayAnswer,
