@@ -1776,7 +1776,26 @@ class OIPage extends StatelessWidget {
   Widget build(BuildContext context) => ListView(padding: const EdgeInsets.all(10), children: [
     const Section('OI Lab — broker option-chain data'),
     const Text('OI/PCR are calculated only from returned Angel One option quotes. Missing chains remain unavailable; no sample OI is generated.', style: TextStyle(fontSize: 11, color: Colors.white70)),
-    ...optionUnderlyings.map((index) {
+    const Section('MCX LIVE FUTURES • ANGEL ONE'),
+    ...commodities.whereType<Map>().map((raw) => Map<String, dynamic>.from(raw)).map((row) {
+      final name = (row['name'] ?? row['symbol'] ?? 'MCX').toString().toUpperCase();
+      final ltp = row['ltp'] ?? row['last_price'] ?? row['close'];
+      final age = row['age_seconds'] ?? row['tick_age_seconds'];
+      final live = row['live'] == true && age is num && age >= 0 && age <= 60;
+      return Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [Expanded(child: Text(name, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16))), Text(live ? 'LIVE' : 'NOT VERIFIED', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: live ? Colors.greenAccent : Colors.orangeAccent))]),
+        InfoRow('Contract', (row['symbol'] ?? name).toString()),
+        InfoRow('Futures LTP', _val(ltp)),
+        InfoRow('Source', (row['source'] ?? row['feed_mode'] ?? 'unknown').toString()),
+        InfoRow('Tick age (sec)', age?.toString() ?? 'unknown'),
+        InfoRow('Volume', _val(row['volume'])),
+        InfoRow('Open interest', _val(row['oi'])),
+        if (row['signal_error'] != null || row['error'] != null)
+          Text('Feed reason: ${row['signal_error'] ?? row['error']}', style: const TextStyle(color: Colors.orangeAccent, fontSize: 11)),
+        const Text('MCX futures data is shown separately. CE/PE option-chain OI is not inferred from futures quotes.', style: TextStyle(color: Colors.white60, fontSize: 10)),
+      ])));
+    }),
+    ...optionUnderlyings.where((index) => indexes.contains(index)).map((index) {
       final signal = Map<String, dynamic>.from(signals[index] as Map? ?? const {});
       final marketRow = Map<String, dynamic>.from(market[index] as Map? ?? const {});
       final cached = optionChains[index];
