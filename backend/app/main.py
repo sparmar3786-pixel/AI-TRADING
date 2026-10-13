@@ -854,6 +854,27 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
         confirmation_seconds=600,
         max_confirmation_gap_seconds=60,
     )
+    # Publish one normalized engine contract consumed by Dashboard, Signals,
+    # Risk, Trading Setup, the five-layer page and Quant Engine Lab.
+    engine_layers = dict(result.get("layers") or {})
+    passed_layers = sum(1 for layer in engine_layers.values() if isinstance(layer, dict) and layer.get("pass") is True)
+    result["five_layer_engine"] = {
+        "layers": engine_layers, "decision": result.get("decision", "WAIT"),
+        "passed_layers": passed_layers, "total_layers": len(engine_layers),
+        "score_semantics": "passed deterministic checks, not probability of profit",
+    }
+    result["quant_engine"] = result["five_layer_engine"]
+    result["quant_score"] = passed_layers
+    result["quant_score_semantics"] = "count of passed deterministic layers; not a win probability"
+    result["trend_sentiment"] = engine_layers.get("trend_sentiment", {})
+    result["option_validation"] = engine_layers.get("option_selection", {})
+    result["risk_validation"] = engine_layers.get("risk_levels", {})
+    result["regime"] = (engine_layers.get("trend_sentiment") or {}).get("trend", "UNKNOWN")
+    result["order_flow"] = {
+        **snapshot["order_flow"],
+        **(engine_layers.get("order_flow") or {}),
+        "semantics": "bid_ask_depth_not_classified_trade_volume",
+    }
     _confirmation_states[index] = result.get("confirmation_state") or {}
     chain_payload = _market_chain_rows(normalized_options)
     result.update({
