@@ -481,18 +481,35 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       if (optionChainError != null) return "API UP • MCX DATA ERROR";
       return "API UP • WAITING MCX DATA";
     }
-    if (!signalsEndpointOnline) return "API UP • DATA ERROR";
+    if (!signalsEndpointOnline) {
+      final error = (signalsFetchError ?? '').toLowerCase();
+      if (error.contains('socketexception') ||
+          error.contains('failed host lookup') ||
+          error.contains('connection refused') ||
+          error.contains('connection reset') ||
+          error.contains('handshakeexception') ||
+          error.contains('network is unreachable')) {
+        return "API DISCONNECTED";
+      }
+      if (error.contains('timeoutexception') || error.contains('timed out') || error.contains('timeout')) {
+        return "SIGNALS API TIMEOUT";
+      }
+      return "SIGNALS API ERROR";
+    }
     if (!_marketOpenNow) return "API UP • MARKET CLOSED";
+    if (signals['live'] == false) return "API UP • INVALID MARKET DATA";
     if (status == "LIVE market feed connected.") return "API LIVE";
     if (status.startsWith("Backend online")) return "API UP • WAITING DATA";
     if (status.startsWith("LIVE unavailable") || status.startsWith("Signal API responded")) return "API UP • REFRESHING DATA";
-    return "API UP • DATA ERROR";
+    return "API UP • INVALID MARKET DATA";
   }
 
   Color get _appBarStatusColor {
     if (_appBarStatus.startsWith("API LIVE")) return Colors.greenAccent;
-    if (_appBarStatus == "API OFFLINE") return Colors.redAccent;
+    if (_appBarStatus == "API OFFLINE" || _appBarStatus == "API DISCONNECTED" ||
+        _appBarStatus == "SIGNALS API ERROR") return Colors.redAccent;
     if (_appBarStatus.contains("CLOSED")) return const Color(0xFF94A3B8);
+    if (_appBarStatus.contains("INVALID MARKET DATA") || _appBarStatus.contains("TIMEOUT")) return Colors.orangeAccent;
     return Colors.orangeAccent;
   }
 
