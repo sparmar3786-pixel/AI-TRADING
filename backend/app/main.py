@@ -1819,14 +1819,138 @@ def portfolio(_: str = Depends(_device)) -> dict[str, Any]:
     }
 
 
+_paper_trades_memory: dict[str, dict[str, Any]] = {}
+
+
+def _paper_trade_path() -> Path:
+    return Path(os.getenv("PAPER_TRADES_FILE", "/data/paper_trades.json"))
+
+
+def _load_paper_trades() -> list[dict[str, Any]]:
+    with _lock:
+        path = _paper_trade_path()
+        try:
+            if path.is_file():
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(raw, list):
+                    _paper_trades_memory.clear()
+                    for item in raw:
+                        if isinstance(item, dict) and item.get("trade_id"):
+                            _paper_trades_memory[str(item["trade_id"])] = dict(item)
+        except (OSError, ValueError, TypeError):
+            # Keep the last in-memory state if a mounted volume is temporarily unavailable.
+            pass
+        return [dict(item) for item in _paper_trades_memory.values()]
+
+
+def _save_paper_trades(rows: list[dict[str, Any]]) -> bool:
+    with _lock:
+        _paper_trades_memory.clear()
+        _paper_trades_memory.update({str(item["trade_id"]): dict(item) for item in rows if item.get("trade_id")})
+        path = _paper_trade_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_suffix(path.suffix + ".tmp")
+            temporary.write_text(json.dumps(rows, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+            temporary.replace(path)
+            return True
+        except OSError:
+            # API remains honest about volatility; it never claims disk persistence.
+            return False
+
+
 @app.get("/v1/paper/trades")
 def paper_trades(_: str = Depends(_device)) -> dict[str, Any]:
-    return {"status": "not_configured", "trades": [], "message": "Paper-trade persistence is not configured on this deployment."}
+    rows = _load_paper_trades()
+    rows.sort(key=lambda item: str(item.get("opened_at") or ""), reverse=True)
+    return {
+        "status": "ok", "trades": rows, "trade_count": len(rows),
+        "persistence": "persistent" if _paper_trade_path().is_file() else "memory_or_empty",
+        "signal_only": True, "order_placement_enabled": False,
+    }
+
+
+@app.post("/v1/paper/trades/open")
+def open_paper_trade(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
+    trade_id = str(body.get("trade_id") or "").strip()
+    index = str(body.get("index") or "").strip().upper()
+    side = str(body.get("side") or "").strip().upper()
+    if not trade_id or len(trade_id) > 128:
+        raise HTTPException(status_code=422, detail="trade_id is required and must be at most 128 characters.")
+    if index not in INDEXES:
+        raise HTTPException(status_code=422, detail="Unsupported index.")
+    if side not in {"CALL", "PUT", "CALL BUY", "PUT BUY", "LONG", "SHORT"}:
+        raise HTTPException(status_code=422, detail="Unsupported paper-trade side.")
+    slippage_r = _number(body.get("slippage_r"))
+    transaction_cost_r = _number(body.get("transaction_cost_r"))
+    slippage_r = 0.02 if slippage_r is None else slippage_r
+    transaction_cost_r = 0.02 if transaction_cost_r is None else transaction_cost_r
+    if not 0 <= slippage_r <= 1 or not 0 <= transaction_cost_r <= 1:
+        raise HTTPException(status_code=422, detail="Paper slippage and transaction costs must be between 0 and 1 R.")
+    rows = _load_paper_trades()
+    if any(str(item.get("trade_id")) == trade_id for item in rows):
+        raise HTTPException(status_code=409, detail="A paper trade with this trade_id already exists.")
+    trade = {
+        "trade_id": trade_id, "strategy_id": str(body.get("strategy_id") or "manual-paper")[:128],
+        "index": index, "side": side, "regime": str(body.get("regime") or "UNVERIFIED")[:64],
+        "status": "OPEN", "slippage_r": slippage_r, "transaction_cost_r": transaction_cost_r,
+        "gross_r": None, "net_r": None, "notes": str(body.get("notes") or "")[:1000],
+        "opened_at": _utc_now().isoformat(), "closed_at": None, "paper_only": True,
+    }
+    rows.append(trade)
+    persisted = _save_paper_trades(rows)
+    return {
+        "status": "ok", "trade": trade, "persistence": "persistent" if persisted else "memory_only",
+        "message": "Paper trade recorded; no broker order was submitted.",
+    }
+
+
+@app.post("/v1/paper/trades/{trade_id}/close")
+def close_paper_trade(trade_id: str, body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
+    gross_r = _number(body.get("gross_r"))
+    if gross_r is None:
+        raise HTTPException(status_code=422, detail="gross_r must be a finite number.")
+    rows = _load_paper_trades()
+    trade = next((item for item in rows if str(item.get("trade_id")) == trade_id), None)
+    if trade is None:
+        raise HTTPException(status_code=404, detail="Paper trade not found.")
+    if trade.get("status") == "CLOSED":
+        raise HTTPException(status_code=409, detail="Paper trade is already closed.")
+    net_r = gross_r - float(trade.get("slippage_r") or 0) - float(trade.get("transaction_cost_r") or 0)
+    trade.update({
+        "status": "CLOSED", "gross_r": round(gross_r, 6), "net_r": round(net_r, 6),
+        "closed_at": _utc_now().isoformat(),
+        "notes": (str(trade.get("notes") or "") + (" | " if trade.get("notes") and body.get("notes") else "") + str(body.get("notes") or ""))[:1500],
+    })
+    persisted = _save_paper_trades(rows)
+    return {
+        "status": "ok", "trade": trade, "persistence": "persistent" if persisted else "memory_only",
+        "message": "Paper result recorded after deducting the configured R-costs; no broker order was submitted.",
+    }
 
 
 @app.get("/v1/paper/report")
 def paper_report(_: str = Depends(_device)) -> dict[str, Any]:
-    return {"status": "not_configured", "trade_count": 0, "metrics": {}, "message": "No persisted paper-trade dataset is configured; performance is not inferred."}
+    rows = _load_paper_trades()
+    closed = [item for item in rows if item.get("status") == "CLOSED" and _number(item.get("net_r")) is not None]
+    values = [float(item["net_r"]) for item in closed]
+    wins = [value for value in values if value > 0]
+    losses = [value for value in values if value < 0]
+    metrics = {
+        "trade_count": len(closed),
+        "win_rate": len(wins) / len(closed) if closed else None,
+        "expectancy_r": round(sum(values) / len(values), 6) if values else None,
+        "net_total_r": round(sum(values), 6),
+        "profit_factor": round(sum(wins) / abs(sum(losses)), 6) if losses else (None if not wins else None),
+        "open_trade_count": sum(1 for item in rows if item.get("status") == "OPEN"),
+        "total_slippage_r": round(sum(float(item.get("slippage_r") or 0) for item in closed), 6),
+        "total_transaction_cost_r": round(sum(float(item.get("transaction_cost_r") or 0) for item in closed), 6),
+    }
+    return {
+        "status": "ok", "trade_count": len(closed), "metrics": metrics,
+        "trades": closed, "mode": "PAPER_ONLY",
+        "message": "Metrics are computed only from recorded closed paper trades; they are not a forecast or live P&L.",
+    }
 
 
 @app.get("/v1/signals")
