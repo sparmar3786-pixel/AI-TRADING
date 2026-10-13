@@ -4,8 +4,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 class OrderFlowPage extends StatefulWidget {
-  const OrderFlowPage({required this.backendUrl, super.key});
+  const OrderFlowPage({required this.backendUrl, required this.signalBackendUrl, super.key});
   final String backendUrl;
+  final String signalBackendUrl;
   @override
   State<OrderFlowPage> createState() => _OrderFlowPageState();
 }
@@ -21,7 +22,7 @@ class _OrderFlowPageState extends State<OrderFlowPage> {
   double numv(dynamic v) => v is num ? v.toDouble() : double.tryParse('$v') ?? 0;
 
   Uri get uri {
-    final base = Uri.parse(widget.backendUrl);
+    final base = Uri.parse(widget.signalBackendUrl);
     return base.replace(scheme: base.scheme == 'https' ? 'wss' : 'ws', path: '/ws', queryParameters: {'symbol': symbol});
   }
 
