@@ -53,6 +53,16 @@ void main() {
     // diagnostics are not exposed as a user-facing section.
     expect(find.text('Feed diagnostics'), findsNothing);
     expect(find.text('Normalized store diagnostics'), findsNothing);
+    final healthScrollable = find.descendant(
+      of: find.byType(ListView).last,
+      matching: find.byType(Scrollable),
+    ).first;
+    final transferHeading = find.text('API TRANSFER SPEED BY ENDPOINT');
+    await tester.scrollUntilVisible(transferHeading, 250, scrollable: healthScrollable);
+    expect(transferHeading, findsOneWidget);
+    final engineTimingHeading = find.text('ENGINE VALIDATION TIME BY INDEX');
+    await tester.scrollUntilVisible(engineTimingHeading, 250, scrollable: healthScrollable);
+    expect(engineTimingHeading, findsOneWidget);
   });
 
   testWidgets('Quant Engine Lab exposes all five research capabilities', (tester) async {
