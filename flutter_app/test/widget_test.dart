@@ -274,7 +274,7 @@ void main() {
       250,
       scrollable: monitorScrollable,
     );
-    expect(find.text('OPENAI + OPENROUTER DATA VALIDATION'), findsOneWidget);
+    expect(find.text('GEMINI + OPENAI + OPENROUTER DATA VALIDATION'), findsOneWidget);
     expect(find.text('TEST GEMINI + OPENAI + OPENROUTER'), findsOneWidget);
 
     // Dispose Flow Monitor first so its periodic poll is cancelled, then let
