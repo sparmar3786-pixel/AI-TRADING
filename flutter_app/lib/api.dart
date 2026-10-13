@@ -13,6 +13,31 @@ class FreshApi {
 
   static const FlutterSecureStorage _secureStorage = FlutterSecureStorage();
 
+  /// Latest measured API transfer diagnostics for the in-app health/notification UI.
+  /// response_bytes is the UTF-8 body size; duration_ms measures request-to-body latency.
+  static Map<String, dynamic> lastRequestMetrics = <String, dynamic>{};
+
+  static void _recordRequestMetric({
+    required String method,
+    required Uri uri,
+    required Stopwatch stopwatch,
+    required http.Response response,
+  }) {
+    stopwatch.stop();
+    final responseBytes = utf8.encode(response.body).length;
+    final elapsedMs = stopwatch.elapsedMilliseconds;
+    lastRequestMetrics = <String, dynamic>{
+      'method': method,
+      'path': uri.path,
+      'status_code': response.statusCode,
+      'duration_ms': elapsedMs,
+      'response_bytes': responseBytes,
+      'bytes_per_second': elapsedMs > 0 ? (responseBytes * 1000 / elapsedMs).round() : null,
+      'received_at': DateTime.now().toUtc().toIso8601String(),
+    };
+  }
+
+
   final String baseUrl;
   final String signalBackendUrl;
   // Injectable only for tests; production requests keep using package:http's
@@ -104,10 +129,12 @@ class FreshApi {
   }) async {
     final uri = _uri(path);
     final headers = await _headers();
+    final stopwatch = Stopwatch()..start();
     final response = await (_testClient == null
             ? http.get(uri, headers: headers)
             : _testClient.get(uri, headers: headers))
         .timeout(timeout);
+    _recordRequestMetric(method: 'GET', uri: uri, stopwatch: stopwatch, response: response);
     return _decode(response);
   }
 
@@ -119,10 +146,12 @@ class FreshApi {
     final uri = _uri(path);
     final headers = await _headers();
     final encodedBody = jsonEncode(body);
+    final stopwatch = Stopwatch()..start();
     final response = await (_testClient == null
             ? http.post(uri, headers: headers, body: encodedBody)
             : _testClient.post(uri, headers: headers, body: encodedBody))
         .timeout(timeout);
+    _recordRequestMetric(method: 'POST', uri: uri, stopwatch: stopwatch, response: response);
     return _decode(response);
   }
 

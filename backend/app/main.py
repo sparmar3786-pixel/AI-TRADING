@@ -85,6 +85,9 @@ _master_rows: list[dict[str, Any]] = []
 _master_loaded_at = 0.0
 _signal_cache: dict[str, Any] | None = None
 _signal_cache_at = 0.0
+# Single-flight guard: concurrent dashboard refreshes and WebSocket clients must not
+# trigger duplicate slow Angel One REST collection for the same cache window.
+_signal_build_lock = threading.Lock()
 _confirmation_states: dict[str, dict[str, Any]] = {}
 _last_market: dict[str, Any] = {}
 _option_history: dict[str, dict[str, float]] = {}
@@ -847,6 +850,7 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
     }
     # A source timestamp that is missing or older than the freshness gate will
     # make the quant engine return WAIT; do not substitute the local clock.
+    validation_started = time.monotonic()
     result = evaluate_five_layer_signal(
         snapshot,
         confirmation_state=_confirmation_states.get(index),
@@ -854,6 +858,8 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
         confirmation_seconds=600,
         max_confirmation_gap_seconds=60,
     )
+    # Actual deterministic engine execution time, excluding broker/network collection.
+    result["validation_timing_ms"] = round((time.monotonic() - validation_started) * 1000, 2)
     # Publish one normalized engine contract consumed by Dashboard, Signals,
     # Risk, Trading Setup, the five-layer page and Quant Engine Lab.
     engine_layers = dict(result.get("layers") or {})
@@ -932,6 +938,7 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
         "market_age_seconds": result.get("layers", {}).get("data_quality", {}).get("age_seconds"),
         "option_age_seconds": next((item.get("age_seconds") for item in chain_payload if item.get("strike") == result.get("strike")), None),
         "ai_decision": "NOT_CONFIGURED",
+        "validation_timing_ms": result.get("validation_timing_ms"),
         "blocks": list(result.get("reasons") or []),
     }
     chart_5m: list[dict[str, Any]] = []
@@ -1405,7 +1412,85 @@ def market_sentiment(index: str = Query(default="NIFTY"), _: str = Depends(_devi
     }
 
 
+_signal_build_error: str | None = None
+
+
+def _refresh_signals_in_background() -> None:
+    """Refresh shared signal state off-request so a slow broker call cannot 499 every client."""
+    global _signal_build_error
+    try:
+        _build_signals(force=True)
+        _signal_build_error = None
+    except Exception as exc:
+        _signal_build_error = f"{type(exc).__name__}: {str(exc)[:180]}"
+        logger.warning("Background signal refresh failed: %s", _signal_build_error)
+    finally:
+        _signal_build_lock.release()
+
+
+def _stale_signal_snapshot(payload: dict[str, Any], cache_age_seconds: float) -> dict[str, Any]:
+    """Keep last-known values visible but fail closed while a refresh is running."""
+    stale = dict(payload)
+    stale["live"] = False
+    stale["refresh"] = {
+        "state": "refreshing",
+        "cache_age_seconds": round(cache_age_seconds, 2),
+        "message": "Previous snapshot shown as stale; no trade plan is actionable until refresh completes.",
+    }
+    feed = dict(stale.get("feed") or {})
+    feed["connected"] = False
+    feed["message"] = "Signal refresh in progress; last snapshot is marked stale."
+    stale["feed"] = feed
+    stale["trade_plans"] = []
+    stale["qualified_trade_count"] = 0
+    stale["order_placement_enabled"] = False
+    stale["market"] = {
+        key: {**dict(row or {}), "live": False, "error": "Stale snapshot; waiting for broker refresh."}
+        for key, row in (stale.get("market") or {}).items()
+    }
+    stale_signals: dict[str, Any] = {}
+    for key, row in (stale.get("signals") or {}).items():
+        signal = dict(row or {})
+        signal["decision"] = "WAIT"
+        reasons = list(signal.get("reasons") or [])
+        reasons.append("Snapshot is stale while live broker refresh is running.")
+        signal["reasons"] = reasons
+        signal["reason"] = reasons
+        signal["guards"] = reasons
+        stale_signals[key] = signal
+    stale["signals"] = stale_signals
+    return stale
+
+
 def _get_signals(force: bool = False) -> dict[str, Any]:
+    """Serve fresh cache immediately; refresh expired cache asynchronously and fail closed."""
+    global _signal_build_error
+    if force:
+        # Explicit forced calls and deterministic tests retain synchronous semantics.
+        with _signal_build_lock:
+            return _build_signals(force=True)
+
+    now = time.monotonic()
+    with _lock:
+        cached = _signal_cache
+        cache_age = now - _signal_cache_at if cached is not None else None
+        if cached is not None and cache_age is not None and cache_age < SIGNAL_CACHE_SECONDS:
+            return cached
+
+    if _signal_build_lock.acquire(blocking=False):
+        _signal_build_error = None
+        threading.Thread(target=_refresh_signals_in_background, name="signal-cache-refresh", daemon=True).start()
+
+    with _lock:
+        cached = _signal_cache
+        cache_age = time.monotonic() - _signal_cache_at if cached is not None else None
+    if cached is not None and cache_age is not None:
+        return _stale_signal_snapshot(cached, cache_age)
+    reason = _signal_build_error or "Signal refresh is running; waiting for first broker snapshot."
+    return _empty_payload(reason)
+
+
+def _build_signals(force: bool = False) -> dict[str, Any]:
     global _signal_cache, _signal_cache_at, _last_market
     with _lock:
         if _signal_cache is not None and not force and time.monotonic() - _signal_cache_at < SIGNAL_CACHE_SECONDS:

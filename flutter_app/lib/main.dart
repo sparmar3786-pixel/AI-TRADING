@@ -8,15 +8,12 @@ import 'api.dart';
 import 'config.dart';
 import 'trade_engine_page.dart';
 import 'broker_home_prototype_page.dart';
-import 'pdf_report_solutions_page.dart';
-import 'quant_research_hub_page.dart';
-import 'quant_repositories_page.dart';
 import 'ai_chat_page.dart';
 import 'quant_engine_lab_page.dart';
 import 'order_flow_page.dart';
 import 'strategy_library_page.dart';
 
-const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Repository Library','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','PDF Report & Repositories','Quant Research Hub','Quant & Trading Repositories','AI Chat','Order Flow','Quant Engine Lab','Strategy Library'];
+const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','AI Chat','Order Flow','Quant Engine Lab','Strategy Library'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
 
 void main() {
@@ -66,6 +63,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
   bool apiOnline = false;
   bool signalsEndpointOnline = false;
   String? signalsFetchError;
+  String? _lastNotifiedSignalError;
   bool angelOnline = false;
   Map<String,dynamic> liveTrading = const {};
   Map<String,dynamic> ai = const {};
@@ -282,7 +280,9 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           debugPrint('FRESH_SIGNALS_CACHE_WRITE_FAILED: $cacheError');
         }
       } catch (e) {
-        if (mounted) setState(() { signalsEndpointOnline = false; signalsFetchError = e.toString().replaceFirst('Exception: ', ''); });
+        final message = e.toString().replaceFirst('Exception: ', '');
+        if (mounted) setState(() { signalsEndpointOnline = false; signalsFetchError = message; });
+        _notifySignalFailure(message);
         s = _makeCachedSignalsNonActionable(await _loadCachedSignals());
       }
       // The signal endpoint deliberately fails closed when candles/Greeks are
@@ -390,13 +390,46 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     return minutes >= (9 * 60 + 15) && minutes <= (15 * 60 + 30);
   }
 
+  void _notifySignalFailure(String message) {
+    final normalized = message.trim().isEmpty ? 'Signal endpoint request failed.' : message.trim();
+    if (_lastNotifiedSignalError == normalized) return;
+    _lastNotifiedSignalError = normalized;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Signal API issue: $normalized'),
+          backgroundColor: Colors.deepOrange,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    });
+  }
+
+  String get _apiMetricTooltip {
+    final metrics = FreshApi.lastRequestMetrics;
+    if (metrics.isEmpty) return 'No completed API response measured yet.';
+    return 'Last API request: ${metrics['method']} ${metrics['path']}'
+        ' • HTTP ${metrics['status_code']}'
+        ' • ${metrics['duration_ms']} ms'
+        ' • ${metrics['response_bytes']} bytes received'
+        ' • ${metrics['bytes_per_second'] ?? 'n/a'} B/s'
+        ' • ${metrics['received_at']}';
+  }
+
   String get _appBarStatus {
     if (!apiOnline) return "API OFFLINE";
-    if (!signalsEndpointOnline) return "API UP • DATA ERROR";
+    if (!signalsEndpointOnline) {
+      final error = (signalsFetchError ?? '').toLowerCase();
+      if (error.contains('timeout') || error.contains('timed out')) {
+        return "API UP • SIGNAL TIMEOUT";
+      }
+      return "API UP • SIGNAL ERROR";
+    }
     if (!_marketOpenNow) return "API UP • MARKET CLOSED";
     if (status == "LIVE market feed connected.") return "API LIVE";
     if (status.startsWith("Backend online")) return "API UP • WAITING DATA";
-    return "API UP • DATA ERROR";
+    return "API UP • WAITING / STALE DATA";
   }
 
   Color get _appBarStatusColor {
@@ -540,7 +573,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         ]),
         actions: [Padding(padding: const EdgeInsets.only(right:12), child: Row(children: [
           Icon(Icons.circle, size:10, color: _appBarStatusColor), SizedBox(width:5),
-          Text(_appBarStatus, style: TextStyle(fontSize:11, color: _appBarStatusColor)),
+          Tooltip(message: _apiMetricTooltip, child: Text(_appBarStatus, style: TextStyle(fontSize:11, color: _appBarStatusColor))),
         ]))],
         bottom: TabBar(isScrollable: true, tabAlignment: TabAlignment.start, tabs: tabs.map((t)=>Tab(text:t)).toList()),
       ),
@@ -570,7 +603,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           onRefresh: refresh,
         ),
         const ApiRailwayPage(),
-        RepositoryLibraryPage(market: market, signals: signals, feed: feed, diagnostics: storeDiagnostics, lastFetch: lastFetch),
         TradingSetupPage(backendUrl: backendUrl, apiOnline: apiOnline, signalsOnline: signalsEndpointOnline, angelOnline: angelOnline, market: market, signals: signals, ai: ai, liveStatus: liveTrading, lastFetch: lastFetch),
         ResearchEnginesPage(market: market, signals: signals, ai: ai, lastFetch: lastFetch, selectedIndex: selectedIndex, onIndexChanged: (value) => setState(() => selectedIndex = value)),
         TradeEnginePage(
@@ -593,9 +625,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           status: status,
           onIndexSelected: (value) => setState(() => selectedIndex = value),
         ),
-        const PdfReportSolutionsPage(),
-        const QuantResearchHubPage(),
-        const QuantRepositoriesPage(),
         AiChatPage(backendUrl: backendUrl, selectedIndex: selectedIndex),
         OrderFlowPage(signalBackendUrl: signalBackendUrl),
         Builder(
@@ -791,17 +820,6 @@ class ApiRailwayPage extends StatelessWidget {
         const Divider(height: 1),
         const ListTile(leading: Icon(Icons.vpn_key_outlined), title: Text('Secret handling'), subtitle: Text('Store credentials as Railway variables or encrypted server-side settings. Never commit .env files, API keys, Angel password, PIN, or TOTP seed.')),
       ])),
-      for (final item in links)
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.open_in_new, color: Color(0xFF12D6FF)),
-            title: Text(item.$1),
-            subtitle: Text(item.$3),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => _openExternal(context, item.$2),
-          ),
-        ),
-      const Text('Links open in your browser. A repository/template link is a reference, not proof that your current Railway service is connected or deployed.', style: TextStyle(fontSize: 12, color: Colors.white70)),
     ],
   );
 }
@@ -1192,19 +1210,12 @@ class ResearchEnginesPage extends StatelessWidget {
         InfoRow('Strategy candidate', (s['decision'] ?? 'NO DATA').toString()),
         InfoRow('Validated decision', (validation['decision'] ?? 'WAIT').toString()),
         InfoRow('Validation verdict', (validation['verdict'] ?? 'NOT VALIDATED').toString()),
+        InfoRow('Engine validation time', validation['validation_timing_ms'] == null ? 'n/a' : '${validation['validation_timing_ms']} ms'),
+        InfoRow('AI provider status', (aiRow['status'] ?? ai['status'] ?? 'NOT CONFIGURED').toString()),
         InfoRow('AI action', (aiRow['action'] ?? 'AI NOT READY').toString()),
         InfoRow('Blocked reasons', ((validation['blocks'] as List?) ?? const []).map((x) => x.toString()).join(', ').isEmpty ? 'None reported' : ((validation['blocks'] as List?) ?? const []).map((x) => x.toString()).join(', ')),
       ]))),
-      const Section('RESEARCH SOURCES • NON-CHART REPOSITORIES'),
-      for (final source in sources)
-        Card(child: ListTile(
-          leading: const Icon(Icons.auto_awesome, color: Color(0xFF12D6FF)),
-          title: Text(source.$1, style: const TextStyle(fontWeight: FontWeight.w800)),
-          subtitle: Text(source.$3),
-          trailing: const Icon(Icons.open_in_new),
-          onTap: () => _openExternal(context, source.$2),
-        )),
-      const Text('Important: these external repositories are research sources, not proof of installed code. Fresh’s own deterministic modules are what generate the values above; no third-party result is marked live unless the backend actually returns it.', style: TextStyle(fontSize: 11, color: Colors.white70)),
+      const Text('Research results above come from the selected index snapshot and deterministic backend modules. External repository links are hidden from this operational view.', style: TextStyle(fontSize: 11, color: Colors.white70)),
     ]);
   }
 
@@ -1364,21 +1375,9 @@ class TradingSetupPage extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
                 child: Text(section.$2),
               ),
-              for (final link in section.$3)
-                ListTile(
-                  dense: true,
-                  leading: const Icon(Icons.open_in_new, size: 18),
-                  title: Text(link.$1),
-                  subtitle: Text(link.$3),
-                  onTap: () => _openExternal(context, link.$2),
-                ),
             ],
           ),
         ),
-      const Card(child: Padding(
-        padding: EdgeInsets.all(12),
-        child: Text('Important: GitHub links are references, not proof that third-party code is installed or compatible. Review licenses, security, API limits and Indian exchange/broker rules before integration. This app is for decision support. Review historical assumptions and validate the live feed before any live order; live endpoints remain gated and are not a promise of profit.', style: TextStyle(fontSize: 12, color: Colors.white70)),
-      )),
     ],
   );
 }
