@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'api.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 /// Groww-inspired information hierarchy for Fresh-Apk. This intentionally keeps
 /// Fresh's existing dark theme and navigation, and does not copy Groww branding.
@@ -289,18 +288,6 @@ class _TradeEnginePageState extends State<TradeEnginePage> {
           ),
         ),
         const SizedBox(height: 8),
-        const Text('REFERENCE REPOSITORIES', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
-        const SizedBox(height: 6),
-        _repoLink(context, 'Groww-style UI reference (ReactJS)', 'https://github.com/likhith1542/groww-clone', 'UI inspiration only; not copied into Flutter or used for market data.'),
-        _repoLink(context, 'Broker gateway and execution safeguards', 'https://github.com/marketcalls/openalgo', 'Review broker gateway, authentication and order safeguards; this is not a drop-in signal engine.'),
-        _repoLink(context, 'Trade engine / order lifecycle reference', 'https://github.com/JasonTeixeira/trade-engine', 'Event-driven order lifecycle and risk-state reference.'),
-        _repoLink(context, 'AI signal risk engine reference', 'https://github.com/keerthivasanrk/AI-Trading-Signal-Engine-FOREX-', 'Risk sizing and confidence-tier ideas; Forex-specific assumptions are not copied blindly.'),
-        _repoLink(context, 'Systematic trading risk reference', 'https://github.com/karimcodes/systematic-trading', 'ATR stop and portfolio risk ideas for independent validation.'),
-        _repoLink(context, 'Backtest validation reference', 'https://github.com/tripolskypetr/backtest-kit', 'TP/SL/timeout test ideas; Fresh uses its own candle replay and assumptions.'),
-        _repoLink(context, 'Automated trading system reference', 'https://github.com/Jaydot33/automated-trading-system', 'Modular risk/backtest/execution research; no live order code copied directly.'),
-        _repoLink(context, 'FastAPI trading dashboard reference', 'https://github.com/dngr2/fastapi-trading-dashboard', 'Backend/API and WebSocket dashboard pattern.'),
-        _repoLink(context, 'Railway FastAPI deployment reference', 'https://github.com/lNamelessl/fastapi-fullstack-railway', 'Deployment pattern only; not proof of current service deployment.'),
-        _repoLink(context, 'Official Angel One SmartAPI Python SDK', 'https://github.com/angel-one/smartapi-python', 'Authoritative broker SDK reference for backend feed and order APIs.'),
       ],
     );
   }
@@ -397,17 +384,4 @@ class _TradeEnginePageState extends State<TradeEnginePage> {
     child: Row(children: [Expanded(child: Text(label, style: const TextStyle(color: Colors.white70))), Flexible(child: Text(value, textAlign: TextAlign.end, style: const TextStyle(fontWeight: FontWeight.w800)))]),
   );
 
-  Widget _repoLink(BuildContext context, String title, String url, String detail) => Card(
-    child: ListTile(
-      leading: const Icon(Icons.open_in_new, color: _cyan),
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-      subtitle: Text(detail, style: const TextStyle(fontSize: 11)),
-      onTap: () async {
-        final opened = await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-        if (!opened && context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open repository link.')));
-        }
-      },
-    ),
-  );
 }
