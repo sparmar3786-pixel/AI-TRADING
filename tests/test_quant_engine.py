@@ -34,6 +34,36 @@ class FiveLayerEngineTests(unittest.TestCase):
         self.assertFalse(result["layers"]["data_quality"]["pass"])
         self.assertIsNone(result["entry"])
 
+    def test_epoch_seconds_and_milliseconds_are_normalized(self):
+        for key, stamp in (
+            ("observed_at", self.now.timestamp()),
+            ("timestamp", self.now.timestamp() * 1000),
+            ("source_timestamp", self.now.isoformat()),
+        ):
+            snapshot = dict(self.snapshot)
+            snapshot.pop("observed_at", None)
+            snapshot[key] = stamp
+            result = evaluate_five_layer_signal(snapshot, now=self.now)
+            self.assertTrue(result["layers"]["data_quality"]["pass"], result["layers"]["data_quality"])
+            self.assertEqual(result["layers"]["data_quality"]["reason_code"], "OK")
+
+    def test_data_quality_exposes_specific_reason_for_missing_timestamp(self):
+        snapshot = dict(self.snapshot)
+        snapshot.pop("observed_at")
+        result = evaluate_five_layer_signal(snapshot, now=self.now)
+        self.assertFalse(result["layers"]["data_quality"]["pass"])
+        self.assertEqual(result["layers"]["data_quality"]["reason_code"], "MISSING_OR_INVALID_TIMESTAMP")
+        self.assertIn("timestamp", result["layers"]["data_quality"]["reason"].lower())
+
+    def test_small_future_clock_skew_is_tolerated_but_large_skew_is_rejected(self):
+        snapshot = dict(self.snapshot, observed_at=(self.now + timedelta(seconds=1)).isoformat())
+        tolerated = evaluate_five_layer_signal(snapshot, now=self.now)
+        self.assertTrue(tolerated["layers"]["data_quality"]["pass"])
+        snapshot["observed_at"] = (self.now + timedelta(seconds=5)).isoformat()
+        rejected = evaluate_five_layer_signal(snapshot, now=self.now)
+        self.assertFalse(rejected["layers"]["data_quality"]["pass"])
+        self.assertEqual(rejected["layers"]["data_quality"]["reason_code"], "FUTURE_TIMESTAMP")
+
     def test_first_valid_candidate_waits_for_ten_minutes(self):
         result = evaluate_five_layer_signal(self.snapshot, now=self.now)
         self.assertEqual(result["decision"], "WAIT")
