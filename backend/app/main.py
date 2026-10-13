@@ -1154,6 +1154,10 @@ def _index_snapshot(
             "low": min(row["low"] for row in group), "close": group[-1]["close"],
             "volume": sum(value for value in volumes if value is not None) if any(value is not None for value in volumes) else None,
         })
+    # Run the full local research suite against the same completed 5m
+    # candles exposed to the app. It remains advisory and never overrides the
+    # deterministic five-layer risk gate or authorizes an order.
+    result["strategy_suite"] = evaluate_strategy_suite(chart_5m, oi_change=None)
     result["indicators"] = indicators
     result["oi_summary"] = {
         "call_oi": call_oi, "put_oi": put_oi, "pcr": pcr,
@@ -1181,6 +1185,7 @@ def _index_snapshot(
         "indicators": indicators,
         "timeframes": {"1m": [], "5m": chart_5m, "15m": chart_15m},
         "option_chain": chain_payload,
+        "strategy_suite": result["strategy_suite"],
     }
     return result, market
 
