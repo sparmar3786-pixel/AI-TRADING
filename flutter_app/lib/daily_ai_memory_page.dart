@@ -10,6 +10,7 @@ class DailyAiMemoryPage extends StatefulWidget {
 
 class _DailyAiMemoryPageState extends State<DailyAiMemoryPage> {
   Map<String, dynamic> _document = const {};
+  List<dynamic> _chatTurns = const [];
   bool _loading = true;
 
   @override
@@ -21,9 +22,11 @@ class _DailyAiMemoryPageState extends State<DailyAiMemoryPage> {
   Future<void> _load() async {
     setState(() => _loading = true);
     final data = await DailyAiMemory.readDay(DateTime.now());
+    final chats = await DailyAiMemory.readChatDay(DateTime.now());
     if (!mounted) return;
     setState(() {
       _document = data;
+      _chatTurns = chats;
       _loading = false;
     });
   }
@@ -60,7 +63,7 @@ class _DailyAiMemoryPageState extends State<DailyAiMemoryPage> {
             Card(child: ListTile(
               leading: const Icon(Icons.calendar_month),
               title: Text(_document['date']?.toString() ?? 'Today'),
-              subtitle: Text('${snapshots.length} saved snapshot(s) • one daily JSON file'),
+              subtitle: Text('${snapshots.length} saved market snapshot(s) • daily market JSON + separate AI chat journal'),
               trailing: _loading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.check_circle_outline),
             )),
             if (DailyAiMemory.lastWriteError != null)
@@ -68,6 +71,30 @@ class _DailyAiMemoryPageState extends State<DailyAiMemoryPage> {
                 leading: const Icon(Icons.error_outline, color: Colors.orangeAccent),
                 title: const Text('Memory write warning'),
                 subtitle: Text(DailyAiMemory.lastWriteError!),
+              )),
+            if (DailyAiMemory.lastChatPath != null)
+              Card(child: ListTile(
+                leading: const Icon(Icons.forum_outlined),
+                title: const Text('AI conversation journal'),
+                subtitle: Text(DailyAiMemory.lastChatPath!),
+              )),
+            const SizedBox(height: 12),
+            const Text('TODAY’S AI CONVERSATIONS', style: TextStyle(fontWeight: FontWeight.w800)),
+            Card(child: ListTile(
+              leading: const Icon(Icons.psychology_alt),
+              title: Text('${_chatTurns.length} saved AI turn(s)'),
+              subtitle: const Text('Each saved turn includes the provider/model and whether a real cloud LLM response was used.'),
+            )),
+            for (final turn in _chatTurns.reversed.take(10))
+              Card(child: ExpansionTile(
+                title: Text('${_map(turn)['provider'] ?? 'unknown'} • ${_map(turn)['model'] ?? 'unknown'}'),
+                subtitle: Text((_map(turn)['question'] ?? '').toString()),
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: SelectableText('LLM used: ${_map(turn)['llm_used'] == true}\n${_map(turn)['answer'] ?? ''}'),
+                  ),
+                ],
               )),
             const SizedBox(height: 8),
             const Text('LATEST OBSERVED MARKET ANALYSIS', style: TextStyle(fontWeight: FontWeight.w800)),
