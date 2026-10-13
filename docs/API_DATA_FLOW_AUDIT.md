@@ -9,8 +9,8 @@
 ## Confirmed code-path issues
 1. flutter_app/lib/main.dart: refresh() sets signalsEndpointOnline=false on signal request errors; _appBarStatus then renders API UP • DATA ERROR.
 2. flutter_app/lib/api.dart: normal GET timeout defaults to 30 seconds.
-3. backend/app/main.py: _get_signals() checks the shared cache under _lock but releases the lock before building. Concurrent cache misses can run expensive six-index broker collection simultaneously. WebSocket /ws calls _get_signals(False) every five seconds.
-4. _index_snapshot() performs spot quote, historical candles, option quote batch, Greeks and selected-option ATR work per index; six indices plus commodity snapshots create a heavy sequential refresh.
+3. backend/app/main.py: _get_signals() uses a single background refresh guarded by _signal_build_metrics['in_flight'] and serves explicitly stale cached snapshots while refreshing. This should reduce duplicate broker fan-out; verify under concurrent app + WebSocket load because earlier logs showed HTTP 499s.
+4. _index_snapshot() performs spot quote, historical candles, option quote batch, Greeks and selected-option ATR work per index; six indices plus commodity snapshots can still make refreshes slow. The SMC chart now includes real daily candles and hourly aggregates of real 5-minute candles in both normal and signal-fallback paths; live latency and broker history availability still require verification.
 5. /ws sends sampled OHLC snapshots and aggregate top-five bid/ask depth only. It does not send the lv price-level map or step required by the uploaded HTML footprint chart.
 6. Prior flutter_app/lib/order_flow_page.dart rendered simple OHLC candles and had no timeframe dropdown, POC/imbalance cells or HTML chart controls.
 7. Backend AI diagnostics state that configured OpenAI/OpenRouter credentials do not mean a provider test succeeded; authenticated inference must be implemented and verified before ok=true.
