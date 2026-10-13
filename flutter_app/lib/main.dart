@@ -2123,7 +2123,12 @@ class _AiAccessState extends State<AiAccessPage>{
       final updated = <String, Map<String, dynamic>>{...providers};
       for (final item in checks.whereType<Map>()) {
         final name = (item['provider'] ?? '').toString();
-        if (name == 'gemini' || name == 'openai' || name == 'openrouter') updated[name] = Map<String, dynamic>.from(item);
+        if (name == 'gemini' || name == 'openai' || name == 'openrouter') {
+          final check = Map<String, dynamic>.from(item);
+          check['configured'] = true;
+          check['status'] = check['ok'] == true ? 'ok' : (check['error'] ?? 'test_failed').toString();
+          updated[name] = check;
+        }
       }
       final details = checks.whereType<Map>().map((item) {
         final name = (item['provider'] ?? 'provider').toString().toUpperCase();
