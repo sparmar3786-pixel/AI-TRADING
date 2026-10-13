@@ -92,15 +92,22 @@ class _SmcChartPageState extends State<SmcChartPage> {
   double? get _last => bars.isEmpty ? null : (bars.last['close'] as num).toDouble();
   Map<String,dynamic> _analyze(List<Map<String,dynamic>> c) {
     if(c.length<5) return {'bias':'NO CLEAR BIAS','signal':'NO TRADE','reason':'Waiting for real candle history','bos':false,'choch':false,'ob':<Map<String,dynamic>>[],'fvg':<Map<String,dynamic>>[],'bsl':<double>[],'ssl':<double>[]};
+    // Use confirmed two-left/two-right pivots, and freeze the pivot set
+    // before the latest candle so the break candle cannot define its own level.
     final highs=<double>[], lows=<double>[];
-    for(var i=1;i<c.length-1;i++){
+    for(var i=2;i<c.length-2;i++){
       final h=(c[i]['high'] as num).toDouble(), l=(c[i]['low'] as num).toDouble();
-      if(h>(c[i-1]['high'] as num).toDouble()&&h>(c[i+1]['high'] as num).toDouble())highs.add(h);
-      if(l<(c[i-1]['low'] as num).toDouble()&&l<(c[i+1]['low'] as num).toDouble())lows.add(l);
+      final left=c.sublist(i-2,i), right=c.sublist(i+1,i+3);
+      if([...left,...right].every((bar)=>h>(bar['high'] as num).toDouble()))highs.add(h);
+      if([...left,...right].every((bar)=>l<(bar['low'] as num).toDouble()))lows.add(l);
     }
+    final previousClose=(c[c.length-2]['close'] as num).toDouble();
     final last=(c.last['close'] as num).toDouble();
-    final bosUp=highs.isNotEmpty&&last>highs.last, bosDown=lows.isNotEmpty&&last<lows.last;
-    final bias=bosUp?'BULLISH':bosDown?'BEARISH':(highs.length>=2&&lows.length>=2&&highs.last>highs[highs.length-2]&&lows.last>lows[lows.length-2]?'BULLISH':highs.length>=2&&lows.length>=2&&highs.last<highs[highs.length-2]&&lows.last<lows[lows.length-2]?'BEARISH':'NO CLEAR BIAS');
+    final bosUp=highs.isNotEmpty&&previousClose<=highs.last&&last>highs.last;
+    final bosDown=lows.isNotEmpty&&previousClose>=lows.last&&last<lows.last;
+    final previousBias=highs.length>=2&&lows.length>=2&&highs.last>highs[highs.length-2]&&lows.last>lows[lows.length-2]?'BULLISH':highs.length>=2&&lows.length>=2&&highs.last<highs[highs.length-2]&&lows.last<lows[lows.length-2]?'BEARISH':'NO CLEAR BIAS';
+    final choch=(previousBias=='BEARISH'&&bosUp)||(previousBias=='BULLISH'&&bosDown);
+    final bias=bosUp?'BULLISH':bosDown?'BEARISH':previousBias;
     final ob=<Map<String,dynamic>>[], fvg=<Map<String,dynamic>>[];
     for(var i=1;i<c.length;i++){
       final p=c[i-1],n=c[i];
@@ -113,8 +120,6 @@ class _SmcChartPageState extends State<SmcChartPage> {
     for(var i=0;i<lows.length;i++){for(var j=i+1;j<lows.length;j++){if((lows[i]-lows[j]).abs()<=tol)ssl.add(lows[i]<lows[j]?lows[i]:lows[j]);}}
     final wanted=bias=='BULLISH'?'bullish':'bearish', zones=[...ob,...fvg].where((z)=>z['type']==wanted).toList();
     final poi=zones.isEmpty?null:zones.last;
-    final previousBias=highs.length>=2&&lows.length>=2&&highs.last>highs[highs.length-2]&&lows.last>lows[lows.length-2]?'BULLISH':highs.length>=2&&lows.length>=2&&highs.last<highs[highs.length-2]&&lows.last<lows[lows.length-2]?'BEARISH':'NO CLEAR BIAS';
-    final choch=(previousBias=='BEARISH'&&bosUp)||(previousBias=='BULLISH'&&bosDown);
     final structure=bosUp||bosDown||choch;
     final liq=bias=='BULLISH'?ssl.isNotEmpty:bsl.isNotEmpty;
     final ready=bias!='NO CLEAR BIAS'&&poi!=null&&structure&&liq;
@@ -124,7 +129,7 @@ class _SmcChartPageState extends State<SmcChartPage> {
       if(!structure)'Waiting for BOS/CHoCH',
       if(!liq)'Waiting for equal-high/low liquidity'
     ].join(' • ');
-    return {'bias':bias,'signal':ready?(bias=='BULLISH'?'LONG':'SHORT'):'NO TRADE','reason':reason,'bos':structure,'choch':choch,'ob':ob,'fvg':fvg,'bsl':bsl,'ssl':ssl,'poi':poi,'tol':tol};
+    return {'bias':bias,'signal':ready?(bias=='BULLISH'?'LONG':'SHORT'):'NO TRADE','reason':reason,'bos':bosUp||bosDown,'choch':choch,'ob':ob,'fvg':fvg,'bsl':bsl,'ssl':ssl,'poi':poi,'tol':tol};
   }
   Widget _smcTag(String title, String value, Color color) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
