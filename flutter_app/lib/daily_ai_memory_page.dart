@@ -41,6 +41,8 @@ class _DailyAiMemoryPageState extends State<DailyAiMemoryPage> {
     final market = _map(latest['market_analysis']);
     final oi = _map(latest['oi_analysis']);
     final footprint = _map(latest['footprint_analysis']);
+    final providerStatus = _map(latest['ai_provider_status']);
+    final aiResults = _map(latest['ai_validation_results']);
     return Scaffold(
       backgroundColor: const Color(0xFF070B12),
       body: RefreshIndicator(
@@ -114,6 +116,12 @@ class _DailyAiMemoryPageState extends State<DailyAiMemoryPage> {
                   ),
                 ],
               )),
+            const SizedBox(height: 8),
+            const Text('AI PROVIDER / VALIDATION MEMORY', style: TextStyle(fontWeight: FontWeight.w800)),
+            Card(child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: SelectableText('Provider status: ${providerStatus.isEmpty ? 'not captured yet' : providerStatus}\nAI validation: ${aiResults.isEmpty ? 'not captured yet' : aiResults}'),
+            )),
             const SizedBox(height: 8),
             const Text('ORDER FLOW / SUPPORT / RESISTANCE', style: TextStyle(fontWeight: FontWeight.w800)),
             Card(child: ListTile(
