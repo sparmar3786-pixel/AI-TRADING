@@ -250,6 +250,19 @@ class BackendApiTests(unittest.TestCase):
             self.assertEqual(report.json()["metrics"]["net_total_r"], 0.96)
             api._paper_trades_memory.clear()
 
+    def test_cold_signal_request_returns_wait_while_refresh_runs_in_background(self):
+        metrics = {"last_duration_ms": None, "build_count": 0, "in_flight": False, "last_error": None}
+        with patch.object(api, "_signal_cache", None), \
+             patch.object(api, "_signal_cache_at", 0), \
+             patch.object(api, "_signal_build_metrics", metrics), \
+             patch.object(api.threading, "Thread") as thread:
+            result = api._get_signals(force=True)
+        thread.assert_called_once()
+        thread.return_value.start.assert_called_once()
+        self.assertTrue(result["refreshing"])
+        self.assertFalse(result["live"])
+        self.assertIn("loading in the background", result["message"])
+
     def test_footprint_levels_use_only_broker_best5_depth(self):
         quote = {
             "best5Data": {
