@@ -91,6 +91,7 @@ _signal_cache_at = 0.0
 _signal_build_lock = threading.Lock()
 _signal_build_metrics: dict[str, Any] = {"last_duration_ms": None, "build_count": 0, "in_flight": False, "last_error": None}
 _request_metrics: dict[str, dict[str, Any]] = {}
+_ai_provider_test_cache: dict[str, dict[str, Any]] = {}
 _confirmation_states: dict[str, dict[str, Any]] = {}
 _last_market: dict[str, Any] = {}
 _option_history: dict[str, dict[str, float]] = {}
@@ -2079,6 +2080,11 @@ def ai_status(_: str = Depends(_device)) -> dict[str, Any]:
         }
         for name, env_names, model_name in providers
     }
+    with _lock:
+        for name in ("openai", "openrouter"):
+            cached = _ai_provider_test_cache.get(name)
+            if cached and cached.get("configured") == provider_status[name]["configured"]:
+                provider_status[name] = dict(cached)
     return {
         "provider": selected[0] if selected else "deterministic_fallback",
         "model": selected[2] if selected else "five-layer-quant-context",
@@ -2232,6 +2238,9 @@ def test_ai_providers(_: str = Depends(_device)) -> dict[str, Any]:
     else:
         checks.append({"provider": "openrouter", "configured": False, "ok": False, "status": "not_configured", "verdict": "WAIT"})
     tested = [item for item in checks if item.get("provider") in ("openai", "openrouter")]
+    with _lock:
+        for item in tested:
+            _ai_provider_test_cache[item["provider"]] = dict(item)
     succeeded = [item for item in tested if item.get("ok") is True]
     return {
         "status": "ok" if succeeded else ("not_configured" if not any(item.get("configured") for item in tested) else "failed"),
