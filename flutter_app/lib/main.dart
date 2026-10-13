@@ -255,7 +255,13 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       // and paper-ledger routes are dispatched by FreshApi to AI-TRADING.
       final api = FreshApi(backendUrl);
       final signalApi = FreshApi(signalBackendUrl);
-      await api.health();
+      // The AI/chat backend is optional and independent of the Angel One
+      // market API. Its health failure must never mark market data offline.
+      try {
+        await api.health();
+      } catch (chatHealthError) {
+        debugPrint('AI_CHAT_BACKEND_HEALTH_FAILED: $chatHealthError');
+      }
       Map<String,dynamic> a = const {};
       String? angelStatusError;
       try {
