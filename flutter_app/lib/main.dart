@@ -2053,7 +2053,7 @@ class AiAccessPage extends StatefulWidget {
   @override State<AiAccessPage> createState()=>_AiAccessState();
 }
 class _AiAccessState extends State<AiAccessPage>{
-  bool working=false,checking=false;
+  bool working=false,checking=false,searchWorking=false;
   String message='Cloud AI status has not been checked.';
   Map<String,Map<String,dynamic>> providers=const{};
   @override void initState(){super.initState();refresh();}
@@ -2078,7 +2078,7 @@ class _AiAccessState extends State<AiAccessPage>{
       final result = await api.aiStatus();
       final raw = result['providers'];
       if (raw is Map) {
-        for (final name in ['openai', 'openrouter']) {
+        for (final name in ['gemini', 'openai', 'openrouter']) {
           final value = raw[name];
           if (value is Map) next[name] = Map<String, dynamic>.from(value);
         }
@@ -2117,6 +2117,38 @@ class _AiAccessState extends State<AiAccessPage>{
     }
   }
 
+  Future<void> testSearch() async {
+    if (searchWorking) return;
+    setState(() => searchWorking = true);
+    try {
+      final result = await FreshApi(widget.backendUrl.trim()).postJson('/v1/providers/search/test', {});
+      final checks = (result['checks'] as List? ?? const []);
+      final updated = <String, Map<String, dynamic>>{...providers};
+      for (final item in checks.whereType<Map>()) {
+        final name = (item['provider'] ?? '').toString();
+        if (name == 'exa' || name == 'tavily') updated[name] = Map<String, dynamic>.from(item);
+      }
+      final details = checks.whereType<Map>().map((item) {
+        final name = (item['provider'] ?? 'provider').toString().toUpperCase();
+        final status = (item['status'] ?? (item['ok'] == true ? 'ok' : 'not_working')).toString();
+        final error = (item['error'] ?? '').toString();
+        final count = item['result_count'];
+        return '$name: $status${count == null ? '' : ' • $count results'}${error.isEmpty ? '' : ' ($error)'}';
+      }).join(' • ');
+      final notice = (result['message'] ?? details).toString();
+      if (mounted) {
+        setState(() { providers = updated; message = '$notice • $details'; });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$notice • $details'), duration: const Duration(seconds: 6)),
+        );
+      }
+    } catch (error) {
+      if (mounted) setState(() => message = 'Search provider test failed: ${error.toString().replaceFirst('Exception: ', '')}');
+    } finally {
+      if (mounted) setState(() => searchWorking = false);
+    }
+  }
+
   Widget provider(String name) {
     final data = providers[name];
     final configured = data?['configured'] == true;
@@ -2136,7 +2168,7 @@ class _AiAccessState extends State<AiAccessPage>{
       _ => name,
     };
     final detail = name == 'exa' || name == 'tavily'
-        ? (data == null ? 'Not checked' : '$label • ${data['evidence_count'] ?? 0} evidence items')
+        ? (data == null ? 'Not checked' : '$label • ${data['result_count'] ?? data['evidence_count'] ?? 0} result(s)')
         : (data == null ? 'Not checked' : '$label • ${data['model'] ?? 'model not reported'}');
     return Card(child: ListTile(
       leading: Icon(Icons.circle, size: 13, color: color),
@@ -2149,7 +2181,17 @@ class _AiAccessState extends State<AiAccessPage>{
   @override
   Widget build(BuildContext context) => ListView(padding: const EdgeInsets.all(14), children: [
     const Section('CLOUD AI • GEMINI + OPENAI + OPENROUTER'),
-    const Card(child: ListTile(leading: Icon(Icons.cloud_done, color: Color(0xFF35D39A), size: 30), title: Text('Gemini Cloud Validation'), subtitle: Text('AI runs through Railway. No on-device GGUF model is used. AI remains advisory; deterministic freshness and risk gates control trade eligibility.'))),
+    Card(child: ListTile(
+      leading: Icon(
+        providers['gemini']?['ok'] == true ? Icons.cloud_done : Icons.cloud_off,
+        color: providers['gemini']?['ok'] == true ? const Color(0xFF35D39A) : const Color(0xFFFF6577),
+        size: 30,
+      ),
+      title: const Text('Gemini Cloud Validation'),
+      subtitle: Text(
+        '${providers['gemini']?['status'] ?? 'not tested'} • AI remains advisory; deterministic freshness and risk gates control trade eligibility.',
+      ),
+    )),
     FilledButton.icon(onPressed: working ? null : test, icon: const Icon(Icons.psychology), label: Text(working ? 'TESTING OPENAI + OPENROUTER…' : 'TEST OPENAI + OPENROUTER')),
     const SizedBox(height: 10),
     Card(child: Padding(padding: const EdgeInsets.all(12), child: Text(message))),
@@ -2158,6 +2200,7 @@ class _AiAccessState extends State<AiAccessPage>{
     OutlinedButton.icon(onPressed: checking ? null : refresh, icon: const Icon(Icons.refresh), label: Text(checking ? 'CHECKING…' : 'REFRESH LLM STATUS')),
     const Section('SEARCH EVIDENCE • BACKEND CONFIGURED'),
     provider('exa'), provider('tavily'),
+    FilledButton.icon(onPressed: searchWorking ? null : testSearch, icon: const Icon(Icons.travel_explore), label: Text(searchWorking ? 'TESTING EXA + TAVILY…' : 'TEST EXA + TAVILY')),
     OutlinedButton.icon(onPressed: checking ? null : refresh, icon: const Icon(Icons.refresh), label: Text(checking ? 'CHECKING…' : 'REFRESH EXA / TAVILY STATUS')),
     const SizedBox(height: 8),
     const Text('Provider keys remain on Railway. Green means a real provider test succeeded; configured-only or untested providers remain red until tested.', style: TextStyle(fontSize: 12, color: Colors.white60)),
