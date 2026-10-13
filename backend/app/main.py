@@ -2010,6 +2010,7 @@ def _provider_key_present(*names: str) -> bool:
     return any(os.getenv(name, "").strip() for name in names)
 
 
+@app.get("/v1/ai/validation/status")
 @app.get("/v1/ai/status")
 def ai_status(_: str = Depends(_device)) -> dict[str, Any]:
     providers = [
