@@ -14,28 +14,12 @@ void main() {
   });
 
 
-  testWidgets('Quant Research Hub lists the requested research repositories', (tester) async {
+  testWidgets('Repository browsing tabs are removed from operational navigation', (tester) async {
     await tester.pumpWidget(const FreshApp());
-    final tabBarContext = tester.element(find.byType(TabBar).first);
-    DefaultTabController.of(tabBarContext).animateTo(tabs.indexOf('Quant Research Hub'));
-    await tester.pumpAndSettle();
-    expect(find.text('QUANT RESEARCH HUB'), findsOneWidget);
-    final hubScrollable = find.descendant(
-      of: find.byType(ListView).last,
-      matching: find.byType(Scrollable),
-    );
-    for (final title in [
-      'Awesome Systematic Trading',
-      'Awesome Algorithmic Trading',
-      'Awesome Quant',
-      'Awesome Deep Trading',
-      'Stock Market Dashboard',
-      'AI Stock Market Dashboard',
-    ]) {
-      final item = find.text(title);
-      await tester.scrollUntilVisible(item, 250, scrollable: hubScrollable);
-      expect(item, findsOneWidget);
-    }
+    expect(tabs, isNot(contains('Repository Library')));
+    expect(tabs, isNot(contains('PDF Report & Repositories')));
+    expect(tabs, isNot(contains('Quant Research Hub')));
+    expect(tabs, isNot(contains('Quant & Trading Repositories')));
   });
 
   testWidgets('Broker Home uses Angel One-backed market data', (tester) async {
@@ -46,32 +30,6 @@ void main() {
     expect(find.text('Invest'), findsOneWidget);
     expect(find.text('INDIAN MARKET WATCH'), findsOneWidget);
     expect(find.text('Markets, watchlist & account overview'), findsOneWidget);
-  });
-
-  testWidgets('PDF report tab includes all report pages, screenshot index and repository links', (tester) async {
-    await tester.pumpWidget(const FreshApp());
-    final tabBarContext = tester.element(find.byType(TabBar).first);
-    DefaultTabController.of(tabBarContext).animateTo(tabs.indexOf('PDF Report & Repositories'));
-    await tester.pumpAndSettle();
-    expect(find.text('PDF REPORT • ALL 10 PAGES & FIX CHECKLIST'), findsOneWidget);
-    expect(find.textContaining('PDF Page 1'), findsOneWidget);
-    final reportScrollable = find.descendant(
-      of: find.byType(ListView).last,
-      matching: find.byType(Scrollable),
-    );
-    final pageTen = find.textContaining('PDF Page 10');
-    await tester.scrollUntilVisible(pageTen, 300, scrollable: reportScrollable);
-    expect(pageTen, findsOneWidget);
-    final screenshotIndex = find.text('ALL 15 SCREENSHOT INDEX');
-    await tester.scrollUntilVisible(screenshotIndex, 300, scrollable: reportScrollable);
-    expect(screenshotIndex, findsOneWidget);
-    final repositoryLinks = find.text('REPOSITORY & DOCUMENTATION LINKS');
-    await tester.scrollUntilVisible(repositoryLinks, 300, scrollable: reportScrollable);
-    expect(repositoryLinks, findsOneWidget);
-    final priorityRootCause = find.text('PRIORITY ROOT CAUSE');
-    await tester.drag(reportScrollable, const Offset(0, 3000));
-    await tester.pumpAndSettle();
-    expect(priorityRootCause, findsOneWidget);
   });
 
   testWidgets('pro option chain renders quote table controls', (tester) async {
