@@ -1127,6 +1127,7 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
     last_source_timestamp: str | None = None
     future: dict[str, str] | None = None
     rows: list[dict[str, Any]] = []
+    history_loaded = False
     try:
         while True:
             try:
@@ -1153,6 +1154,29 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
                     })
                     await asyncio.sleep(5)
                     continue
+                if not history_loaded:
+                    history_loaded = True
+                    try:
+                        history_start, history_end = _session_range()
+                        history = adapter.candles(future["exchange"], future["token"], "ONE_MINUTE", history_start, history_end).get("candles") or []
+                        for candle in history:
+                            if not isinstance(candle, (list, tuple)) or len(candle) < 6:
+                                continue
+                            stamp = _iso(candle[0])
+                            parsed_candle = datetime.fromisoformat(stamp) if stamp else None
+                            values = [_number(candle[pos]) for pos in (1, 2, 3, 4)]
+                            if parsed_candle is None or any(value is None for value in values):
+                                continue
+                            opened, high, low, close = values
+                            candles.append({
+                                "t": int(parsed_candle.timestamp()), "o": opened, "h": high, "l": low, "c": close,
+                                "v": _number(candle[5]) or 0.0, "lv": {}, "source_timestamp": stamp,
+                                "historical": True, "level_semantics": "price-level depth unavailable for historical candles",
+                            })
+                        candles = candles[-250:]
+                    except Exception:
+                        # Historical candles are optional; never replace them with generated/sample prices.
+                        candles = []
                 quote = _quotes(adapter, future["exchange"], [future["token"]]).get(future["token"])
                 ltp = _number(quote.get("ltp")) if quote else None
                 source_timestamp = _quote_timestamp(quote or {})
@@ -1183,7 +1207,8 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
                         existing["h"] = max(float(existing["h"]), ltp)
                         existing["l"] = min(float(existing["l"]), ltp)
                         existing["c"] = ltp
-                        existing["v"] = float(existing.get("v") or 0) + delta_volume
+                        existing["v"] = delta_volume if existing.get("historical") is True else float(existing.get("v") or 0) + delta_volume
+                        existing.pop("historical", None)
                         existing["d"] = buy_depth - sell_depth
                         existing["bo"] = buy_orders
                         existing["so"] = sell_orders
