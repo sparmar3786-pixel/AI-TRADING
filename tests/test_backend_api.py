@@ -245,6 +245,30 @@ class BackendApiTests(unittest.TestCase):
         self.assertIn("25000.0", body["answer"])
         self.assertIn("missing option evidence", body["answer"])
 
+    def test_ai_chat_can_read_mcX_commodity_snapshot(self):
+        payload = {
+            "market": {},
+            "signals": {},
+            "commodities": [{
+                "name": "CRUDEOILM", "symbol": "CRUDEOILM26OCTFUT",
+                "ltp": 5500.0, "age_seconds": 2.0, "live": True,
+                "source": "angelone_smartapi", "decision": "WAIT",
+                "reasons": ["commodity options require verified Greeks and risk inputs"],
+            }],
+        }
+        with patch.object(api, "_get_signals", return_value=payload), \
+             patch.dict(os.environ, {"OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
+            response = self.client.post(
+                "/v1/ai/chat", headers=self.device_headers,
+                json={"index": "CRUDEOILM", "question": "Analyze current MCX context", "history": []},
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        data = response.json()
+        self.assertFalse(data["llm_used"])
+        self.assertEqual(data["index"], "CRUDEOILM")
+        self.assertIn("5500.0", data["answer"])
+        self.assertIn("verified Greeks", data["answer"])
+
     def test_ai_chat_uses_real_provider_when_configured(self):
         payload = {
             "market": {"NIFTY": {"ltp": 25000.0, "age_seconds": 3, "live": True, "source": "angelone_smartapi"}},
