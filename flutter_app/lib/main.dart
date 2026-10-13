@@ -63,6 +63,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
   bool apiOnline = false;
   bool signalsEndpointOnline = false;
   String? signalsFetchError;
+  String? _lastNotifiedSignalError;
   bool angelOnline = false;
   Map<String,dynamic> liveTrading = const {};
   Map<String,dynamic> ai = const {};
@@ -279,7 +280,9 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           debugPrint('FRESH_SIGNALS_CACHE_WRITE_FAILED: $cacheError');
         }
       } catch (e) {
-        if (mounted) setState(() { signalsEndpointOnline = false; signalsFetchError = e.toString().replaceFirst('Exception: ', ''); });
+        final message = e.toString().replaceFirst('Exception: ', '');
+        if (mounted) setState(() { signalsEndpointOnline = false; signalsFetchError = message; });
+        _notifySignalFailure(message);
         s = _makeCachedSignalsNonActionable(await _loadCachedSignals());
       }
       // The signal endpoint deliberately fails closed when candles/Greeks are
@@ -385,6 +388,32 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     if (ist.weekday == DateTime.saturday || ist.weekday == DateTime.sunday) return false;
     final minutes = ist.hour * 60 + ist.minute;
     return minutes >= (9 * 60 + 15) && minutes <= (15 * 60 + 30);
+  }
+
+  void _notifySignalFailure(String message) {
+    final normalized = message.trim().isEmpty ? 'Signal endpoint request failed.' : message.trim();
+    if (_lastNotifiedSignalError == normalized) return;
+    _lastNotifiedSignalError = normalized;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Signal API issue: $normalized'),
+          backgroundColor: Colors.deepOrange,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    });
+  }
+
+  String get _apiMetricTooltip {
+    final metrics = FreshApi.lastRequestMetrics;
+    if (metrics.isEmpty) return 'No completed API response measured yet.';
+    return 'Last API request: ${metrics['method']} ${metrics['path']}'
+        ' • HTTP ${metrics['status_code']}'
+        ' • ${metrics['duration_ms']} ms'
+        ' • ${metrics['response_bytes']} bytes received'
+        ' • ${metrics['received_at']}';
   }
 
   String get _appBarStatus {
@@ -543,7 +572,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         ]),
         actions: [Padding(padding: const EdgeInsets.only(right:12), child: Row(children: [
           Icon(Icons.circle, size:10, color: _appBarStatusColor), SizedBox(width:5),
-          Text(_appBarStatus, style: TextStyle(fontSize:11, color: _appBarStatusColor)),
+          Tooltip(message: _apiMetricTooltip, child: Text(_appBarStatus, style: TextStyle(fontSize:11, color: _appBarStatusColor))),
         ]))],
         bottom: TabBar(isScrollable: true, tabAlignment: TabAlignment.start, tabs: tabs.map((t)=>Tab(text:t)).toList()),
       ),
