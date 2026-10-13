@@ -14,6 +14,7 @@ import 'order_flow_page.dart';
 import 'strategy_library_page.dart';
 import 'flow_monitor_page.dart';
 import 'risk_calculator_page.dart';
+import 'gemini_signal_review.dart';
 import 'background_monitor.dart';
 import 'daily_ai_memory.dart';
 import 'daily_ai_memory_page.dart';
@@ -659,7 +660,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         ),
         const ApiRailwayPage(),
         MarketDiagnosticsPage(market: market, signals: signals, feed: feed, diagnostics: storeDiagnostics, lastFetch: lastFetch),
-        TradingSetupPage(backendUrl: backendUrl, apiOnline: apiOnline, signalsOnline: signalsEndpointOnline, angelOnline: angelOnline, market: market, signals: signals, ai: ai, liveStatus: liveTrading, lastFetch: lastFetch),
+        TradingSetupPage(backendUrl: backendUrl, selectedIndex: selectedIndex, aiProviders: aiProviderStatus, apiOnline: apiOnline, signalsOnline: signalsEndpointOnline, angelOnline: angelOnline, market: market, signals: signals, ai: ai, liveStatus: liveTrading, lastFetch: lastFetch),
         ResearchEnginesPage(market: market, signals: signals, ai: ai, commodities: commodities, optionChains: optionChainsByIndex, lastFetch: lastFetch, selectedIndex: selectedIndex, onIndexChanged: (value) => setState(() => selectedIndex = value)),
         TradeEnginePage(
           backendUrl: backendUrl,
@@ -1325,6 +1326,8 @@ class ResearchEnginesPage extends StatelessWidget {
 class TradingSetupPage extends StatelessWidget {
   const TradingSetupPage({
     required this.backendUrl,
+    required this.selectedIndex,
+    required this.aiProviders,
     required this.apiOnline,
     required this.signalsOnline,
     required this.angelOnline,
@@ -1336,6 +1339,8 @@ class TradingSetupPage extends StatelessWidget {
     super.key,
   });
   final String backendUrl;
+  final String selectedIndex;
+  final Map<String, dynamic> aiProviders;
   final bool apiOnline, signalsOnline, angelOnline;
   final Map<String, dynamic> market, signals, ai, liveStatus;
   final String? lastFetch;
@@ -1353,6 +1358,9 @@ class TradingSetupPage extends StatelessWidget {
         final optionRows = market.values.whereType<Map>().fold<int>(0, (sum, row) => sum + (((row['option_chain'] as List?) ?? const []).length));
         final indicatorReady = signals.values.whereType<Map>().any((row) => row['indicators'] is Map);
         final validationReady = signals.values.whereType<Map>().any((row) => row['live_validation'] is Map);
+        final providerMap = Map<String, dynamic>.from(aiProviders['providers'] as Map? ?? const {});
+        final geminiProvider = Map<String, dynamic>.from(providerMap['gemini'] as Map? ?? const {});
+        final geminiReady = geminiProvider['ok'] == true;
         final aiReady = ai.values.whereType<Map>().any((row) => row['action'] != null);
         final checks = <(String, bool, String)>[
           ('1. Backend API', apiOnline, backendUrl),
@@ -1360,13 +1368,14 @@ class TradingSetupPage extends StatelessWidget {
           ('3. Live market data', liveIndexes > 0, '$liveIndexes of ${indexes.length} indexes fresh'),
           ('4. Indicators & strategy engine', indicatorReady, 'Deterministic indicators and OI strategy output'),
           ('5. Option chain / OI', optionRows > 0, '$optionRows option quotes in latest snapshots'),
-          ('6. Signal risk validation', validationReady, 'Fail-closed validation payload'),
+          ('6. Signal risk validation', validationReady, 'Backend supplies explicit fail-closed checks'),
           ('7. Historical backtest', angelOnline, 'Historical candle replay requires an authenticated Angel One session'),
-          ('8. AI analysis', aiReady, 'Cloud AI result returned by backend'),
-          ('9. Execution / order status', liveStatus.isNotEmpty, '${liveStatus['mode'] ?? 'Status not returned'} • live orders remain gated by risk and explicit approval'),
+          ('8. Gemini provider connectivity', geminiReady, (geminiProvider['status'] ?? 'Real Gemini test required').toString()),
+          ('9. AI signal analysis', aiReady, 'Review is advisory; provider connectivity alone is not a signal decision'),
+          ('10. Execution / order status', liveStatus.isNotEmpty, '${liveStatus['mode'] ?? 'Status not returned'} • live orders remain gated by risk and explicit approval'),
         ];
         return Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('LIVE SETUP CHECKLIST • 9 MODULES', style: TextStyle(fontWeight: FontWeight.w900)),
+          const Text('LIVE SETUP CHECKLIST • 10 MODULES', style: TextStyle(fontWeight: FontWeight.w900)),
           const SizedBox(height: 4),
           Text('Last snapshot: ${lastFetch ?? 'No market snapshot'}', style: const TextStyle(fontSize: 11, color: Colors.white60)),
           const Divider(),
@@ -1387,6 +1396,8 @@ class TradingSetupPage extends StatelessWidget {
           )),
         ])));
       }),
+      const SizedBox(height: 8),
+      GeminiSignalReview(backendUrl: backendUrl, selectedIndex: selectedIndex),
       const SizedBox(height: 8),
       const Text('Broker choice: Angel One SmartAPI. No Zerodha/Kite integration is required for this app.', style: TextStyle(color: Color(0xFF12D6FF), fontWeight: FontWeight.w700)),
       const SizedBox(height: 12),
@@ -1915,7 +1926,9 @@ class SignalPage extends StatelessWidget {
           Text((agentAnalysis['safety_note'] ?? 'Specialist analysis appears after the cloud AI provider responds. Missing data must remain unavailable.').toString(), style: const TextStyle(fontSize: 11)),
         ]),
       )),
-      const Section('Live AI Validation'),
+      const Section('Gemini Signal Review'),
+      GeminiSignalReview(backendUrl: backendUrl, selectedIndex: index),
+            const Section('Live AI Validation'),
       Card(child:Padding(
         padding:const EdgeInsets.all(12),
         child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
