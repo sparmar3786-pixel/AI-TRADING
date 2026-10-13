@@ -786,12 +786,27 @@ def _session_range() -> tuple[str, str]:
 
 
 def _wait_signal(index: str, reason: str) -> dict[str, Any]:
+    """A blocked/missing-data signal still returns the full validation contract."""
     return {
         "decision": "WAIT", "candidate_decision": "WAIT", "index": index,
         "entry": None, "stop_loss": None, "target": None, "strike": None,
         "expiry": None, "signal_only": True, "layers": {},
         "reasons": [reason], "signal_stability": {"state": "BLOCKED", "required_minutes": 10},
         "data_source": "angelone_smartapi", "data_fresh": False,
+        "five_layer_engine": {"layers": {}, "decision": "WAIT", "passed_layers": 0, "total_layers": 0},
+        "quant_engine": {"layers": {}, "decision": "WAIT", "passed_layers": 0, "total_layers": 0},
+        "live_validation": {
+            "decision": "WAIT", "verdict": "WAIT",
+            "checks": {
+                "fresh_market_data": False, "valid_option_quote": False,
+                "five_layer_engine": False, "valid_sl_target": False,
+                "risk_checks": False, "ai_direction_consistent": False,
+            },
+            "market_direction": "UNKNOWN", "market_age_seconds": None,
+            "option_age_seconds": None, "reward_risk": None,
+            "ai_decision": "NOT_RUN", "blocks": ["NO_LIVE_MARKET_DATA", reason],
+            "ai_conflict": False, "signal_only": True, "order_placement_enabled": False,
+        },
     }
 
 
