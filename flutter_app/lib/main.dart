@@ -14,6 +14,7 @@ import 'order_flow_page.dart';
 import 'strategy_library_page.dart';
 import 'flow_monitor_page.dart';
 import 'risk_calculator_page.dart';
+import 'background_monitor.dart';
 import 'daily_ai_memory.dart';
 import 'daily_ai_memory_page.dart';
 
@@ -22,7 +23,8 @@ const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
 const commodityOptionUnderlyings = ['CRUDEOIL','CRUDEOILM','NATURALGAS','NATGASMINI','GOLD','GOLDM','SILVER','SILVERM','COPPER','ZINC','ALUMINIUM','LEAD','NICKEL'];
 const optionUnderlyings = [...indexes, ...commodityOptionUnderlyings];
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   // Capture Dart/Flutter errors in logcat so a phone-side crash can be
   // diagnosed without silently swallowing the framework's default handling.
   FlutterError.onError = (details) {
@@ -35,6 +37,7 @@ void main() {
     debugPrintStack(stackTrace: stack);
     return false; // Leave unhandled errors visible to Flutter's runtime.
   };
+  await initializeBackgroundMonitor();
   runApp(const FreshApp());
 }
 
