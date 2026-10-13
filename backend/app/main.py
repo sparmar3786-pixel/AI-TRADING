@@ -14,6 +14,7 @@ import re
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 import asyncio
 from datetime import date, datetime, time as dt_time, timedelta, timezone
@@ -1974,19 +1975,104 @@ def ai_status(_: str = Depends(_device)) -> dict[str, Any]:
     }
 
 
+def _run_ai_validation_probe(provider: str, api_key: str, model: str, endpoint: str, market_row: dict[str, Any]) -> dict[str, Any]:
+    """Perform one real authenticated model call and capture a bounded, secret-free result."""
+    started = time.perf_counter()
+    source_payload = {
+        "source": market_row.get("source"),
+        "source_timestamp": market_row.get("source_timestamp") or market_row.get("timestamp"),
+        "ltp": market_row.get("ltp"),
+        "age_seconds": market_row.get("age_seconds"),
+        "live": market_row.get("live") is True,
+    }
+    prompt = (
+        "Validate this market snapshot only as a secondary reviewer. Never invent missing facts. "
+        "Return one JSON object with keys verdict (PASS or WAIT) and reason. PASS only if source is "
+        "angelone_smartapi, source_timestamp exists, ltp is a positive number, age_seconds is numeric "
+        "between 0 and 60, and live is true. Otherwise verdict must be WAIT. This AI result cannot "
+        "override deterministic risk gates. Snapshot: " + json.dumps(source_payload, separators=(",", ":"))
+    )
+    body = json.dumps({
+        "model": model,
+        "temperature": 0,
+        "max_tokens": 100,
+        "messages": [
+            {"role": "system", "content": "You are a cautious market-data validation assistant. Output JSON only."},
+            {"role": "user", "content": prompt},
+        ],
+    }).encode("utf-8")
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    if provider == "openrouter":
+        headers["HTTP-Referer"] = "https://github.com/sparmar3786-pixel/AI-TRADING"
+        headers["X-Title"] = "AI-TRADING Data Validator"
+    request = urllib.request.Request(endpoint, data=body, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=8) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        choices = data.get("choices") or []
+        output = str(((choices[0].get("message") or {}).get("content") if choices else "") or "").strip()
+        # Parse the model's verdict if possible; malformed output is WAIT, never PASS.
+        verdict = "WAIT"
+        reason = "Model did not return a parseable validation verdict."
+        try:
+            cleaned = output.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+            parsed = json.loads(cleaned)
+            candidate = str(parsed.get("verdict", "WAIT")).upper()
+            verdict = "PASS" if candidate == "PASS" and source_payload["live"] and source_payload["source_timestamp"] and isinstance(source_payload["ltp"], (int, float)) and source_payload["ltp"] > 0 and isinstance(source_payload["age_seconds"], (int, float)) and 0 <= source_payload["age_seconds"] <= 60 else "WAIT"
+            reason = str(parsed.get("reason") or "")[:180]
+        except (ValueError, TypeError, AttributeError):
+            reason = output[:180] or reason
+        return {
+            "provider": provider, "configured": True, "ok": bool(output),
+            "status": "ok" if output else "empty_model_response",
+            "model": model, "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+            "verdict": verdict, "reason": reason, "output": output[:240],
+        }
+    except urllib.error.HTTPError as exc:
+        # Do not echo provider response bodies: they can include account metadata.
+        return {"provider": provider, "configured": True, "ok": False, "status": "http_error",
+                "model": model, "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+                "verdict": "WAIT", "error": f"Provider returned HTTP {exc.code}."}
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        return {"provider": provider, "configured": True, "ok": False, "status": "connection_error",
+                "model": model, "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+                "verdict": "WAIT", "error": f"Provider request failed ({type(exc).__name__})."}
+
+
 @app.post("/v1/providers/ai/test")
 def test_ai_providers(_: str = Depends(_device)) -> dict[str, Any]:
-    checks = [
-        {"provider": "gemini", "configured": _provider_key_present("GEMINI_API_KEY", "GOOGLE_API_KEY"), "ok": False},
-        {"provider": "openrouter", "configured": _provider_key_present("OPENROUTER_API_KEY"), "ok": False},
-        {"provider": "openai", "configured": _provider_key_present("OPENAI_API_KEY"), "ok": False},
+    # A test call is deliberately explicit/on-demand, not added to every market tick.
+    # It validates a real broker snapshot when one is cached; no sample price is sent.
+    market_row = dict(((_signal_cache or {}).get("market") or {}).get("NIFTY") or {})
+    checks: list[dict[str, Any]] = [
+        {"provider": "gemini", "configured": _provider_key_present("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+         "ok": False, "status": "configured_not_tested", "verdict": "WAIT",
+         "message": "Gemini remains separate; this button probes OpenAI and OpenRouter."}
     ]
+    openai_key = os.getenv("OPENAI_API_KEY", "").strip()
+    openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    if openai_key:
+        checks.append(_run_ai_validation_probe(
+            "openai", openai_key, os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip(),
+            "https://api.openai.com/v1/chat/completions", market_row))
+    else:
+        checks.append({"provider": "openai", "configured": False, "ok": False, "status": "not_configured", "verdict": "WAIT"})
+    if openrouter_key:
+        checks.append(_run_ai_validation_probe(
+            "openrouter", openrouter_key, os.getenv("OPENROUTER_MODEL", "openrouter/free").strip(),
+            "https://openrouter.ai/api/v1/chat/completions", market_row))
+    else:
+        checks.append({"provider": "openrouter", "configured": False, "ok": False, "status": "not_configured", "verdict": "WAIT"})
+    tested = [item for item in checks if item.get("provider") in ("openai", "openrouter")]
+    succeeded = [item for item in tested if item.get("ok") is True]
     return {
-        "status": "configured_not_connectivity_tested" if any(item["configured"] for item in checks) else "not_configured",
-        "checks": checks,
-        "message": "Credentials are present, but no provider response is marked OK until an actual authenticated model request is implemented and verified." if any(item["configured"] for item in checks) else "No cloud AI provider key is configured.",
+        "status": "ok" if succeeded else ("not_configured" if not any(item.get("configured") for item in tested) else "failed"),
+        "checks": checks, "providers": {item["provider"]: item for item in checks},
+        "market_snapshot_available": bool(market_row.get("source_timestamp") and market_row.get("ltp") is not None),
+        "message": "Actual authenticated model calls completed. AI verdicts are secondary only and cannot override deterministic risk gates."
+            if succeeded else "OpenAI/OpenRouter test did not complete successfully. Inspect each provider status and Railway variables.",
+        "signal_only": True, "order_placement_enabled": False,
     }
-
 
 @app.post("/v1/providers/search/status")
 def search_provider_status(_: str = Depends(_device)) -> dict[str, Any]:
