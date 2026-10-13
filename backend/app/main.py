@@ -39,6 +39,10 @@ from risk.position_sizing import position_size
 
 app = FastAPI(title="AI-TRADING Read-only Signals API", version="1.0.0")
 logger = logging.getLogger("ai_trading.angel")
+# SmartAPI SDK error logs can include full request headers (API key/JWT) and payloads.
+# Never forward SDK transport logs to Railway; return only sanitized app diagnostics.
+for _sdk_logger_name in ("SmartApi", "SmartApi.smartConnect", "urllib3", "requests"):
+    logging.getLogger(_sdk_logger_name).setLevel(logging.CRITICAL)
 IST = ZoneInfo("Asia/Kolkata")
 MASTER_URL = "https://margincalculator.angelone.in/OpenAPI_File/files/OpenAPIScripMaster.json"
 MASTER_TTL_SECONDS = 6 * 60 * 60
