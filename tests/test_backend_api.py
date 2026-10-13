@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import tempfile
@@ -296,6 +297,52 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(result["signals"]["NIFTY"]["decision"], "WAIT")
         self.assertIn("insufficient candle history", result["market"]["NIFTY"]["signal_error"])
 
+
+    def test_cold_signal_request_returns_wait_while_refresh_runs_in_background(self):
+        metrics = {"last_duration_ms": None, "build_count": 0, "in_flight": False, "last_error": None}
+        with patch.object(api, "_signal_cache", None), \
+             patch.object(api, "_signal_cache_at", 0), \
+             patch.object(api, "_signal_build_metrics", metrics), \
+             patch.object(api.threading, "Thread") as thread:
+            result = api._get_signals(force=True)
+        thread.assert_called_once()
+        thread.return_value.start.assert_called_once()
+        self.assertTrue(result["refreshing"])
+        self.assertFalse(result["live"])
+        self.assertIn("loading in the background", result["message"])
+
+    def test_ai_probe_cannot_pass_stale_market_data(self):
+        class FakeResponse:
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                return False
+            def read(self):
+                model_output = json.dumps({"verdict": "PASS", "reason": "looks good"})
+                return json.dumps({"choices": [{"message": {"content": model_output}}]}).encode("utf-8")
+
+        with patch.object(api.urllib.request, "urlopen", return_value=FakeResponse()):
+            result = api._run_ai_validation_probe(
+                "openai", "test-secret", "test-model", "https://api.openai.com/v1/chat/completions",
+                {"source": "angelone_smartapi", "source_timestamp": "2026-10-13T09:00:00+00:00",
+                 "ltp": 25000.0, "age_seconds": 120.0, "live": False},
+            )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["verdict"], "WAIT")
+        self.assertNotIn("test-secret", str(result))
+
+    def test_footprint_levels_use_only_broker_best5_depth(self):
+        quote = {
+            "best5Data": {
+                "buy": [{"price": 24999.5, "quantity": 10, "orders": 2}],
+                "sell": [{"price": 25000.5, "quantity": 12, "orders": 3}],
+            }
+        }
+        levels, buy_orders, sell_orders = api._footprint_levels(quote, step=5.0)
+        self.assertEqual(levels, {"25000.00": [12.0, 10.0]})
+        self.assertEqual(buy_orders, 2)
+        self.assertEqual(sell_orders, 3)
+        self.assertEqual(api._footprint_levels({}, step=5.0), ({}, 0, 0))
 
 if __name__ == "__main__":
     unittest.main()
