@@ -1180,7 +1180,16 @@ def validate_ai_providers(body: AIValidationRequest, _: str = Depends(_device)) 
             providers[name] = future.result()
     ready = [item for item in providers.values() if item.get("status") == "ok"]
     configured = [item for item in providers.values() if item.get("status") != "not_configured"]
-    overall = "NOT_CONFIGURED" if not configured else "PASS" if len(ready) == 2 and validation_input["snapshot_live"] else "PARTIAL" if ready else "FAILED"
+    if not validation_input["snapshot_live"]:
+        overall = "BLOCKED_NO_LIVE_DATA"
+    elif not configured:
+        overall = "NOT_CONFIGURED"
+    elif len(ready) == 2:
+        overall = "PASS"
+    elif ready:
+        overall = "PARTIAL"
+    else:
+        overall = "FAILED"
     return {
         "index": index, "providers": providers, "overall_status": overall,
         "deterministic_decision": signal.get("decision", "WAIT"),
