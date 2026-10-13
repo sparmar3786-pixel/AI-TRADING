@@ -223,7 +223,8 @@ def evaluate_five_layer_signal(
         obid, oask, ltp = map(_number, (option.get("bid"), option.get("ask"), option.get("ltp")))
         volume, oi, delta = map(_number, (option.get("volume"), option.get("oi"), option.get("delta")))
         expiry = _timestamp(str(option.get("expiry", "")) + "T23:59:00+00:00") if option.get("expiry") else None
-        option_time = _timestamp(option.get("timestamp", option.get("source_timestamp", option.get("exchange_timestamp")))) if any(option.get(key) is not None for key in ("timestamp", "source_timestamp", "exchange_timestamp")) else observed
+        option_stamp = next((option.get(key) for key in ("timestamp", "source_timestamp", "exchange_timestamp", "time", "t") if option.get(key) is not None), None)
+        option_time = _timestamp(option_stamp) if option_stamp is not None else observed
         option_age = _age_seconds(now_utc, option_time)
         valid = (
             strike is not None and strike > 0 and obid is not None and oask is not None
