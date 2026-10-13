@@ -1,6 +1,26 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:webview_flutter/webview_flutter.dart';
+
+/// Latest measured WebSocket transport metrics from the original chart.
+class OrderFlowTelemetry {
+  static Map<String, dynamic> latest = <String, dynamic>{};
+  static final List<Map<String, dynamic>> recent = <Map<String, dynamic>>[];
+
+  static void record(String message) {
+    try {
+      final decoded = jsonDecode(message);
+      if (decoded is! Map) return;
+      final row = Map<String, dynamic>.from(decoded);
+      latest = row;
+      recent.insert(0, row);
+      if (recent.length > 30) recent.removeRange(30, recent.length);
+    } catch (_) {
+      // Telemetry is best-effort and must never interrupt the chart.
+    }
+  }
+}
 
 /// Displays the user's original Order Flow HTML without redrawing or restyling
 /// its canvas. The HTML connects to the configured signal backend via its
@@ -34,6 +54,9 @@ class _OrderFlowPageState extends State<OrderFlowPage> {
       final controller = WebViewController()
         ..setJavaScriptMode(JavaScriptMode.unrestricted)
         ..setBackgroundColor(const Color(0xFF0B0F14))
+        ..addJavaScriptChannel('Telemetry', onMessageReceived: (message) {
+          OrderFlowTelemetry.record(message.message);
+        })
         ..setNavigationDelegate(NavigationDelegate(
           onPageFinished: (_) {
             if (mounted) setState(() => _loading = false);
