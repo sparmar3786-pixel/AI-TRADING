@@ -950,6 +950,15 @@ def _index_snapshot(
     candle_future = _market_data_executor.submit(
         adapter.candles, config["exchange"], config["token"], "FIVE_MINUTE", start, end
     )
+    # Fetch genuine daily history in parallel so the SMC chart's 1D timeframe
+    # never aliases intraday candles or fabricates higher-timeframe bars.
+    daily_end_dt = datetime.now(IST)
+    daily_start_text = (daily_end_dt - timedelta(days=45)).strftime("%Y-%m-%d %H:%M")
+    daily_end_text = daily_end_dt.strftime("%Y-%m-%d %H:%M")
+    daily_future = _market_data_executor.submit(
+        adapter.candles, config["exchange"], config["token"], "ONE_DAY",
+        daily_start_text, daily_end_text,
+    )
     if spot_quote is None:
         spot_quote = _quotes(adapter, config["exchange"], [config["token"]]).get(config["token"])
     if not spot_quote:
@@ -962,6 +971,12 @@ def _index_snapshot(
         raise RuntimeError("Angel One quote omitted its exchange feed timestamp; fail-closed freshness gate")
     candle_result = candle_future.result()
     candle_rows = candle_result.get("candles") or []
+    try:
+        daily_candle_rows = (daily_future.result(timeout=15).get("candles") or [])
+    except Exception:
+        # Missing daily history remains unavailable; the SMC page must not
+        # reinterpret intraday bars as daily data.
+        daily_candle_rows = []
     closes = _candle_closes(candle_rows)
     if len(closes) < 36:
         raise RuntimeError("Insufficient 5-minute candle history for multi-timeframe trend")
@@ -1222,6 +1237,33 @@ def _index_snapshot(
             "volume": _number(candle[5]),
         })
     chart_5m = chart_5m[-250:]
+    chart_1h: list[dict[str, Any]] = []
+    for offset in range(0, len(chart_5m) - 11, 12):
+        group = chart_5m[offset:offset + 12]
+        if len(group) != 12:
+            continue
+        volumes = [_number(row.get("volume")) for row in group]
+        chart_1h.append({
+            "t": group[-1]["t"], "timestamp": group[-1]["timestamp"],
+            "open": group[0]["open"], "high": max(row["high"] for row in group),
+            "low": min(row["low"] for row in group), "close": group[-1]["close"],
+            "volume": sum(value for value in volumes if value is not None) if any(value is not None for value in volumes) else None,
+        })
+    chart_1d: list[dict[str, Any]] = []
+    for candle in daily_candle_rows:
+        if not isinstance(candle, (list, tuple)) or len(candle) < 6:
+            continue
+        stamp = _iso(candle[0])
+        parsed_stamp = datetime.fromisoformat(stamp) if stamp else None
+        opened, high, low, closed = (_number(candle[i]) for i in (1, 2, 3, 4))
+        if parsed_stamp is None or any(value is None for value in (opened, high, low, closed)):
+            continue
+        chart_1d.append({
+            "t": int(parsed_stamp.timestamp()), "timestamp": stamp,
+            "open": opened, "high": high, "low": low, "close": closed,
+            "volume": _number(candle[5]),
+        })
+    chart_1d = chart_1d[-45:]
     chart_15m: list[dict[str, Any]] = []
     for offset in range(0, len(chart_5m) - 2, 3):
         group = chart_5m[offset:offset + 3]
@@ -1263,7 +1305,7 @@ def _index_snapshot(
             "semantics": "bid_ask_depth_not_classified_trade_volume",
         },
         "indicators": indicators,
-        "timeframes": {"1m": [], "5m": chart_5m, "15m": chart_15m},
+        "timeframes": {"1m": [], "5m": chart_5m, "15m": chart_15m, "1H": chart_1h, "1D": chart_1d},
         "option_chain": chain_payload,
         "strategy_suite": result["strategy_suite"],
     }
@@ -2061,7 +2103,7 @@ def _get_signals_uncached(force: bool = False) -> dict[str, Any]:
                                         "low": min(row["low"] for row in group), "close": group[-1]["close"],
                                         "volume": sum(value for value in volumes if value is not None) if any(value is not None for value in volumes) else None,
                                     })
-                            market_row["timeframes"] = {"1m": [], "5m": chart_rows, "15m": chart_15m_rows}
+                            market_row["timeframes"] = {"1m": [], "5m": chart_rows, "15m": chart_15m_rows, "1H": [], "1D": []}
                             if len(chart_closes) >= 30:
                                 market_row["indicators"] = _indicator_snapshot(chart_closes, candle_payload.get("candles") or [], [])
                         except Exception:
