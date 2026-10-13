@@ -99,7 +99,7 @@ class _FlowMonitorPageState extends State<FlowMonitorPage> {
       final result = await api.testAIProviders().timeout(const Duration(seconds: 24));
       if (!mounted) return;
       final checks = (result['checks'] as List? ?? const []).whereType<Map>().toList();
-      final messages = checks.where((c) => c['provider'] == 'openai' || c['provider'] == 'openrouter').map((c) {
+      final messages = checks.where((c) => c['provider'] == 'gemini' || c['provider'] == 'openai' || c['provider'] == 'openrouter').map((c) {
         final name = (c['provider'] ?? 'AI').toString().toUpperCase();
         final verdict = (c['verdict'] ?? 'WAIT').toString().toUpperCase();
         final status = (c['status'] ?? 'unknown').toString();
@@ -221,9 +221,9 @@ class _FlowMonitorPageState extends State<FlowMonitorPage> {
               ));
             }),
           const SizedBox(height: 8),
-          const Text('OPENAI + OPENROUTER DATA VALIDATION', style: TextStyle(fontWeight: FontWeight.w900)),
+          const Text('GEMINI + OPENAI + OPENROUTER DATA VALIDATION', style: TextStyle(fontWeight: FontWeight.w900)),
           const SizedBox(height: 4),
-          FilledButton.icon(onPressed: testing ? null : testProviders, icon: testing ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.verified_outlined), label: Text(testing ? 'TESTING PROVIDERS…' : 'TEST OPENAI + OPENROUTER')),
+          FilledButton.icon(onPressed: testing ? null : testProviders, icon: testing ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.verified_outlined), label: Text(testing ? 'TESTING PROVIDERS…' : 'TEST GEMINI + OPENAI + OPENROUTER')),
           if (providerResult.isNotEmpty) Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('Overall status: ${providerResult['status'] ?? 'unknown'}', style: const TextStyle(fontWeight: FontWeight.w900)),
             Text((providerResult['message'] ?? '').toString(), style: const TextStyle(fontSize: 11, color: Colors.white70)),
