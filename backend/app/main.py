@@ -14,9 +14,9 @@ import re
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -86,12 +86,54 @@ _master_rows: list[dict[str, Any]] = []
 _master_loaded_at = 0.0
 _signal_cache: dict[str, Any] | None = None
 _signal_cache_at = 0.0
-# Single-flight guard: concurrent dashboard refreshes and WebSocket clients must not
-# trigger duplicate slow Angel One REST collection for the same cache window.
+# Signal computation is refreshed in the background so a cold/slow broker
+# cycle cannot make every HTTP client wait for the full multi-index fan-out.
 _signal_build_lock = threading.Lock()
+_signal_build_metrics: dict[str, Any] = {"last_duration_ms": None, "build_count": 0, "in_flight": False, "last_error": None}
+_request_metrics: dict[str, dict[str, Any]] = {}
 _confirmation_states: dict[str, dict[str, Any]] = {}
 _last_market: dict[str, Any] = {}
 _option_history: dict[str, dict[str, float]] = {}
+# Retain only real broker candles/depth observed since this process started,
+# so a WebSocket reconnect does not erase captured footprint levels.
+_footprint_history: dict[str, list[dict[str, Any]]] = {}
+
+def _record_request_metric(path: str, status_code: int, elapsed_ms: float, response_bytes: int | None) -> None:
+    with _lock:
+        item = dict(_request_metrics.get(path) or {"count": 0, "errors": 0, "total_ms": 0.0})
+        item["count"] = int(item.get("count", 0)) + 1
+        item["errors"] = int(item.get("errors", 0)) + (1 if status_code >= 400 else 0)
+        item["total_ms"] = float(item.get("total_ms", 0.0)) + elapsed_ms
+        item["last_ms"] = round(elapsed_ms, 1)
+        item["average_ms"] = round(float(item["total_ms"]) / int(item["count"]), 1)
+        item["last_status"] = int(status_code)
+        item["last_response_bytes"] = response_bytes
+        item["last_server_throughput_bytes_per_second"] = round(response_bytes / (elapsed_ms / 1000.0), 1) if response_bytes is not None and elapsed_ms > 0 else None
+        _request_metrics[path] = item
+        # Keep a bounded per-route table instead of growing forever.
+        if len(_request_metrics) > 60:
+            oldest = next(iter(_request_metrics))
+            if oldest != path:
+                _request_metrics.pop(oldest, None)
+
+@app.middleware("http")
+async def request_timing_middleware(request, call_next):
+    started = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        _record_request_metric(request.url.path, 500, elapsed_ms, None)
+        raise
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    try:
+        response_bytes = int(response.headers.get("content-length")) if response.headers.get("content-length") else None
+    except (TypeError, ValueError):
+        response_bytes = None
+    response.headers["X-Response-Time-Ms"] = f"{elapsed_ms:.1f}"
+    response.headers["Server-Timing"] = f"app;dur={elapsed_ms:.1f}"
+    _record_request_metric(request.url.path, response.status_code, elapsed_ms, response_bytes)
+    return response
 
 
 class ConnectRequest(BaseModel):
@@ -111,11 +153,6 @@ class ResearchIndicatorsRequest(BaseModel):
     atr_period: int = Field(default=14, ge=2, le=50)
     band_period: int = Field(default=20, ge=2, le=100)
     channel_period: int = Field(default=20, ge=2, le=100)
-
-
-class AIValidationRequest(BaseModel):
-    """Request a secondary evidence review; this can never override deterministic risk gates."""
-    index: str = Field(default="NIFTY", max_length=20)
 
 
 class BacktestRequest(BaseModel):
@@ -413,6 +450,64 @@ def _book(quote: dict[str, Any]) -> tuple[float | None, float | None, float, flo
     buy_volume = sum(_number(x.get("quantity")) or 0 for x in buy)
     sell_volume = sum(_number(x.get("quantity")) or 0 for x in sell)
     return bid, ask, buy_volume, sell_volume
+
+def _book_sides(quote: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return only broker-reported best-five bid/ask levels; never synthesize levels."""
+    raw = quote.get("best5Data") or quote.get("depth") or {}
+    if isinstance(raw, list):
+        buy = [x for x in raw if isinstance(x, dict) and str(x.get("side", "")).lower() in ("buy", "b")]
+        sell = [x for x in raw if isinstance(x, dict) and str(x.get("side", "")).lower() in ("sell", "s")]
+    elif isinstance(raw, dict):
+        buy = raw.get("buy") or raw.get("bids") or []
+        sell = raw.get("sell") or raw.get("asks") or []
+    else:
+        buy, sell = [], []
+    return ([x for x in buy if isinstance(x, dict)], [x for x in sell if isinstance(x, dict)])
+
+
+def _footprint_levels(quote: dict[str, Any], step: float = 5.0) -> tuple[dict[str, list[float]], int, int]:
+    """Bucket real best-five book quantities into the original chart's price rows.
+
+    Values are [sell-side ask depth, buy-side bid depth], not exchange-classified
+    trade prints. Missing broker levels produce an empty map rather than fake cells.
+    """
+    buy, sell = _book_sides(quote)
+    levels: dict[str, list[float]] = {}
+    def bucket(price: float) -> str:
+        value = round(price / step) * step if step > 0 else price
+        return f"{value:.2f}"
+    for rows, side_index in ((sell, 0), (buy, 1)):
+        for row in rows:
+            price = _number(row.get("price"))
+            quantity = _number(row.get("quantity"))
+            if price is None or price <= 0 or quantity is None or quantity < 0:
+                continue
+            key = bucket(price)
+            pair = levels.setdefault(key, [0.0, 0.0])
+            pair[side_index] += quantity
+    buy_orders = sum(int(_number(row.get("orders") or row.get("orderCount") or row.get("numberOfOrders")) or 0) for row in buy)
+    sell_orders = sum(int(_number(row.get("orders") or row.get("orderCount") or row.get("numberOfOrders")) or 0) for row in sell)
+    return levels, buy_orders, sell_orders
+
+
+def _find_nearest_future(rows: list[dict[str, Any]], index: str) -> dict[str, str] | None:
+    """Find the nearest unexpired index future for footprint snapshots."""
+    segment = "BFO" if index in {"SENSEX", "BANKEX"} else "NFO"
+    today = datetime.now(IST).date()
+    contracts = [
+        row for row in rows
+        if str(row.get("exch_seg", "")).upper() == segment
+        and str(row.get("name", "")).upper().replace(" ", "") == index
+        and str(row.get("instrumenttype", "")).upper() == "FUTIDX"
+        and row.get("token")
+        and _expiry_date(row.get("expiry")) is not None
+        and _expiry_date(row.get("expiry")) >= today
+    ]
+    contracts.sort(key=lambda row: _expiry_date(row.get("expiry")) or date.max)
+    if not contracts:
+        return None
+    row = contracts[0]
+    return {"exchange": segment, "token": str(row["token"]), "symbol": str(row.get("symbol") or index), "expiry": str(row.get("expiry") or "")}
 
 
 def _quote_timestamp(quote: dict[str, Any]) -> str | None:
@@ -856,7 +951,7 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
     }
     # A source timestamp that is missing or older than the freshness gate will
     # make the quant engine return WAIT; do not substitute the local clock.
-    validation_started = time.monotonic()
+    engine_started = time.perf_counter()
     result = evaluate_five_layer_signal(
         snapshot,
         confirmation_state=_confirmation_states.get(index),
@@ -864,8 +959,10 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
         confirmation_seconds=600,
         max_confirmation_gap_seconds=60,
     )
-    # Actual deterministic engine execution time, excluding broker/network collection.
-    result["validation_timing_ms"] = round((time.monotonic() - validation_started) * 1000, 2)
+    result["performance"] = {
+        **dict(result.get("performance") or {}),
+        "five_layer_validation_ms": round((time.perf_counter() - engine_started) * 1000, 2),
+    }
     # Publish one normalized engine contract consumed by Dashboard, Signals,
     # Risk, Trading Setup, the five-layer page and Quant Engine Lab.
     engine_layers = dict(result.get("layers") or {})
@@ -944,7 +1041,6 @@ def _index_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]], index
         "market_age_seconds": result.get("layers", {}).get("data_quality", {}).get("age_seconds"),
         "option_age_seconds": next((item.get("age_seconds") for item in chain_payload if item.get("strike") == result.get("strike")), None),
         "ai_decision": "NOT_CONFIGURED",
-        "validation_timing_ms": result.get("validation_timing_ms"),
         "blocks": list(result.get("reasons") or []),
     }
     chart_5m: list[dict[str, Any]] = []
@@ -1022,55 +1118,130 @@ def _empty_payload(reason: str) -> dict[str, Any]:
 
 @app.websocket("/ws")
 async def market_snapshot_stream(websocket: WebSocket) -> None:
-    """Stream only broker-sourced spot snapshots; never fabricate market ticks.
-
-    The Flutter footprint view receives sampled quotes, not exchange trade prints.
-    Depth-derived delta is explicitly labelled as bid/ask depth, not aggressor volume.
-    """
+    """Stream broker-only nearest-future snapshots without running the slow signal fan-out."""
     await websocket.accept()
     symbol = (websocket.query_params.get("symbol") or "NIFTY").strip().upper()
     if symbol not in INDEXES:
-        await websocket.send_json({"type": "status", "mode": "WAIT", "message": "Unsupported index symbol"})
+        await websocket.send_json({"type": "status", "mode": "wait", "message": "Unsupported index symbol"})
         await websocket.close(code=1008)
         return
-    candles: list[dict[str, Any]] = []
+    with _lock:
+        candles: list[dict[str, Any]] = [dict(item) for item in _footprint_history.get(symbol, [])]
+    last_trade_volume: float | None = None
     last_source_timestamp: str | None = None
+    future: dict[str, str] | None = None
+    rows: list[dict[str, Any]] = []
+    history_loaded = False
     try:
         while True:
             try:
-                payload = await asyncio.to_thread(_get_signals, False)
-                market_row = dict((payload.get("market") or {}).get(symbol) or {})
-                ltp = _number(market_row.get("ltp"))
-                source_timestamp = _iso(market_row.get("source_timestamp") or market_row.get("timestamp"))
+                adapter = _current_adapter()
+                if not adapter or adapter.status().get("authenticated") is not True:
+                    await websocket.send_json({
+                        "type": "snap", "symbol": symbol, "candles": candles, "step": 5,
+                        "mode": "wait", "live": False, "source_timestamp": None,
+                        "message": "Angel One is not authenticated. Connect the broker to receive footprint data.",
+                        "level_semantics": "broker_best5_bid_ask_depth_not_trade_prints",
+                    })
+                    await asyncio.sleep(5)
+                    continue
+                if not rows:
+                    rows = _load_master()
+                if future is None:
+                    future = _find_nearest_future(rows, symbol)
+                if future is None:
+                    await websocket.send_json({
+                        "type": "snap", "symbol": symbol, "candles": candles, "step": 5,
+                        "mode": "wait", "live": False, "source_timestamp": None,
+                        "message": "No unexpired index-futures contract found in the Angel One instrument master.",
+                        "level_semantics": "broker_best5_bid_ask_depth_not_trade_prints",
+                    })
+                    await asyncio.sleep(5)
+                    continue
+                if not history_loaded:
+                    history_loaded = True
+                    try:
+                        history_start, history_end = _session_range()
+                        history = adapter.candles(future["exchange"], future["token"], "ONE_MINUTE", history_start, history_end).get("candles") or []
+                        for candle in history:
+                            if not isinstance(candle, (list, tuple)) or len(candle) < 6:
+                                continue
+                            stamp = _iso(candle[0])
+                            parsed_candle = datetime.fromisoformat(stamp) if stamp else None
+                            values = [_number(candle[pos]) for pos in (1, 2, 3, 4)]
+                            if parsed_candle is None or any(value is None for value in values):
+                                continue
+                            candle_epoch = int(parsed_candle.timestamp())
+                            if any(int(item.get("t") or 0) == candle_epoch for item in candles):
+                                # Keep the already captured live/depth candle for this minute.
+                                continue
+                            opened, high, low, close = values
+                            candles.append({
+                                "t": candle_epoch, "o": opened, "h": high, "l": low, "c": close,
+                                "v": _number(candle[5]) or 0.0, "lv": {}, "source_timestamp": stamp,
+                                "historical": True, "level_semantics": "price-level depth unavailable for historical candles",
+                            })
+                        candles.sort(key=lambda item: int(item.get("t") or 0))
+                        candles = candles[-250:]
+                    except Exception:
+                        # Historical candles are optional; never replace them with generated/sample prices.
+                        candles = sorted(candles, key=lambda item: int(item.get("t") or 0))[-250:]
+                quote = _quotes(adapter, future["exchange"], [future["token"]]).get(future["token"])
+                ltp = _number(quote.get("ltp")) if quote else None
+                source_timestamp = _quote_timestamp(quote or {})
                 parsed = datetime.fromisoformat(source_timestamp) if source_timestamp else None
                 age = (_utc_now() - parsed).total_seconds() if parsed else None
-                live = ltp is not None and ltp > 0 and age is not None and 0 <= age <= 60 and market_row.get("live") is True
-                if live and source_timestamp and source_timestamp != last_source_timestamp:
-                    flow = dict(market_row.get("order_flow") or {})
-                    bid_depth = _number(flow.get("buy_volume")) or 0.0
-                    ask_depth = _number(flow.get("sell_volume")) or 0.0
-                    epoch = int(parsed.timestamp()) if parsed else 0
-                    candles.append({
-                        "t": epoch, "o": ltp, "h": ltp, "l": ltp, "c": ltp,
-                        "v": bid_depth + ask_depth, "d": bid_depth - ask_depth,
-                        "source_timestamp": source_timestamp,
-                        "volume_semantics": "bid_ask_depth_not_trade_volume",
-                    })
+                live = ltp is not None and ltp > 0 and age is not None and 0 <= age <= 60
+                if live and parsed and source_timestamp:
+                    epoch = int(parsed.timestamp())
+                    minute = epoch - epoch % 60
+                    levels, buy_orders, sell_orders = _footprint_levels(quote or {}, step=5.0)
+                    _, _, buy_depth, sell_depth = _book(quote or {})
+                    total_volume = _number((quote or {}).get("tradeVolume") or (quote or {}).get("volume"))
+                    delta_volume = max(0.0, total_volume - last_trade_volume) if total_volume is not None and last_trade_volume is not None else 0.0
+                    if total_volume is not None:
+                        last_trade_volume = total_volume
+                    existing = next((item for item in reversed(candles) if int(item.get("t") or 0) == minute), None)
+                    if existing is None:
+                        existing = {
+                            "t": minute, "o": ltp, "h": ltp, "l": ltp, "c": ltp,
+                            "v": delta_volume, "d": buy_depth - sell_depth,
+                            "bo": buy_orders, "so": sell_orders, "lv": levels,
+                            "source_timestamp": source_timestamp,
+                            "volume_semantics": "incremental_broker_trade_volume",
+                            "level_semantics": "broker_best5_bid_ask_depth_not_trade_prints",
+                        }
+                        candles.append(existing)
+                    else:
+                        existing["h"] = max(float(existing["h"]), ltp)
+                        existing["l"] = min(float(existing["l"]), ltp)
+                        existing["c"] = ltp
+                        existing["v"] = delta_volume if existing.get("historical") is True else float(existing.get("v") or 0) + delta_volume
+                        existing.pop("historical", None)
+                        existing["d"] = buy_depth - sell_depth
+                        existing["bo"] = buy_orders
+                        existing["so"] = sell_orders
+                        existing["lv"] = levels
+                        existing["source_timestamp"] = source_timestamp
                     candles = candles[-250:]
                     last_source_timestamp = source_timestamp
+                if candles:
+                    with _lock:
+                        _footprint_history[symbol] = [dict(item) for item in candles[-250:]]
+                mode = "live" if live else ("closed" if candles else "wait")
                 await websocket.send_json({
-                    "type": "snap", "symbol": symbol, "candles": candles,
-                    "mode": "LIVE" if live else "WAIT",
-                    "live": live, "ltp": ltp if live else None,
-                    "source_timestamp": source_timestamp,
-                    "tick_age_ms": int(age * 1000) if age is not None else None,
-                    "message": "Broker timestamped snapshots; delta is bid/ask depth, not classified trade prints.",
+                    "type": "snap", "symbol": symbol, "candles": candles, "step": 5,
+                    "mode": mode, "live": live, "ltp": ltp if live else None,
+                    "source_timestamp": source_timestamp, "tick_age_ms": int(age * 1000) if age is not None else None,
+                    "future_symbol": future["symbol"], "future_expiry": future["expiry"],
+                    "level_semantics": "broker_best5_bid_ask_depth_not_trade_prints",
+                    "message": "Live requires a fresh exchange timestamp. Footprint cells show broker best-five bid/ask depth, not classified trade prints.",
                     "signal_only": True, "order_placement_enabled": False,
                 })
             except HTTPException as exc:
-                await websocket.send_json({"type": "status", "mode": "WAIT", "message": str(exc.detail)[:180], "candles": candles})
+                await websocket.send_json({"type": "status", "mode": "wait", "message": str(exc.detail)[:180], "candles": candles})
             except Exception:
-                await websocket.send_json({"type": "status", "mode": "WAIT", "message": "Broker snapshot unavailable; waiting for a fresh timestamped quote.", "candles": candles})
+                await websocket.send_json({"type": "status", "mode": "wait", "message": "Broker futures snapshot unavailable; waiting for a fresh timestamped quote.", "candles": candles})
             await asyncio.sleep(5)
     except WebSocketDisconnect:
         return
@@ -1084,120 +1255,6 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
 @app.get("/health")
 def health() -> dict[str, Any]:
     return {"status": "ok", "service": "ai-trading-readonly-api", "time": _utc_now().isoformat()}
-
-
-def _call_ai_validation_provider(
-    provider: str,
-    api_key: str | None,
-    model: str,
-    endpoint: str,
-    validation_input: dict[str, Any],
-) -> dict[str, Any]:
-    """Call an optional server-configured OpenAI-compatible provider without exposing credentials."""
-    if not api_key:
-        return {"provider": provider, "status": "not_configured", "model": model, "output": None, "duration_ms": None}
-    prompt = (
-        "Review this timestamped market snapshot as a SECONDARY data-quality reviewer. "
-        "Do not invent prices, infer missing fields, or recommend an order. "
-        "Never override the deterministic engine decision. If source timestamps are missing/stale, "
-        "or required evidence is incomplete, verdict must be BLOCK. Return concise JSON only with "
-        "keys verdict (PASS/WARN/BLOCK), summary, and issues (array). Input:\n"
-        + json.dumps(validation_input, ensure_ascii=False, default=str)[:14000]
-    )
-    request_body = json.dumps({
-        "model": model,
-        "temperature": 0,
-        "messages": [
-            {"role": "system", "content": "You are a cautious market-data validation assistant. Deterministic risk gates are authoritative."},
-            {"role": "user", "content": prompt},
-        ],
-    }).encode("utf-8")
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    if provider == "openrouter":
-        headers["HTTP-Referer"] = os.getenv("OPENROUTER_SITE_URL", "https://ai-trading.app")
-        headers["X-Title"] = "AI-TRADING secondary validator"
-    started = time.monotonic()
-    try:
-        req = urllib.request.Request(endpoint, data=request_body, headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=12) as response:
-            response_body = response.read()
-            decoded = json.loads(response_body.decode("utf-8", errors="replace"))
-        choices = decoded.get("choices") if isinstance(decoded, dict) else None
-        output = None
-        if isinstance(choices, list) and choices and isinstance(choices[0], dict):
-            message = choices[0].get("message") or {}
-            output = message.get("content") if isinstance(message, dict) else None
-        return {
-            "provider": provider, "status": "ok" if isinstance(output, str) and output.strip() else "invalid_response",
-            "model": model, "duration_ms": round((time.monotonic() - started) * 1000, 2),
-            "output": output[:2400] if isinstance(output, str) else None,
-            "error": None if isinstance(output, str) and output.strip() else "Provider returned no text content.",
-        }
-    except Exception as exc:
-        return {
-            "provider": provider, "status": "failed", "model": model,
-            "duration_ms": round((time.monotonic() - started) * 1000, 2),
-            "output": None, "error": f"{type(exc).__name__}: {str(exc)[:180]}",
-        }
-
-
-@app.post("/v1/ai/validate")
-def validate_ai_providers(body: AIValidationRequest, _: str = Depends(_device)) -> dict[str, Any]:
-    """Run optional OpenAI and OpenRouter reviews against the current server snapshot."""
-    index = body.index.strip().upper()
-    if index not in INDEXES:
-        raise HTTPException(status_code=400, detail=f"Unsupported index. Choose from {', '.join(INDEXES)}.")
-    payload = _get_signals()
-    market = dict((payload.get("market") or {}).get(index) or {})
-    signal = dict((payload.get("signals") or {}).get(index) or {})
-    validation_input = {
-        "index": index,
-        "market": market,
-        "deterministic_signal": {
-            "decision": signal.get("decision", "WAIT"),
-            "layers": signal.get("layers") or {},
-            "reasons": signal.get("reasons") or [],
-            "validation_timing_ms": signal.get("validation_timing_ms"),
-        },
-        "snapshot_live": payload.get("live") is True and market.get("live") is True,
-        "snapshot_generated_at": payload.get("generated_at"),
-    }
-    openai_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-    openrouter_model = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
-    providers: dict[str, Any] = {}
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        jobs = {
-            "openai": pool.submit(
-                _call_ai_validation_provider, "openai", os.getenv("OPENAI_API_KEY"),
-                openai_model, "https://api.openai.com/v1/chat/completions", validation_input,
-            ),
-            "openrouter": pool.submit(
-                _call_ai_validation_provider, "openrouter", os.getenv("OPENROUTER_API_KEY"),
-                openrouter_model, "https://openrouter.ai/api/v1/chat/completions", validation_input,
-            ),
-        }
-        for name, future in jobs.items():
-            providers[name] = future.result()
-    ready = [item for item in providers.values() if item.get("status") == "ok"]
-    configured = [item for item in providers.values() if item.get("status") != "not_configured"]
-    if not validation_input["snapshot_live"]:
-        overall = "BLOCKED_NO_LIVE_DATA"
-    elif not configured:
-        overall = "NOT_CONFIGURED"
-    elif len(ready) == 2:
-        overall = "PASS"
-    elif ready:
-        overall = "PARTIAL"
-    else:
-        overall = "FAILED"
-    return {
-        "index": index, "providers": providers, "overall_status": overall,
-        "deterministic_decision": signal.get("decision", "WAIT"),
-        "validation_timing_ms": signal.get("validation_timing_ms"),
-        "snapshot_live": validation_input["snapshot_live"],
-        "generated_at": _utc_now().isoformat(),
-        "safety": "Secondary evidence only; AI output never overrides deterministic WAIT/risk gates.",
-    }
 
 
 @app.get("/v1/metadata")
@@ -1363,6 +1420,11 @@ def diagnostics(_: str = Depends(_device)) -> dict[str, Any]:
     fresh_count = sum(1 for row in (_signal_cache or {}).get("market", {}).values() if row.get("live") is True)
     return {
         "service": "ai-trading-readonly-api",
+        "signal_build": dict(_signal_build_metrics),
+        "api_performance": {
+            path: {key: value for key, value in metric.items() if key != "total_ms"}
+            for path, metric in _request_metrics.items()
+        },
         "angel": angel,
         "angel_one": {
             "authenticated": angel.get("authenticated", False),
@@ -1532,85 +1594,86 @@ def market_sentiment(index: str = Query(default="NIFTY"), _: str = Depends(_devi
     }
 
 
-_signal_build_error: str | None = None
-
-
-def _refresh_signals_in_background() -> None:
-    """Refresh shared signal state off-request so a slow broker call cannot 499 every client."""
-    global _signal_build_error
+def _refresh_signals_worker() -> None:
+    global _signal_build_metrics, _signal_cache
+    started = time.monotonic()
+    error_text = None
     try:
-        _build_signals(force=True)
-        _signal_build_error = None
+        _get_signals_uncached(force=True)
     except Exception as exc:
-        _signal_build_error = f"{type(exc).__name__}: {str(exc)[:180]}"
-        logger.warning("Background signal refresh failed: %s", _signal_build_error)
+        error_text = f"{type(exc).__name__}: signal refresh failed"
+        logger.warning("SIGNAL_REFRESH_FAILED: %s", type(exc).__name__)
     finally:
-        _signal_build_lock.release()
+        elapsed_ms = round((time.monotonic() - started) * 1000, 1)
+        with _lock:
+            _signal_build_metrics["last_duration_ms"] = elapsed_ms
+            _signal_build_metrics["build_count"] = int(_signal_build_metrics.get("build_count", 0)) + 1
+            _signal_build_metrics["last_error"] = error_text
+            _signal_build_metrics["in_flight"] = False
+            if _signal_cache is not None:
+                _signal_cache["performance"] = {
+                    "signal_build_ms": elapsed_ms,
+                    "signal_build_count": _signal_build_metrics["build_count"],
+                    "single_flight": True,
+                    "background_refresh": True,
+                }
 
 
-def _stale_signal_snapshot(payload: dict[str, Any], cache_age_seconds: float) -> dict[str, Any]:
-    """Keep last-known values visible but fail closed while a refresh is running."""
-    stale = dict(payload)
-    stale["live"] = False
-    stale["refresh"] = {
-        "state": "refreshing",
-        "cache_age_seconds": round(cache_age_seconds, 2),
-        "message": "Previous snapshot shown as stale; no trade plan is actionable until refresh completes.",
-    }
-    feed = dict(stale.get("feed") or {})
-    feed["connected"] = False
-    feed["message"] = "Signal refresh in progress; last snapshot is marked stale."
-    stale["feed"] = feed
-    stale["trade_plans"] = []
-    stale["qualified_trade_count"] = 0
-    stale["order_placement_enabled"] = False
-    stale["market"] = {
-        key: {**dict(row or {}), "live": False, "error": "Stale snapshot; waiting for broker refresh."}
-        for key, row in (stale.get("market") or {}).items()
-    }
-    stale_signals: dict[str, Any] = {}
-    for key, row in (stale.get("signals") or {}).items():
-        signal = dict(row or {})
-        signal["decision"] = "WAIT"
-        reasons = list(signal.get("reasons") or [])
-        reasons.append("Snapshot is stale while live broker refresh is running.")
-        signal["reasons"] = reasons
-        signal["reason"] = reasons
-        signal["guards"] = reasons
-        stale_signals[key] = signal
-    stale["signals"] = stale_signals
-    return stale
+def _stale_signal_snapshot(cached: dict[str, Any], age_seconds: float | None) -> dict[str, Any]:
+    # JSON round-trip makes a detached copy so stale flags never mutate the cache.
+    snapshot = json.loads(json.dumps(cached, default=str))
+    snapshot["live"] = False
+    snapshot["refreshing"] = True
+    snapshot["cache_age_seconds"] = round(age_seconds, 1) if age_seconds is not None else None
+    snapshot["feed"] = {**(snapshot.get("feed") or {}), "connected": False, "mode": "CACHED_REFRESHING"}
+    for row in (snapshot.get("market") or {}).values():
+        if isinstance(row, dict):
+            row["live"] = False
+            row["cached"] = True
+            row["feed_mode"] = "CACHED_REFRESHING"
+    for row in (snapshot.get("signals") or {}).values():
+        if isinstance(row, dict):
+            decision = str(row.get("decision") or "WAIT").upper()
+            if decision in ("CALL BUY", "PUT BUY"):
+                row["candidate_decision"] = decision
+            row["decision"] = "WAIT"
+            row["data_fresh"] = False
+            validation = dict(row.get("live_validation") or {})
+            validation["decision"] = "WAIT"
+            validation["verdict"] = "WARN"
+            blocks = list(validation.get("blocks") or [])
+            blocks.append("Signal refresh is in progress; cached data is not actionable.")
+            validation["blocks"] = blocks
+            row["live_validation"] = validation
+    snapshot["trade_plans"] = []
+    snapshot["qualified_trade_count"] = 0
+    snapshot["message"] = "Showing cached quotes as stale while the broker snapshot refreshes in the background."
+    return snapshot
 
 
 def _get_signals(force: bool = False) -> dict[str, Any]:
-    """Serve fresh cache immediately; refresh expired cache asynchronously and fail closed."""
-    global _signal_build_error
-    if force:
-        # Explicit forced calls and deterministic tests retain synchronous semantics.
-        with _signal_build_lock:
-            return _build_signals(force=True)
-
-    now = time.monotonic()
+    """Serve immediately and refresh expired market snapshots in a single background worker."""
+    global _signal_build_metrics
     with _lock:
+        age = time.monotonic() - _signal_cache_at if _signal_cache is not None else None
+        fresh = _signal_cache is not None and age is not None and age < SIGNAL_CACHE_SECONDS
+        if fresh and not force:
+            return _signal_cache
         cached = _signal_cache
-        cache_age = now - _signal_cache_at if cached is not None else None
-        if cached is not None and cache_age is not None and cache_age < SIGNAL_CACHE_SECONDS:
-            return cached
+        start_refresh = not bool(_signal_build_metrics.get("in_flight"))
+        if start_refresh:
+            _signal_build_metrics["in_flight"] = True
+    if start_refresh:
+        worker = threading.Thread(target=_refresh_signals_worker, name="signal-refresh", daemon=True)
+        worker.start()
+    if cached is not None:
+        return _stale_signal_snapshot(cached, age)
+    payload = _empty_payload("Initial Angel One snapshot is loading in the background; retry shortly.")
+    payload["refreshing"] = True
+    payload["performance"] = {"signal_build_ms": _signal_build_metrics.get("last_duration_ms"), "in_flight": True}
+    return payload
 
-    if _signal_build_lock.acquire(blocking=False):
-        _signal_build_error = None
-        threading.Thread(target=_refresh_signals_in_background, name="signal-cache-refresh", daemon=True).start()
-
-    with _lock:
-        cached = _signal_cache
-        cache_age = time.monotonic() - _signal_cache_at if cached is not None else None
-    if cached is not None and cache_age is not None:
-        return _stale_signal_snapshot(cached, cache_age)
-    reason = _signal_build_error or "Signal refresh is running; waiting for first broker snapshot."
-    return _empty_payload(reason)
-
-
-def _build_signals(force: bool = False) -> dict[str, Any]:
+def _get_signals_uncached(force: bool = False) -> dict[str, Any]:
     global _signal_cache, _signal_cache_at, _last_market
     with _lock:
         if _signal_cache is not None and not force and time.monotonic() - _signal_cache_at < SIGNAL_CACHE_SECONDS:
@@ -1623,8 +1686,12 @@ def _build_signals(force: bool = False) -> dict[str, Any]:
         signals: dict[str, Any] = {}
         market: dict[str, Any] = {}
         for index in INDEXES:
+            index_started = time.perf_counter()
             try:
                 result, quote = _index_snapshot(adapter, rows, index)
+                elapsed_index_ms = round((time.perf_counter() - index_started) * 1000, 2)
+                result["performance"] = {**dict(result.get("performance") or {}), "index_snapshot_ms": elapsed_index_ms}
+                quote["performance"] = {"index_snapshot_ms": elapsed_index_ms}
                 signals[index] = result
                 market[index] = quote
             except Exception as exc:
@@ -1633,15 +1700,21 @@ def _build_signals(force: bool = False) -> dict[str, Any]:
                 # option Greeks or option ATR). A signal failure must not blank
                 # the Market/Dashboard pages or silently become an actionable trade.
                 reason = str(exc)[:220]
+                elapsed_index_ms = round((time.perf_counter() - index_started) * 1000, 2)
                 signals[index] = _wait_signal(index, reason)
+                signals[index]["performance"] = {"index_snapshot_ms": elapsed_index_ms, "five_layer_validation_ms": None}
                 market_row: dict[str, Any] = {
                     "ltp": None, "age_seconds": None, "feed_mode": "DATA_ERROR",
+                    "performance": {"index_snapshot_ms": elapsed_index_ms},
                     "source": "angelone_smartapi", "live": False,
                     "error": reason, "signal_error": reason, "option_chain": [],
                 }
                 try:
                     index_config = INDEXES[index]
-                    spot_fallback = _quotes(adapter, index_config["exchange"], [index_config["token"]]).get(index_config["token"])
+                    fallback_quotes = _quotes(adapter, index_config["exchange"], [str(index_config["token"])])
+                    spot_fallback = fallback_quotes.get(str(index_config["token"]))
+                    if spot_fallback is None:
+                        spot_fallback = next((value for key, value in fallback_quotes.items() if str(key) == str(index_config["token"])), None)
                     if spot_fallback:
                         spot_ltp = _number(spot_fallback.get("ltp"))
                         spot_timestamp = _quote_timestamp(spot_fallback)
@@ -1954,19 +2027,114 @@ def ai_status(_: str = Depends(_device)) -> dict[str, Any]:
     }
 
 
+def _run_ai_validation_probe(provider: str, api_key: str, model: str, endpoint: str, market_row: dict[str, Any]) -> dict[str, Any]:
+    """Perform one real authenticated model call and capture a bounded, secret-free result."""
+    started = time.perf_counter()
+    source_payload = {
+        "source": market_row.get("source"),
+        "source_timestamp": market_row.get("source_timestamp") or market_row.get("timestamp"),
+        "ltp": market_row.get("ltp"),
+        "age_seconds": market_row.get("age_seconds"),
+        "live": market_row.get("live") is True,
+    }
+    prompt = (
+        "Validate this market snapshot only as a secondary reviewer. Never invent missing facts. "
+        "Return one JSON object with keys verdict (PASS or WAIT) and reason. PASS only if source is "
+        "angelone_smartapi, source_timestamp exists, ltp is a positive number, age_seconds is numeric "
+        "between 0 and 60, and live is true. Otherwise verdict must be WAIT. This AI result cannot "
+        "override deterministic risk gates. Snapshot: " + json.dumps(source_payload, separators=(",", ":"))
+    )
+    body = json.dumps({
+        "model": model,
+        "temperature": 0,
+        "max_tokens": 100,
+        "messages": [
+            {"role": "system", "content": "You are a cautious market-data validation assistant. Output JSON only."},
+            {"role": "user", "content": prompt},
+        ],
+    }).encode("utf-8")
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    if provider == "openrouter":
+        headers["HTTP-Referer"] = "https://github.com/sparmar3786-pixel/AI-TRADING"
+        headers["X-Title"] = "AI-TRADING Data Validator"
+    request = urllib.request.Request(endpoint, data=body, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=8) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        choices = data.get("choices") or []
+        output = str(((choices[0].get("message") or {}).get("content") if choices else "") or "").strip()
+        # Parse the model's verdict if possible; malformed output is WAIT, never PASS.
+        verdict = "WAIT"
+        reason = "Model did not return a parseable validation verdict."
+        try:
+            cleaned = output.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+            parsed = json.loads(cleaned)
+            candidate = str(parsed.get("verdict", "WAIT")).upper()
+            verdict = "PASS" if candidate == "PASS" and source_payload["live"] and source_payload["source_timestamp"] and isinstance(source_payload["ltp"], (int, float)) and source_payload["ltp"] > 0 and isinstance(source_payload["age_seconds"], (int, float)) and 0 <= source_payload["age_seconds"] <= 60 else "WAIT"
+            reason = str(parsed.get("reason") or "")[:180]
+        except (ValueError, TypeError, AttributeError):
+            reason = output[:180] or reason
+        return {
+            "provider": provider, "configured": True, "ok": bool(output),
+            "status": "ok" if output else "empty_model_response",
+            "model": model, "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+            "verdict": verdict, "reason": reason, "output": output[:240],
+        }
+    except urllib.error.HTTPError as exc:
+        # Do not echo provider response bodies: they can include account metadata.
+        return {"provider": provider, "configured": True, "ok": False, "status": "http_error",
+                "model": model, "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+                "verdict": "WAIT", "error": f"Provider returned HTTP {exc.code}."}
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        return {"provider": provider, "configured": True, "ok": False, "status": "connection_error",
+                "model": model, "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+                "verdict": "WAIT", "error": f"Provider request failed ({type(exc).__name__})."}
+
+
 @app.post("/v1/providers/ai/test")
 def test_ai_providers(_: str = Depends(_device)) -> dict[str, Any]:
-    checks = [
-        {"provider": "gemini", "configured": _provider_key_present("GEMINI_API_KEY", "GOOGLE_API_KEY"), "ok": False},
-        {"provider": "openrouter", "configured": _provider_key_present("OPENROUTER_API_KEY"), "ok": False},
-        {"provider": "openai", "configured": _provider_key_present("OPENAI_API_KEY"), "ok": False},
+    # A test call is deliberately explicit/on-demand, not added to every market tick.
+    # It validates a real broker snapshot when one is cached; no sample price is sent.
+    market_row = dict(((_signal_cache or {}).get("market") or {}).get("NIFTY") or {})
+    source_stamp = _iso(market_row.get("source_timestamp") or market_row.get("timestamp"))
+    parsed_stamp = datetime.fromisoformat(source_stamp) if source_stamp else None
+    actual_age = (_utc_now() - parsed_stamp).total_seconds() if parsed_stamp else None
+    market_row["age_seconds"] = round(actual_age, 2) if actual_age is not None else None
+    market_row["live"] = (
+        market_row.get("source") == "angelone_smartapi"
+        and _number(market_row.get("ltp")) is not None
+        and (_number(market_row.get("ltp")) or 0) > 0
+        and actual_age is not None and 0 <= actual_age <= 60
+    )
+    checks: list[dict[str, Any]] = [
+        {"provider": "gemini", "configured": _provider_key_present("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+         "ok": False, "status": "configured_not_tested", "verdict": "WAIT",
+         "message": "Gemini remains separate; this button probes OpenAI and OpenRouter."}
     ]
+    openai_key = os.getenv("OPENAI_API_KEY", "").strip()
+    openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    if openai_key:
+        checks.append(_run_ai_validation_probe(
+            "openai", openai_key, os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip(),
+            "https://api.openai.com/v1/chat/completions", market_row))
+    else:
+        checks.append({"provider": "openai", "configured": False, "ok": False, "status": "not_configured", "verdict": "WAIT"})
+    if openrouter_key:
+        checks.append(_run_ai_validation_probe(
+            "openrouter", openrouter_key, os.getenv("OPENROUTER_MODEL", "openrouter/free").strip(),
+            "https://openrouter.ai/api/v1/chat/completions", market_row))
+    else:
+        checks.append({"provider": "openrouter", "configured": False, "ok": False, "status": "not_configured", "verdict": "WAIT"})
+    tested = [item for item in checks if item.get("provider") in ("openai", "openrouter")]
+    succeeded = [item for item in tested if item.get("ok") is True]
     return {
-        "status": "configured_not_connectivity_tested" if any(item["configured"] for item in checks) else "not_configured",
-        "checks": checks,
-        "message": "Credentials are present, but no provider response is marked OK until an actual authenticated model request is implemented and verified." if any(item["configured"] for item in checks) else "No cloud AI provider key is configured.",
+        "status": "ok" if succeeded else ("not_configured" if not any(item.get("configured") for item in tested) else "failed"),
+        "checks": checks, "providers": {item["provider"]: item for item in checks},
+        "market_snapshot_available": bool(market_row.get("source_timestamp") and market_row.get("ltp") is not None),
+        "message": "Actual authenticated model calls completed. AI verdicts are secondary only and cannot override deterministic risk gates."
+            if succeeded else "OpenAI/OpenRouter test did not complete successfully. Inspect each provider status and Railway variables.",
+        "signal_only": True, "order_placement_enabled": False,
     }
-
 
 @app.post("/v1/providers/search/status")
 def search_provider_status(_: str = Depends(_device)) -> dict[str, Any]:
