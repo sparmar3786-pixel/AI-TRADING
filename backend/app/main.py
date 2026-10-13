@@ -2629,10 +2629,10 @@ def test_ai_providers(_: str = Depends(_device)) -> dict[str, Any]:
 
 @app.post("/v1/ai/review-signal")
 def review_signal_with_gemini(payload: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
-    """Gemini may veto a candidate; it can never promote a blocked deterministic signal."""
+    """Use Gemini first and OpenRouter as fallback; neither can override deterministic risk gates."""
     index = str(payload.get("index") or "").strip().upper()
     if index not in INDEXES:
-        return {"provider": "gemini", "ok": False, "verdict": "WAIT", "decision": "WAIT", "status": "invalid_index", "reason": "Index is not supported."}
+        return {"provider": "none", "ok": False, "verdict": "WAIT", "decision": "WAIT", "status": "invalid_index", "reason": "Index is not supported."}
     snapshot = dict(_signal_cache or {})
     signal_map = dict(snapshot.get("signals") or {})
     market_map = dict(snapshot.get("market") or {})
@@ -2643,20 +2643,27 @@ def review_signal_with_gemini(payload: dict[str, Any], _: str = Depends(_device)
     expected = str(signal.get("decision") or "WAIT").upper()
     if expected not in ("CALL BUY", "PUT BUY") or validation.get("verdict") != "PASS" or not checks or not all(value is True for value in checks.values()):
         return {
-            "provider": "gemini", "configured": _provider_key_present("GEMINI_API_KEY", "GOOGLE_API_KEY"),
-            "ok": False, "verdict": "WAIT", "decision": "WAIT", "status": "deterministic_gate_blocked",
-            "reason": "The backend five-layer checks are not all PASS; Gemini cannot override them.",
+            "provider": "none", "configured": False, "ok": False, "verdict": "WAIT", "decision": "WAIT",
+            "status": "deterministic_gate_blocked",
+            "reason": "The backend five-layer checks are not all PASS; cloud AI cannot override them.",
             "blocks": list(validation.get("blocks") or ["DETERMINISTIC_VALIDATION_NOT_PASS"]),
             "checks": {"backend_validation": False, "ai_direction_consistent": False},
             "signal_only": True, "order_placement_enabled": False,
         }
-    api_key = (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()
-    model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
-    if not api_key:
+    providers: list[tuple[str, str, str]] = []
+    gemini_key = (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()
+    if gemini_key:
+        providers.append(("gemini", gemini_key, os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()))
+    openrouter_key = (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPEN_ROUTER_API_KEY") or "").strip()
+    if openrouter_key:
+        providers.append(("openrouter", openrouter_key, os.getenv("OPENROUTER_MODEL", "openrouter/free").strip()))
+    if not providers:
         return {
-            "provider": "gemini", "configured": False, "ok": False, "verdict": "WAIT",
-            "decision": "WAIT", "status": "not_configured", "reason": "GEMINI_API_KEY is not configured on the signal service.",
-            "blocks": ["GEMINI_NOT_CONFIGURED"], "checks": {"backend_validation": True, "ai_direction_consistent": False},
+            "provider": "none", "configured": False, "ok": False, "verdict": "WAIT",
+            "decision": "WAIT", "status": "not_configured",
+            "reason": "Configure GEMINI_API_KEY and/or OPENROUTER_API_KEY on the backend.",
+            "blocks": ["AI_PROVIDER_NOT_CONFIGURED"],
+            "checks": {"backend_validation": True, "ai_direction_consistent": False},
             "signal_only": True, "order_placement_enabled": False,
         }
     review_input = {
@@ -2665,36 +2672,50 @@ def review_signal_with_gemini(payload: dict[str, Any], _: str = Depends(_device)
         "signal": {key: signal.get(key) for key in ("decision", "strike", "option_side", "entry", "stop_loss", "target", "data_fresh")},
         "live_validation": validation,
     }
-    try:
-        result = _run_gemini_completion(api_key, model, [
-            {"role": "system", "content": "You are a strict independent trading risk reviewer. Read only the supplied JSON. Return ONLY JSON with keys verdict (PASS or WAIT), decision (CALL BUY, PUT BUY, or WAIT), conflicting_direction (boolean), reason (string). Return PASS only when the provided deterministic checks are all true and the candidate has no missing/stale data, invalid quote, conflicting direction, invalid stop loss/target, or failed risk gate. If uncertain return WAIT. Do not invent prices. Confidence is not profit probability."},
-            {"role": "user", "content": json.dumps(review_input, separators=(",", ":"), default=str)[:10000]},
-        ])
-        text_response = str(result.get("answer") or "").strip()
-        match = re.search(r"\{.*\}", text_response, re.DOTALL)
-        parsed = json.loads(match.group(0)) if match else {}
-        ai_decision = str(parsed.get("decision") or "WAIT").strip().upper()
-        ai_verdict = str(parsed.get("verdict") or "WAIT").strip().upper()
-        conflict = parsed.get("conflicting_direction") is True or ai_decision != expected
-        passed = ai_verdict == "PASS" and ai_decision == expected and not conflict
-        return {
-            "provider": "gemini", "configured": True, "ok": True, "status": "ok",
-            "model": result.get("model"), "latency_ms": result.get("latency_ms"),
-            "verdict": "PASS" if passed else "WAIT", "decision": expected if passed else "WAIT",
-            "ai_decision": ai_decision, "ai_direction_consistent": not conflict,
-            "reason": str(parsed.get("reason") or "Gemini did not confirm every risk condition.")[:500],
-            "blocks": [] if passed else ["GEMINI_REVIEW_NOT_PASS"],
-            "checks": {"backend_validation": True, "ai_direction_consistent": not conflict, "ai_verdict_pass": ai_verdict == "PASS"},
-            "signal_only": True, "order_placement_enabled": False,
-        }
-    except (RuntimeError, ValueError, TypeError) as exc:
-        return {
-            "provider": "gemini", "configured": True, "ok": False, "verdict": "WAIT",
-            "decision": "WAIT", "status": str(exc)[:100], "reason": "Gemini review failed or returned invalid JSON.",
-            "blocks": ["GEMINI_REVIEW_FAILED"],
-            "checks": {"backend_validation": True, "ai_direction_consistent": False},
-            "signal_only": True, "order_placement_enabled": False,
-        }
+    messages = [
+        {"role": "system", "content": "You are a strict independent trading risk reviewer. Read only the supplied JSON. Return ONLY JSON with keys verdict (PASS or WAIT), decision (CALL BUY, PUT BUY, or WAIT), conflicting_direction (boolean), reason (string). Return PASS only when the provided deterministic checks are all true and the candidate has no missing/stale data, invalid quote, conflicting direction, invalid stop loss/target, or failed risk gate. If uncertain return WAIT. Do not invent prices. Confidence is not profit probability."},
+        {"role": "user", "content": json.dumps(review_input, separators=(",", ":"), default=str)[:10000]},
+    ]
+    failures: list[dict[str, str]] = []
+    for provider, api_key, model in providers:
+        try:
+            if provider == "gemini":
+                result = _run_gemini_completion(api_key, model, messages)
+            else:
+                result = _run_openai_compatible_completion(
+                    api_key, model, messages, provider="openrouter",
+                    endpoint=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1/chat/completions").strip(),
+                )
+            text_response = str(result.get("answer") or "").strip()
+            match = re.search(r"\{.*\}", text_response, re.DOTALL)
+            parsed = json.loads(match.group(0)) if match else {}
+            ai_decision = str(parsed.get("decision") or "WAIT").strip().upper()
+            ai_verdict = str(parsed.get("verdict") or "WAIT").strip().upper()
+            conflict = parsed.get("conflicting_direction") is True or ai_decision != expected
+            passed = ai_verdict == "PASS" and ai_decision == expected and not conflict
+            return {
+                "provider": provider, "configured": True, "ok": True, "status": "ok",
+                "model": result.get("model"), "latency_ms": result.get("latency_ms"),
+                "verdict": "PASS" if passed else "WAIT", "decision": expected if passed else "WAIT",
+                "ai_decision": ai_decision, "ai_direction_consistent": not conflict,
+                "reason": str(parsed.get("reason") or f"{provider} did not confirm every risk condition.")[:500],
+                "blocks": [] if passed else [f"{provider.upper()}_REVIEW_NOT_PASS"],
+                "checks": {"backend_validation": True, "ai_direction_consistent": not conflict, "ai_verdict_pass": ai_verdict == "PASS"},
+                "provider_failures": failures,
+                "signal_only": True, "order_placement_enabled": False,
+            }
+        except (RuntimeError, ValueError, TypeError) as exc:
+            failures.append({"provider": provider, "status": str(exc)[:100]})
+    return {
+        "provider": "none", "configured": True, "ok": False, "verdict": "WAIT",
+        "decision": "WAIT", "status": "all_providers_failed",
+        "reason": "Gemini and OpenRouter review failed or returned invalid JSON.",
+        "provider_failures": failures,
+        "blocks": ["AI_REVIEW_FAILED"],
+        "checks": {"backend_validation": True, "ai_direction_consistent": False},
+        "signal_only": True, "order_placement_enabled": False,
+    }
+
 
 @app.post("/v1/providers/search/status")
 def search_provider_status(_: str = Depends(_device)) -> dict[str, Any]:
