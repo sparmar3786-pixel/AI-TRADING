@@ -26,13 +26,13 @@ Angel One REST/WebSocket → exchange-timestamped market snapshot → shared mar
 - Notifications: timestamp, index, failing stage, latency, provider/model, validation verdict and safe error summary; never include API keys/tokens.
 
 ## Required fix order
-1. Add single-flight protection for signal cache misses; re-check cache after acquiring the build lock so multiple clients share one refresh.
+1. Confirm the existing single-background-refresh guard prevents duplicate broker fan-out under concurrent clients; add a load test if 499s recur.
 2. Instrument stage durations (market snapshot, option quotes, Greeks, ATR, commodities, total build) and expose them in diagnostics.
 3. Reduce duplicate polling and have WebSocket consumers use the shared cached snapshot; verify no repeated 499s under concurrent app + WS clients.
 4. Implement actual OpenAI and OpenRouter authenticated inference/test calls server-side; show output, model, latency and validation verdict only after a real response.
 5. Add real price-level bid/ask depth to /ws from broker data before rendering Sell × Buy / POC / imbalance. If depth is absent, show an explicit unavailable state rather than fabricated cells.
 6. Remove repository/reference cards from operational tabs; retain only app workflows and optionally a single dedicated reference library.
-7. Verify Flutter analysis/tests, Python tests, CI APK artifact, and live Angel One timestamps separately.
+7. Verify Flutter analysis/tests, Python tests, CI APK artifact, and live Angel One timestamps separately. The Android build workflow's service manifest setting must match the plugin's exported=true declaration to avoid manifest-merger failure.
 
 ## Footprint design requirements from supplied index(1).html
 Preserve symbol selector; timeframes 1m, 3m, 5m, 15m, 30m, 1h; zoom; live control; manual; price axis; Sell × Buy ladder; green/red volume cells; POC outline; 3x imbalance; delta, volume, Buy ord and Sell ord; pan/drag and last-price line. Demo mode must not be used.
