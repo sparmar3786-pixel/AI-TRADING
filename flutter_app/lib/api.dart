@@ -53,7 +53,9 @@ class FreshApi {
   static const Set<String> _signalRoutes = <String>{
     '/v1/system/diagnostics',
     '/v1/metadata',
-    '/v1/ai/status',\n    '/v1/ai/validate',\n    '/v1/providers/ai/test',
+    '/v1/ai/status',
+    '/v1/ai/validate',
+    '/v1/providers/ai/test',
     '/v1/providers/search/test',
     '/v1/providers/search/status',
     '/v1/angel/status',
@@ -189,7 +191,8 @@ class FreshApi {
       final rawDetail = decoded is Map ? decoded['detail'] : null;
       String detail = '';
       if (rawDetail is String) {
-        detail = rawDetail.replaceAll(RegExp(r'[\r\n]+'), ' ').trim();
+        detail = rawDetail.replaceAll(RegExp(r'[\r
+]+'), ' ').trim();
       } else if (rawDetail is Map) {
         // Angel One login diagnostics are structured. Show actionable broker
         // context while deliberately excluding credential/token-shaped fields.
@@ -224,7 +227,8 @@ class FreshApi {
   Future<Map<String, dynamic>> systemDiagnostics() => getJson('/v1/system/diagnostics');
   Future<Map<String, dynamic>> metadata() => getJson('/v1/metadata');
   Future<Map<String, dynamic>> angelStatus() => getJson('/v1/angel/status');
-  Future<Map<String, dynamic>> aiStatus() => getJson('/v1/ai/status');\n  Future<Map<String, dynamic>> testAIProviders() =>
+  Future<Map<String, dynamic>> aiStatus() => getJson('/v1/ai/status');
+  Future<Map<String, dynamic>> testAIProviders() =>
       postJson('/v1/providers/ai/test', {});
   Future<Map<String, dynamic>> testSearchProviders() =>
       postJson('/v1/providers/search/test', {});
