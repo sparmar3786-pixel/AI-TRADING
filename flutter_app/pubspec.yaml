@@ -28,3 +28,4 @@ flutter:
   assets:
     - assets/order_flow.html
     - assets/order_flow_footprint.html
+    - assets/prochart.html
