@@ -7,6 +7,7 @@
 - /health, /v1/angel/status, and /v1/system/diagnostics frequently returned 200; route reachability does not prove fresh market data.
 
 ## Confirmed code-path issues
+- CI container smoke test exposed `ModuleNotFoundError: No module named 'backend'` because the service is launched as `app.main` inside the Docker image. The router import now supports both container and repository test module paths; confirm the next container smoke test passes.
 1. flutter_app/lib/main.dart: refresh() sets signalsEndpointOnline=false on signal request errors; _appBarStatus then renders API UP • DATA ERROR.
 2. flutter_app/lib/api.dart: normal GET timeout defaults to 30 seconds.
 3. backend/app/main.py: _get_signals() uses a single background refresh guarded by _signal_build_metrics['in_flight'] and serves explicitly stale cached snapshots while refreshing. This should reduce duplicate broker fan-out; verify under concurrent app + WebSocket load because earlier logs showed HTTP 499s.
