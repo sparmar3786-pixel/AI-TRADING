@@ -7,10 +7,11 @@
 - /health, /v1/angel/status, and /v1/system/diagnostics frequently returned 200; route reachability does not prove fresh market data.
 
 ## Confirmed code-path issues
+- CI container smoke test exposed `ModuleNotFoundError: No module named 'backend'` because the service is launched as `app.main` inside the Docker image. The router import now supports both container and repository test module paths; confirm the next container smoke test passes.
 1. flutter_app/lib/main.dart: refresh() sets signalsEndpointOnline=false on signal request errors; _appBarStatus then renders API UP • DATA ERROR.
 2. flutter_app/lib/api.dart: normal GET timeout defaults to 30 seconds.
-3. backend/app/main.py: _get_signals() checks the shared cache under _lock but releases the lock before building. Concurrent cache misses can run expensive six-index broker collection simultaneously. WebSocket /ws calls _get_signals(False) every five seconds.
-4. _index_snapshot() performs spot quote, historical candles, option quote batch, Greeks and selected-option ATR work per index; six indices plus commodity snapshots create a heavy sequential refresh.
+3. backend/app/main.py: _get_signals() uses a single background refresh guarded by _signal_build_metrics['in_flight'] and serves explicitly stale cached snapshots while refreshing. This should reduce duplicate broker fan-out; verify under concurrent app + WebSocket load because earlier logs showed HTTP 499s.
+4. _index_snapshot() performs spot quote, historical candles, option quote batch, Greeks and selected-option ATR work per index; six indices plus commodity snapshots can still make refreshes slow. The SMC chart now includes real daily candles and hourly aggregates of real 5-minute candles in both normal and signal-fallback paths; live latency and broker history availability still require verification.
 5. /ws sends sampled OHLC snapshots and aggregate top-five bid/ask depth only. It does not send the lv price-level map or step required by the uploaded HTML footprint chart.
 6. Prior flutter_app/lib/order_flow_page.dart rendered simple OHLC candles and had no timeframe dropdown, POC/imbalance cells or HTML chart controls.
 7. Backend AI diagnostics state that configured OpenAI/OpenRouter credentials do not mean a provider test succeeded; authenticated inference must be implemented and verified before ok=true.
@@ -26,13 +27,13 @@ Angel One REST/WebSocket → exchange-timestamped market snapshot → shared mar
 - Notifications: timestamp, index, failing stage, latency, provider/model, validation verdict and safe error summary; never include API keys/tokens.
 
 ## Required fix order
-1. Add single-flight protection for signal cache misses; re-check cache after acquiring the build lock so multiple clients share one refresh.
+1. Confirm the existing single-background-refresh guard prevents duplicate broker fan-out under concurrent clients; add a load test if 499s recur.
 2. Instrument stage durations (market snapshot, option quotes, Greeks, ATR, commodities, total build) and expose them in diagnostics.
 3. Reduce duplicate polling and have WebSocket consumers use the shared cached snapshot; verify no repeated 499s under concurrent app + WS clients.
 4. Implement actual OpenAI and OpenRouter authenticated inference/test calls server-side; show output, model, latency and validation verdict only after a real response.
 5. Add real price-level bid/ask depth to /ws from broker data before rendering Sell × Buy / POC / imbalance. If depth is absent, show an explicit unavailable state rather than fabricated cells.
 6. Remove repository/reference cards from operational tabs; retain only app workflows and optionally a single dedicated reference library.
-7. Verify Flutter analysis/tests, Python tests, CI APK artifact, and live Angel One timestamps separately.
+7. Verify Flutter analysis/tests, Python tests, CI APK artifact, and live Angel One timestamps separately. The Android build workflow's service manifest setting must match the plugin's exported=true declaration to avoid manifest-merger failure.
 
 ## Footprint design requirements from supplied index(1).html
 Preserve symbol selector; timeframes 1m, 3m, 5m, 15m, 30m, 1h; zoom; live control; manual; price axis; Sell × Buy ladder; green/red volume cells; POC outline; 3x imbalance; delta, volume, Buy ord and Sell ord; pan/drag and last-price line. Demo mode must not be used.

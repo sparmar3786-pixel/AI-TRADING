@@ -1,0 +1,80 @@
+name: Verify source fixes (no APK)
+
+on:
+  push:
+    branches:
+      - fix/android-desugaring-no-apk-build-20261013
+    paths:
+      - '.github/scripts/**'
+      - '.github/workflows/verify-source-no-apk.yml'
+      - 'backend/**'
+      - 'tests/**'
+      - 'flutter_app/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-source-no-apk-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  python-tests:
+    name: Python syntax and backend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Android CI SDK guards without building an APK
+        run: |
+          set -euo pipefail
+          grep -F 'uses: android-actions/setup-android@v3' .github/workflows/android-apk.yml
+          grep -F "packages: 'cmdline-tools;latest platform-tools'" .github/workflows/android-apk.yml
+          grep -F 'name: Enforce Android minSdk 26' .github/workflows/android-apk.yml
+          grep -F 'command -v sdkmanager' .github/workflows/android-apk.yml
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: python -m pip install -r backend/requirements.txt
+      - name: Compile Python sources
+        run: |
+          python -m py_compile .github/scripts/ensure_android_desugaring.py
+          python -m py_compile .github/scripts/test_ensure_android_desugaring.py
+          python -m py_compile tests/test_backend_api.py
+      - name: Test Android desugaring patch
+        working-directory: .
+        run: python .github/scripts/test_ensure_android_desugaring.py
+      - name: Run backend regression tests
+        run: python -m unittest discover -s tests -v
+
+  flutter-source-tests:
+    name: Flutter analysis and tests (no APK)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: flutter_app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate Android project files (no build)
+        run: flutter create --platforms=android --project-name ai_trading_signal .
+      - name: Verify generated Gradle desugaring configuration
+        working-directory: .
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/ensure_android_desugaring.py
+          python3 .github/scripts/ensure_android_desugaring.py
+          grep -nE 'isCoreLibraryDesugaringEnabled|coreLibraryDesugaring' flutter_app/android/app/build.gradle.kts
+      - name: Install Flutter dependencies
+        run: flutter pub get
+      - name: Analyze Dart
+        run: flutter analyze --no-fatal-infos
+      - name: Run Flutter tests
+        run: flutter test

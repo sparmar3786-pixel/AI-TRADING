@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>ProChart • Live candles</title>
+<style>
+:root{color-scheme:dark;background:#0e1420;color:#e6eaf3;font:12px system-ui}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0e1420}header{height:34px;padding:8px 10px;display:flex;gap:12px;background:#151c2b;border-bottom:1px solid #222c40;white-space:nowrap}#symbol{font-weight:700}#status{color:#ffb74d}canvas{display:block;width:100%;height:calc(100% - 34px);touch-action:pan-y}
+</style></head><body><header><span id="symbol">NIFTY</span><span id="price">—</span><span id="status">Waiting for live API candles</span></header><canvas id="chart"></canvas>
+<script>
+(function(){
+const canvas=document.getElementById('chart'),ctx=canvas.getContext('2d');let candles=[],symbol='NIFTY',theme={bg:'#0e1420',grid:'#222c40',text:'#8792aa',up:'#22c58b',down:'#ff5b72'};
+function resize(){const dpr=window.devicePixelRatio||1;canvas.width=Math.max(1,canvas.clientWidth*dpr);canvas.height=Math.max(1,canvas.clientHeight*dpr);ctx.setTransform(dpr,0,0,dpr,0,0);draw()}window.addEventListener('resize',resize);
+function setMarketData(payload){try{const obj=typeof payload==='string'?JSON.parse(payload):payload;const rows=Array.isArray(obj)?obj:(obj.candles||[]);symbol=obj.symbol||symbol;candles=rows.map(x=>({t:x.time??x.t??x.timestamp??'',o:Number(x.open??x.o),h:Number(x.high??x.h),l:Number(x.low??x.l),c:Number(x.close??x.c),v:Number(x.volume??x.v??0)})).filter(x=>[x.o,x.h,x.l,x.c].every(Number.isFinite)&&x.h>=Math.max(x.o,x.c,x.l)&&x.l<=Math.min(x.o,x.c,x.h));document.getElementById('symbol').textContent=symbol;document.getElementById('status').textContent=candles.length?'LIVE API SNAPSHOT • '+candles.length+' candles':'No valid live candles';draw()}catch(e){document.getElementById('status').textContent='Invalid candle payload';draw()}}
+window.setMarketData=setMarketData;
+function draw(){const w=canvas.clientWidth,h=canvas.clientHeight;if(!w||!h)return;ctx.fillStyle=theme.bg;ctx.fillRect(0,0,w,h);if(!candles.length){ctx.fillStyle=theme.text;ctx.font='14px system-ui';ctx.textAlign='center';ctx.fillText('Waiting for real API candles — demo data disabled',w/2,h/2);document.getElementById('price').textContent='—';return}
+const shown=candles.slice(-Math.max(20,Math.floor((w-60)/8))),left=8,right=56,top=18,bottom=18,pw=w-left-right,ph=h-top-bottom;let lo=Math.min(...shown.map(x=>x.l)),hi=Math.max(...shown.map(x=>x.h));if(!(hi>lo)){lo-=1;hi+=1}const pad=(hi-lo)*.06;lo-=pad;hi+=pad;const y=p=>top+(hi-p)/(hi-lo)*ph;
+ctx.font='10px system-ui';ctx.strokeStyle=theme.grid;ctx.fillStyle=theme.text;ctx.textAlign='left';for(let i=0;i<5;i++){const yy=top+i*ph/4;ctx.beginPath();ctx.moveTo(left,yy);ctx.lineTo(left+pw,yy);ctx.stroke();ctx.fillText((hi-i*(hi-lo)/4).toFixed(2),left+pw+4,yy+3)}
+const step=pw/shown.length,body=Math.max(1,Math.min(8,step*.58));shown.forEach((b,i)=>{const x=left+i*step+step/2,up=b.c>=b.o;ctx.strokeStyle=ctx.fillStyle=up?theme.up:theme.down;ctx.beginPath();ctx.moveTo(x,y(b.h));ctx.lineTo(x,y(b.l));ctx.stroke();const yo=y(Math.max(b.o,b.c)),yc=y(Math.min(b.o,b.c));ctx.fillRect(x-body/2,yo,body,Math.max(1,yc-yo))});
+const last=shown[shown.length-1],prev=shown[shown.length-2]||last;document.getElementById('price').textContent=last.c.toFixed(2)+' '+(last.c>=prev.c?'+':'')+((last.c-prev.c)/(prev.c||1)*100).toFixed(2)+'%';document.getElementById('price').style.color=last.c>=prev.c?theme.up:theme.down;document.getElementById('status').textContent='API snapshot • no simulated ticks'}
+resize();
+})();
+</script></body></html>
