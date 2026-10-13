@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import re
 import sys
@@ -37,6 +38,7 @@ from strategies.advanced import bollinger_bands, macd as advanced_macd, donchian
 from risk.position_sizing import position_size
 
 app = FastAPI(title="AI-TRADING Read-only Signals API", version="1.0.0")
+logger = logging.getLogger("ai_trading.angel")
 IST = ZoneInfo("Asia/Kolkata")
 MASTER_URL = "https://margincalculator.angelone.in/OpenAPI_File/files/OpenAPIScripMaster.json"
 MASTER_TTL_SECONDS = 6 * 60 * 60
@@ -962,9 +964,20 @@ def angel_connect(body: ConnectRequest, _: str = Depends(_device)) -> dict[str, 
         except AngelOneConfigError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except Exception as exc:
-            # Keep secrets and raw SDK payloads out of the response, but expose a
-            # bounded, non-secret SmartAPI error code/message so 502s are actionable.
+            # Log only exception type and stack trace: never log credentials,
+            # TOTP, request headers, SDK response bodies, or token values.
+            logger.warning("Angel One connect failed; exception_type=%s", type(exc).__name__, exc_info=True)
+            # Classify common transport failures without exposing raw exception text.
             error_text = str(exc)
+            exc_type = type(exc).__name__.lower()
+            if any(name in exc_type for name in ("timeout", "connection", "ssl", "socket", "network")):
+                detail = {
+                    "message": "Railway could not complete the request to Angel One SmartAPI.",
+                    "stage": "smartapi_transport",
+                    "error_code": type(exc).__name__[:32],
+                    "next_step": "Check Railway outbound HTTPS/DNS/TLS connectivity and retry. If transport succeeds, inspect the sanitized broker response stage.",
+                }
+                raise HTTPException(status_code=502, detail=detail) from exc
             match = re.search(r"Angel One SmartAPI error \(([^)]+)\): (.*)", error_text)
             if match:
                 error_code = match.group(1)[:32]
@@ -1603,4 +1616,3 @@ def historical_backtest(body: BacktestRequest, _: str = Depends(_device)) -> dic
         ],
     }
     return {"status": "ok", "source": "angelone_smartapi_historical_candles", "index": index, "exchange": exchange, "symboltoken": token, "interval": body.interval, "report": report}
-
