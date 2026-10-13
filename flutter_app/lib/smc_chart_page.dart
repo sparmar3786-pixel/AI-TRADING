@@ -28,17 +28,37 @@ class _SmcChartPageState extends State<SmcChartPage> {
   bool showOb=true, showFvg=true, showLiquidity=true, _engineBusy=false;
   Map<String,dynamic> _engineResult=const {};
   String? _engineError;
-  bool get _liveFeed => widget.market['live']==true || widget.market['feed_mode']=='LIVE';
+  DateTime? _candleTimestamp(Map<String,dynamic> candle) {
+    final raw = candle['timestamp'] ?? candle['time'] ?? candle['t'];
+    if (raw is num) {
+      final value = raw.toInt();
+      return DateTime.fromMillisecondsSinceEpoch(value > 1000000000000 ? value : value * 1000, isUtc: true);
+    }
+    return DateTime.tryParse(raw?.toString() ?? '')?.toUtc();
+  }
+
+  bool get _hasFreshLtfCandle {
+    final rows = _bars('15m');
+    if (rows.isEmpty) return false;
+    final stamp = _candleTimestamp(rows.last);
+    if (stamp == null) return false;
+    final age = DateTime.now().toUtc().difference(stamp);
+    return age >= const Duration(minutes: -2) && age <= const Duration(minutes: 20);
+  }
+
+  bool get _liveFeed =>
+      (widget.market['live'] == true || widget.market['feed_mode'] == 'LIVE') &&
+      _hasFreshLtfCandle;
   Future<void> _runEngine() async {
     final htf = _bars(strategyFormat == 'Inner Circle' ? '1W' : '1D');
     final mtf = _bars(strategyFormat == 'Inner Circle' ? '1D' : '1H');
     final ltf = _bars('15m');
     if (!_liveFeed) {
-      setState(() { _engineError='Live backend feed is not confirmed. Demo/synthetic data is disabled.'; _engineResult=const {}; });
+      setState(() { _engineError='Live backend feed or fresh 15m Angel One candles are not confirmed. Demo/synthetic data is disabled.'; _engineResult=const {}; });
       return;
     }
     if (htf.length < 5 || mtf.length < 5 || ltf.length < 5) {
-      setState(() { _engineError='Insufficient real candles: at least 5 candles are required for 1D, 1H and 15m. No demo data will be generated.'; _engineResult=const {}; });
+      setState(() { _engineError='Insufficient real candles: Guardeer requires 1D/1H/15m; Inner Circle requires 1W/1D/15m, with at least 5 candles each. No demo data will be generated.'; _engineResult=const {}; });
       return;
     }
     setState(() { _engineBusy=true; _engineError=null; _engineResult=const {}; });
