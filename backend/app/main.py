@@ -15,13 +15,14 @@ import sys
 import threading
 import time
 import urllib.request
+import asyncio
 from datetime import date, datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -910,6 +911,67 @@ def _empty_payload(reason: str) -> dict[str, Any]:
         "commodities": [{"symbol": name, "status": "WAIT", "reason": reason, "ltp": None} for name in COMMODITY_NAMES],
         "generated_at": now, "signal_only": True, "order_placement_enabled": False,
     }
+
+
+@app.websocket("/ws")
+async def market_snapshot_stream(websocket: WebSocket) -> None:
+    """Stream only broker-sourced spot snapshots; never fabricate market ticks.
+
+    The Flutter footprint view receives sampled quotes, not exchange trade prints.
+    Depth-derived delta is explicitly labelled as bid/ask depth, not aggressor volume.
+    """
+    await websocket.accept()
+    symbol = (websocket.query_params.get("symbol") or "NIFTY").strip().upper()
+    if symbol not in INDEXES:
+        await websocket.send_json({"type": "status", "mode": "WAIT", "message": "Unsupported index symbol"})
+        await websocket.close(code=1008)
+        return
+    candles: list[dict[str, Any]] = []
+    last_source_timestamp: str | None = None
+    try:
+        while True:
+            try:
+                payload = await asyncio.to_thread(_get_signals, False)
+                market_row = dict((payload.get("market") or {}).get(symbol) or {})
+                ltp = _number(market_row.get("ltp"))
+                source_timestamp = _iso(market_row.get("source_timestamp") or market_row.get("timestamp"))
+                parsed = datetime.fromisoformat(source_timestamp) if source_timestamp else None
+                age = (_utc_now() - parsed).total_seconds() if parsed else None
+                live = ltp is not None and ltp > 0 and age is not None and 0 <= age <= 60 and market_row.get("live") is True
+                if live and source_timestamp and source_timestamp != last_source_timestamp:
+                    flow = dict(market_row.get("order_flow") or {})
+                    bid_depth = _number(flow.get("buy_volume")) or 0.0
+                    ask_depth = _number(flow.get("sell_volume")) or 0.0
+                    epoch = int(parsed.timestamp()) if parsed else 0
+                    candles.append({
+                        "t": epoch, "o": ltp, "h": ltp, "l": ltp, "c": ltp,
+                        "v": bid_depth + ask_depth, "d": bid_depth - ask_depth,
+                        "source_timestamp": source_timestamp,
+                        "volume_semantics": "bid_ask_depth_not_trade_volume",
+                    })
+                    candles = candles[-250:]
+                    last_source_timestamp = source_timestamp
+                await websocket.send_json({
+                    "type": "snap", "symbol": symbol, "candles": candles,
+                    "mode": "LIVE" if live else "WAIT",
+                    "live": live, "ltp": ltp if live else None,
+                    "source_timestamp": source_timestamp,
+                    "tick_age_ms": int(age * 1000) if age is not None else None,
+                    "message": "Broker timestamped snapshots; delta is bid/ask depth, not classified trade prints.",
+                    "signal_only": True, "order_placement_enabled": False,
+                })
+            except HTTPException as exc:
+                await websocket.send_json({"type": "status", "mode": "WAIT", "message": str(exc.detail)[:180], "candles": candles})
+            except Exception:
+                await websocket.send_json({"type": "status", "mode": "WAIT", "message": "Broker snapshot unavailable; waiting for a fresh timestamped quote.", "candles": candles})
+            await asyncio.sleep(5)
+    except WebSocketDisconnect:
+        return
+    except Exception:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
 @app.get("/health")
