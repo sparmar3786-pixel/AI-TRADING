@@ -588,20 +588,25 @@ def _quotes(adapter: AngelOneReadOnly, exchange: str, tokens: list[str]) -> dict
             if not tick or _number(tick.get("ltp")) is None:
                 continue
             bid, ask, _, _ = _book(tick)
-            # Quote/option gates require a real bid and ask. If this tick mode
-            # omitted depth, request REST FULL depth instead of inventing it.
+            # Use a broker tick only when it includes a two-sided book. Otherwise
+            # fall back to rate-limited REST FULL quotes; never synthesize depth.
             if bid is not None and ask is not None:
                 output[token] = tick
     missing = [token for token in unique_tokens if token not in output]
-    if missing:
+    # SmartAPI market-data accepts at most 50 tokens per exchange in one request.
+    # Chunking prevents HTTP 400 loops on 100-contract MCX option chains.
+    for offset in range(0, len(missing), 50):
+        batch = missing[offset:offset + 50]
         try:
-            result = adapter.market_data("FULL", {exchange: missing})
+            result = adapter.market_data("FULL", {exchange: batch})
             for row in _quote_rows(result):
                 token = str(row.get("symbolToken") or row.get("symboltoken") or row.get("token") or "")
                 if token:
                     row["_source_mode"] = "REST_FULL_DEPTH"
                     output[token] = row
         except Exception:
+            # Preserve any real ticks already collected. If no quote succeeded,
+            # let the route return a typed data error instead of an empty success.
             if not output:
                 raise
     return output
@@ -2302,25 +2307,71 @@ def search_provider_status(_: str = Depends(_device)) -> dict[str, Any]:
 def test_search_providers(_: str = Depends(_device)) -> dict[str, Any]:
     exa = _provider_key_present("EXA_API_KEY")
     tavily = _provider_key_present("TAVILY_API_KEY")
-    evidence = fetch_market_news_sentiment("NIFTY", exa_api_key=os.getenv("EXA_API_KEY"), tavily_api_key=os.getenv("TAVILY_API_KEY"))
-    sources = list(evidence.get("sources") or [])
+    # Force a fresh network probe: cached headlines must never make a broken
+    # provider appear green after its key was revoked or its quota was exhausted.
+    evidence = fetch_market_news_sentiment(
+        "NIFTY", exa_api_key=os.getenv("EXA_API_KEY"),
+        tavily_api_key=os.getenv("TAVILY_API_KEY"), force=True,
+    )
+    provider_checks = dict(evidence.get("provider_checks") or {})
+    checks = []
+    for name, configured in (("exa", exa), ("tavily", tavily)):
+        observed = dict(provider_checks.get(name) or {})
+        checks.append({
+            "provider": name, "configured": configured,
+            "ok": configured and observed.get("ok") is True,
+            "status": observed.get("status", "not_configured" if not configured else "test_failed"),
+            "result_count": observed.get("result_count", 0),
+            "error": observed.get("error"),
+        })
     articles = list(evidence.get("articles") or [])
-    checks = [
-        {"provider": "exa", "configured": exa, "ok": "exa" in sources},
-        {"provider": "tavily", "configured": tavily, "ok": "tavily" in sources},
-    ]
+    configured_checks = [item for item in checks if item["configured"]]
+    passed = [item for item in configured_checks if item["ok"]]
     return {
-        "status": "ok" if any(item["ok"] for item in checks) else "failed_or_no_evidence",
+        "status": "ok" if passed else ("not_configured" if not configured_checks else "failed"),
         "checks": checks, "providers": {item["provider"]: item for item in checks},
         "evidence_count": len(articles), "search_evidence": articles[:8],
         "errors": evidence.get("errors", []),
-        "message": "Search returned source-backed headlines." if articles else "No source-backed headlines returned; check provider status, key permissions and Railway outbound access.",
+        "message": "Provider authentication and search request succeeded." if passed else "No configured search provider passed a live request. Inspect each provider's status; secrets are never returned.",
     }
+
+
+def _run_chat_completion(provider: str, api_key: str, model: str, endpoint: str, messages: list[dict[str, str]]) -> dict[str, Any]:
+    """Make a real server-side LLM call. Never expose keys or raw provider bodies."""
+    started = time.perf_counter()
+    body = json.dumps({
+        "model": model, "temperature": 0.2, "max_tokens": 700,
+        "messages": messages,
+    }).encode("utf-8")
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    if provider == "openrouter":
+        headers["HTTP-Referer"] = "https://github.com/sparmar3786-pixel/AI-TRADING"
+        headers["X-Title"] = "AI-TRADING Market Assistant"
+    request = urllib.request.Request(endpoint, data=body, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=14) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        choices = data.get("choices") or []
+        answer = str(((choices[0].get("message") or {}).get("content") if choices else "") or "").strip()
+        if not answer:
+            raise RuntimeError("empty_response")
+        return {
+            "answer": answer, "provider": provider, "model": model, "llm_used": True,
+            "status": "connected", "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+        }
+    except urllib.error.HTTPError as exc:
+        if exc.code == 429:
+            raise RuntimeError(f"{provider}_rate_limited") from None
+        if exc.code in (401, 403):
+            raise RuntimeError(f"{provider}_authentication_failed") from None
+        raise RuntimeError(f"{provider}_http_{exc.code}") from None
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        raise RuntimeError(f"{provider}_{type(exc).__name__.lower()}") from None
 
 
 @app.post("/v1/ai/chat")
 def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
-    """Honest deterministic fallback until an authenticated LLM adapter is available."""
+    """Use a real cloud provider when configured; disclose fallback if every provider fails."""
     index = str(body.get("index") or "NIFTY").strip().upper()
     if index not in INDEXES:
         raise HTTPException(status_code=400, detail="Unsupported index.")
@@ -2336,8 +2387,53 @@ def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
         reasons = signal.get("reasons") or signal.get("reason") or []
         if not isinstance(reasons, list):
             reasons = [str(reasons)]
+        context = {
+            "index": index, "market": market, "signal": signal, "validation": validation,
+            "search_evidence": list(news.get("articles") or [])[:6],
+            "live_data_status": "fresh only if market.live=true and source_timestamp is recent",
+        }
+        system_message = (
+            "You are AI-TRADING's secondary market research assistant. Use only supplied evidence; "
+            "never invent prices, OI, Greeks, volume, candle history, support/resistance or timestamps. "
+            "Clearly label unavailable/stale data. Explain signal and risk gates, but never override a "
+            "deterministic WAIT/REJECT. This backend is read-only and does not place orders."
+        )
+        history = body.get("history") if isinstance(body.get("history"), list) else []
+        messages = [{"role": "system", "content": system_message},
+                    {"role": "user", "content": "Verified context JSON:\n" + json.dumps(context, separators=(",", ":"), default=str)[:14000]}]
+        for item in history[-8:]:
+            if not isinstance(item, dict) or item.get("role") not in ("user", "assistant"):
+                continue
+            content = str(item.get("content") or "").strip()
+            if content:
+                messages.append({"role": str(item["role"]), "content": content[:3000]})
+        messages.append({"role": "user", "content": question[:3000]})
+        candidates = [
+            ("openai", os.getenv("OPENAI_API_KEY", "").strip(),
+             os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip(), "https://api.openai.com/v1/chat/completions"),
+            ("openrouter", os.getenv("OPENROUTER_API_KEY", "").strip(),
+             os.getenv("OPENROUTER_MODEL", "openrouter/free").strip(), "https://openrouter.ai/api/v1/chat/completions"),
+        ]
+        failures: list[dict[str, str]] = []
+        for provider, key, model, endpoint in candidates:
+            if not key:
+                continue
+            if not model or model == "configured-model":
+                model = "gpt-4o-mini" if provider == "openai" else "openrouter/free"
+            try:
+                result = _run_chat_completion(provider, key, model, endpoint, messages)
+                return {
+                    **result, "index": index, "question": question,
+                    "market": market, "signal": signal, "validation": validation,
+                    "search_attempted": bool(os.getenv("EXA_API_KEY", "").strip() or os.getenv("TAVILY_API_KEY", "").strip()),
+                    "search_evidence": list(news.get("articles") or [])[:8],
+                    "provider_failures": failures, "signal_only": True,
+                    "order_placement_enabled": False,
+                }
+            except RuntimeError as exc:
+                failures.append({"provider": provider, "status": str(exc)[:80]})
         answer = (
-            f"{index} market context (deterministic backend fallback, not an LLM response): "
+            f"{index} market context (deterministic fallback; no cloud LLM response succeeded): "
             f"LTP={market.get('ltp') if market.get('ltp') is not None else 'unavailable'}; "
             f"quote age={market.get('age_seconds') if market.get('age_seconds') is not None else 'unknown'} seconds; "
             f"signal={signal.get('decision', 'WAIT')}; validation={validation.get('verdict', 'NOT_AVAILABLE')}. "
@@ -2347,10 +2443,11 @@ def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
         return {
             "answer": answer, "provider": "deterministic_fallback",
             "model": "five-layer-quant-context", "llm_used": False,
-            "index": index, "question": question,
-            "market": market, "signal": signal, "validation": validation,
-            "search_evidence": news.get("articles", [])[:8],
-            "status": "fallback_response", "signal_only": True,
+            "index": index, "question": question, "market": market, "signal": signal,
+            "validation": validation, "search_attempted": bool(os.getenv("EXA_API_KEY", "").strip() or os.getenv("TAVILY_API_KEY", "").strip()),
+            "search_evidence": list(news.get("articles") or [])[:8],
+            "provider_failures": failures, "status": "provider_error_fallback" if failures else "fallback_response",
+            "signal_only": True, "order_placement_enabled": False,
         }
     except HTTPException as exc:
         raise HTTPException(status_code=503, detail={"message": "Current market context is unavailable.", "reason": str(exc.detail)[:180]}) from exc
