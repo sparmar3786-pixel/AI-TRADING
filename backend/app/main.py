@@ -1837,19 +1837,49 @@ def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
 
 @app.get("/v1/live/orders")
 def live_orders(_: str = Depends(_device)) -> dict[str, Any]:
-    return {
-        "status": "read_only", "orders": [], "order_placement_enabled": False,
-        "message": "This backend intentionally does not expose order placement or a live order book. Connect a read-only broker order-history adapter before displaying broker orders.",
-    }
+    adapter = _current_adapter()
+    if not adapter or adapter.status().get("authenticated") is not True:
+        return {
+            "status": "not_connected", "orders": [], "order_placement_enabled": False,
+            "message": "Connect Angel One to read the broker order book. No order-placement API is exposed.",
+        }
+    try:
+        snapshot = adapter.account_snapshot()
+        return {
+            "status": snapshot.get("status", "unavailable"),
+            "orders": snapshot.get("orders", []), "errors": snapshot.get("errors", []),
+            "read_only": True, "order_placement_enabled": False,
+            "message": "Read-only Angel One order-book snapshot; this endpoint cannot submit or modify orders.",
+        }
+    except Exception:
+        return {
+            "status": "unavailable", "orders": [], "order_placement_enabled": False,
+            "message": "Angel One order-book read failed. Check session and broker API access.",
+        }
 
 
 @app.get("/v1/portfolio")
 def portfolio(_: str = Depends(_device)) -> dict[str, Any]:
-    return {
-        "status": "not_available", "positions": [], "holdings": [], "orders": [],
-        "source": "angelone_smartapi", "read_only": True,
-        "message": "The current adapter does not implement authenticated holdings/positions endpoints. No portfolio values are fabricated.",
-    }
+    adapter = _current_adapter()
+    if not adapter or adapter.status().get("authenticated") is not True:
+        return {
+            "status": "not_connected", "positions": [], "holdings": [], "orders": [],
+            "source": "angelone_smartapi", "read_only": True,
+            "message": "Connect Angel One to load live holdings and positions. No sample balance or P&L is fabricated.",
+        }
+    try:
+        snapshot = adapter.account_snapshot()
+        return {
+            **snapshot,
+            "message": "Authenticated read-only account snapshot. Missing broker endpoints remain empty and are listed in errors.",
+            "order_placement_enabled": False,
+        }
+    except Exception:
+        return {
+            "status": "unavailable", "positions": [], "holdings": [], "orders": [],
+            "source": "angelone_smartapi", "read_only": True,
+            "message": "Angel One account snapshot failed. Check session and broker API access.",
+        }
 
 
 _paper_trades_memory: dict[str, dict[str, Any]] = {}
