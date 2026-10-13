@@ -597,7 +597,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         const QuantResearchHubPage(),
         const QuantRepositoriesPage(),
         AiChatPage(backendUrl: backendUrl, selectedIndex: selectedIndex),
-        OrderFlowPage(backendUrl: backendUrl, signalBackendUrl: signalBackendUrl),
+        OrderFlowPage(signalBackendUrl: signalBackendUrl),
         Builder(
           builder: (tabContext) => QuantEngineLabPage(
             backendUrl: backendUrl,
