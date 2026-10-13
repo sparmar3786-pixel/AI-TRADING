@@ -41,7 +41,12 @@ from quant_engine import evaluate_five_layer_signal, evaluate_futures_signal
 from strategies.technical import atr as technical_atr, ema as technical_ema, rsi as technical_rsi, rsi_reversion, sma as technical_sma
 from strategies.advanced import bollinger_bands, macd as advanced_macd, donchian_channels
 from strategies.suite import evaluate_strategy_suite
-from backend.app.smc_api import router as smc_router
+try:
+    # Docker image runs the service as app.main with backend/app copied to /app/app.
+    from app.smc_api import router as smc_router
+except ModuleNotFoundError:
+    # Repository unit tests import backend.app.main from the repository root.
+    from backend.app.smc_api import router as smc_router
 from risk.position_sizing import position_size
 
 app = FastAPI(title="AI-TRADING Read-only Signals API", version="1.0.0")
