@@ -23,6 +23,14 @@ class StrategySuiteTests(unittest.TestCase):
         self.assertEqual(result["status"], "invalid_data")
         self.assertEqual(result["signal"], "WAIT")
 
+    def test_invalid_candle_reports_exact_reason(self):
+        missing = evaluate_strategy_suite([{"high": 101, "low": 99}])
+        self.assertEqual(missing["reason_code"], "MISSING_OR_NON_NUMERIC_OHLC")
+        self.assertIn("high/low/close", missing["reason"])
+
+        negative_volume = evaluate_strategy_suite([{"high": 101, "low": 99, "close": 100, "volume": -1}])
+        self.assertEqual(negative_volume["reason_code"], "NEGATIVE_VOLUME")
+
     def test_oi_classification(self):
         self.assertEqual(classify_oi_change(0.02, 500), "LONG_BUILDUP")
         self.assertEqual(classify_oi_change(-0.02, 500), "SHORT_BUILDUP")
