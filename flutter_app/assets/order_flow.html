@@ -81,9 +81,11 @@ function status(){const s=$('st'),l=raw[raw.length-1];
 
 function agg(){const m=new Map();
  for(const c of raw){const k=Math.floor(c.t/(tf*60))*tf*60;let a=m.get(k);
-  if(!a){a={t:k,o:c.o,h:c.h,l:c.l,c:c.c,lv:{},v:0,d:0,bo:0,so:0};m.set(k,a)}
-  a.h=Math.max(a.h,c.h);a.l=Math.min(a.l,c.l);a.c=c.c;a.v+=c.v;a.d+=c.d;a.bo=c.bo;a.so=c.so;
-  for(const p in c.lv){const x=a.lv[p]||(a.lv[p]=[0,0]);x[0]+=c.lv[p][0];x[1]+=c.lv[p][1]}}
+  if(!a){a={t:k,o:c.o,h:c.h,l:c.l,c:c.c,lv:{},v:0,d:null,bo:null,so:null};m.set(k,a)}
+  a.h=Math.max(a.h,c.h);a.l=Math.min(a.l,c.l);a.c=c.c;a.v+=Number(c.v)||0;
+  if(c.d!=null)a.d=(a.d??0)+Number(c.d||0);
+  if(c.bo!=null)a.bo=c.bo;if(c.so!=null)a.so=c.so;
+  for(const p in (c.lv||{})){const x=a.lv[p]||(a.lv[p]=[0,0]);x[0]+=Number(c.lv[p][0])||0;x[1]+=Number(c.lv[p][1])||0}}
  return [...m.values()]}
 
 function draw(){
@@ -133,7 +135,7 @@ function draw(){
  const l=all[all.length-1],yp=y(l.c)+rh/2;
  if(l.c<=hB&&l.c>=lB){ctx.setLineDash([3,3]);ctx.strokeStyle='#f0b429';ctx.beginPath();ctx.moveTo(0,yp);ctx.lineTo(W-pw,yp);ctx.stroke();ctx.setLineDash([]);
   ctx.fillStyle='#f0b429';ctx.fillRect(W-pw,yp-8,pw,16);ctx.fillStyle='#000';ctx.textAlign='left';ctx.font='11px system-ui';ctx.fillText(l.c.toFixed(2),W-pw+3,yp)}
- $('info').innerHTML=`<span>LTP <b>${l.c.toFixed(2)}</b></span><span>Δ <b style="color:${l.d>=0?'#26c281':'#ef4b5b'}">${f(l.d)}</b></span><span>Vol <b>${f(l.v)}</b></span><span>Buy orders <b style="color:#26c281">${l.bo}</b></span><span>Sell orders <b style="color:#ef4b5b">${l.so}</b></span><span>Cell = Sell × Buy</span><span style="color:#f0b429">▭ POC</span>`;
+ $('info').innerHTML=`<span>LTP <b>${l.c.toFixed(2)}</b></span><span>Δ <b style="color:${l.d==null?'#7d8896':l.d>=0?'#26c281':'#ef4b5b'}">${l.d==null?'—':f(l.d)}</b></span><span>Vol <b>${f(l.v)}</b></span><span>Buy orders <b style="color:#26c281">${l.bo==null?'—':l.bo}</b></span><span>Sell orders <b style="color:#ef4b5b">${l.so==null?'—':l.so}</b></span><span>Cell = Sell × Buy</span><span style="color:#f0b429">▭ POC</span>`;
 }
 (function loop(){if(dirty){dirty=0;draw()}requestAnimationFrame(loop)})();
 new ResizeObserver(()=>dirty=1).observe(document.querySelector('main'));addEventListener('orientationchange',()=>setTimeout(()=>dirty=1,200));
