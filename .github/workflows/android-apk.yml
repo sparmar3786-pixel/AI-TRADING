@@ -79,13 +79,13 @@ jobs:
       - name: Widget and API tests
         run: flutter test
       - name: Build release APK
-        run: flutter build apk --release --no-tree-shake-icons --dart-define=BACKEND_URL=https://nse-algo-backend-final-production.up.railway.app --dart-define=SIGNAL_BACKEND_URL=https://nse-algo-backend-final-production.up.railway.app
+        run: flutter build apk --release --no-tree-shake-icons --dart-define=BACKEND_URL=https://nse-algo-backend-final-production.up.railway.app --dart-define=SIGNAL_BACKEND_URL=https://ai-trading-signals-api-production.up.railway.app
       - name: Build optimized ARM64 APK
         run: |
           set -euo pipefail
           APK_DIR="build/app/outputs/flutter-apk"
           cp "$APK_DIR/app-release.apk" /tmp/ai-trading-universal.apk
-          flutter build apk --release --split-per-abi --no-tree-shake-icons --dart-define=BACKEND_URL=https://nse-algo-backend-final-production.up.railway.app --dart-define=SIGNAL_BACKEND_URL=https://nse-algo-backend-final-production.up.railway.app
+          flutter build apk --release --split-per-abi --no-tree-shake-icons --dart-define=BACKEND_URL=https://nse-algo-backend-final-production.up.railway.app --dart-define=SIGNAL_BACKEND_URL=https://ai-trading-signals-api-production.up.railway.app
           test -s "$APK_DIR/app-arm64-v8a-release.apk"
           cp /tmp/ai-trading-universal.apk "$APK_DIR/app-release.apk"
           ls -lh "$APK_DIR/app-release.apk" "$APK_DIR/app-arm64-v8a-release.apk"
