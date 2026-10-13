@@ -26,20 +26,15 @@ class PdfReportSolutionsPage extends StatelessWidget {
       'Step 6: validate in signal-only mode first. Live execution stays disabled until every gate passes and a human explicitly authorizes it.',
       'The PDF says exact causes still require Railway logs and /docs verification; this screen does not claim remote runtime checks were completed.',
     ]),
-    ('PDF Page 3 • Screenshots 1–2', 'Indicators tab: research links', [
-      'Screenshot 1: Indicators tab — Strategy Library / research links.',
-      'Screenshot 2: Indicators tab — additional research links for charts and dashboards.',
-      'These are reference links; a link in the app does not prove upstream source code was cloned or integrated.',
+    ('PDF Page 3 • Screenshots 1–2', 'Indicators tab: indicator tools', [
+      'Screenshot 1: Indicators tab — technical indicator controls.',
+      'Screenshot 2: Indicators tab — additional indicator and chart controls.',
+      'Indicator values must be computed from timestamped market candles; unavailable values must remain unavailable rather than fabricated.',
     ]),
     ('PDF Page 4 • Screenshots 3–4', 'Signals validation and Backtesting 404', [
       'Screenshot 3: Signals tab — validation blocks and Angel One Live Execution shown DISABLED.',
       'Screenshot 4: Backtesting tab — Backtest failed: HTTP 404: Not Found.',
       'Fix the backtest route by comparing the deployed API route and app URL; keep live execution disabled while validation is blocked.',
-    ]),
-    ('PDF Page 5 • Screenshots 5–6', 'Repository Library', [
-      'Screenshot 5: Repository Library — list 2.',
-      'Screenshot 6: Repository Library — list 1.',
-      'Repository links are research references unless specific code has been separately ported, tested and licensed.',
     ]),
     ('PDF Page 6 • Screenshots 7–8', 'Trading Setup checklist and system flow', [
       'Screenshot 7: Live Setup Checklist — Angel login, live data and AI show CHECK.',
@@ -51,10 +46,10 @@ class PdfReportSolutionsPage extends StatelessWidget {
       'Screenshot 10: Trading Setup — modules 5 to 9 and disclaimer.',
       'Treat module status as evidence from the app/backend; do not mark a module healthy just because its screen exists.',
     ]),
-    ('PDF Page 8 • Screenshots 11–12', 'Research Engines and reference repositories', [
-      'Screenshot 11: Research Engines — research sources.',
-      'Screenshot 12: 3-Layer Trade Engine — reference repositories.',
-      'Research repositories are not themselves live data sources or proof of working integration.',
+    ('PDF Page 8 • Screenshots 11–12', 'Research Engines and 3-Layer engine status', [
+      'Screenshot 11: Research Engines — data sources and validation status.',
+      'Screenshot 12: 3-Layer Trade Engine — validation and blocking reasons.',
+      'Engine health must be verified from live source timestamps, calculated outputs and deterministic risk-gate results.',
     ]),
     ('PDF Page 9 • Screenshots 13–14', '3-Layer engine blocks and disabled monitor', [
       'Screenshot 13: Blocking reasons and Trade Monitor DISABLED.',
@@ -68,18 +63,16 @@ class PdfReportSolutionsPage extends StatelessWidget {
   ];
 
   static const screenshotCaptions = <String>[
-    '1. Indicators — Strategy Library / research links',
-    '2. Indicators — more chart and dashboard links',
+    '1. Indicators — technical indicator controls',
+    '2. Indicators — additional indicator and chart controls',
     '3. Signals — validation blocks and Live Execution DISABLED',
     '4. Backtesting — HTTP 404',
-    '5. Repository Library — list 2',
-    '6. Repository Library — list 1',
-    '7. Trading Setup — live setup checklist',
+        '7. Trading Setup — live setup checklist',
     '8. Trading Setup — system flow and modules',
     '9. Trading Setup — modules 2 to 8',
     '10. Trading Setup — modules 5 to 9 and disclaimer',
-    '11. Research Engines — research sources',
-    '12. 3-Layer Trade Engine — reference repositories',
+    '11. Research Engines — data and validation status',
+    '12. 3-Layer Trade Engine — validation and blocking reasons',
     '13. 3-Layer Trade Engine — blocking reasons and disabled monitor',
     '14. 3-Layer Trade Engine — all checks',
     '15. 3-Layer Trade Engine — Risk & Validation FAIL / WAIT',
@@ -94,7 +87,7 @@ class PdfReportSolutionsPage extends StatelessWidget {
           style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
       const SizedBox(height: 6),
       const Text(
-        'In-app transcription and structured guide based on the uploaded 10-page screenshot report. All 15 screenshot captions are indexed below. This is report content in a new tab, not an embedded pixel-for-pixel PDF viewer.',
+        'In-app transcription and structured guide based on the uploaded 10-page screenshot report. Operational screenshot captions are indexed below; repository-library screenshots are omitted. This is report content in a new tab, not an embedded pixel-for-pixel PDF viewer.',
         style: TextStyle(color: Colors.white70, fontSize: 12)),
       const SizedBox(height: 12),
       Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(
