@@ -35,10 +35,10 @@ void main() {
       of: find.byType(ListView).last,
       matching: find.byType(Scrollable),
     );
+    expect(find.textContaining('SCREENSHOT INDEX'), findsOneWidget);
     final pageTen = find.textContaining('PDF Page 10');
     await tester.scrollUntilVisible(pageTen, 300, scrollable: reportScrollable);
     expect(pageTen, findsOneWidget);
-    expect(find.textContaining('SCREENSHOT INDEX'), findsOneWidget);
     final repositoryLinks = find.text('REPOSITORY & DOCUMENTATION LINKS');
     expect(repositoryLinks, findsNothing);
     final priorityRootCause = find.text('PRIORITY ROOT CAUSE');
@@ -207,7 +207,8 @@ void main() {
     DefaultTabController.of(tabBarContext).animateTo(tabs.indexOf('Flow Monitor'));
     await tester.pumpAndSettle();
     expect(find.text('FLOW MONITOR • API SPEED • ENGINE VALIDATION'), findsOneWidget);
-    final monitorScrollable = find.byType(Scrollable).last;
+    final monitorList = find.byType(ListView).last;
+    final monitorScrollable = find.descendant(of: monitorList, matching: find.byType(Scrollable)).first;
     await tester.scrollUntilVisible(find.text('SERVER API ROUTE METRICS'), 250, scrollable: monitorScrollable);
     expect(find.text('SERVER API ROUTE METRICS'), findsOneWidget);
     await tester.scrollUntilVisible(find.text('OPENAI + OPENROUTER DATA VALIDATION'), 250, scrollable: monitorScrollable);
