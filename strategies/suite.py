@@ -34,6 +34,63 @@ def _cross_signal(fast: list[float | None], slow: list[float | None]) -> list[st
     return out
 
 
+def stochastic_reversal(highs: list[float], lows: list[float], closes: list[float], period: int = 14) -> str:
+    """Return a reversal only when %K exits an extreme zone; no look-ahead."""
+    if period < 2 or not (len(highs) == len(lows) == len(closes)) or len(closes) < period + 1:
+        return "WAIT"
+    k_values: list[float] = []
+    for i in range(period - 1, len(closes)):
+        highest, lowest = max(highs[i - period + 1:i + 1]), min(lows[i - period + 1:i + 1])
+        k_values.append(50.0 if highest == lowest else (closes[i] - lowest) / (highest - lowest) * 100.0)
+    if len(k_values) < 2:
+        return "WAIT"
+    prior, current = k_values[-2], k_values[-1]
+    if prior <= 20 < current:
+        return "LONG"
+    if prior >= 80 > current:
+        return "SHORT"
+    return "WAIT"
+
+
+def rate_of_change_signal(closes: list[float], period: int = 10) -> str:
+    """Simple ROC momentum direction; zero/insufficient history is neutral."""
+    if period < 1 or len(closes) <= period or closes[-period - 1] <= 0:
+        return "WAIT"
+    change = closes[-1] / closes[-period - 1] - 1.0
+    return "LONG" if change > 0 else "SHORT" if change < 0 else "WAIT"
+
+
+def liquidity_sweep_signal(highs: list[float], lows: list[float], closes: list[float], lookback: int = 20) -> str:
+    """Flag a rejection beyond prior swing liquidity, using only prior bars for levels."""
+    if lookback < 2 or not (len(highs) == len(lows) == len(closes)) or len(closes) <= lookback:
+        return "WAIT"
+    prior_high = max(highs[-lookback - 1:-1])
+    prior_low = min(lows[-lookback - 1:-1])
+    last_high, last_low, last_close = highs[-1], lows[-1], closes[-1]
+    if last_high > prior_high and last_close < prior_high:
+        return "SHORT"
+    if last_low < prior_low and last_close > prior_low:
+        return "LONG"
+    return "WAIT"
+
+
+def classify_price_regime(closes: list[float], atr_value: float | None) -> str:
+    """Deterministic coarse regime label; never represents a trained ML model."""
+    if len(closes) < 21 or closes[-1] <= 0:
+        return "UNKNOWN"
+    fast, slow = ema(closes, 9)[-1], ema(closes, 21)[-1]
+    if fast is None or slow is None:
+        return "UNKNOWN"
+    volatility = (atr_value / closes[-1]) if atr_value is not None else None
+    if volatility is not None and volatility >= 0.025:
+        return "HIGH_VOLATILITY"
+    if fast > slow:
+        return "TRENDING_UP"
+    if fast < slow:
+        return "TRENDING_DOWN"
+    return "RANGING"
+
+
 def classify_oi_change(price_change: Any, oi_change: Any) -> str:
     """Classify price/OI direction without treating the classification as a trade."""
     price, oi = _number(price_change), _number(oi_change)
@@ -108,6 +165,9 @@ def evaluate_strategy_suite(
         signals["vwap_bias"] = "LONG" if vwap_values[-1] is not None and closes[-1] > vwap_values[-1] else "SHORT" if vwap_values[-1] is not None and closes[-1] < vwap_values[-1] else "WAIT"
     else:
         signals["vwap_bias"] = "WAIT"
+    signals["stochastic_reversal"] = stochastic_reversal(highs, lows, closes)
+    signals["roc_momentum"] = rate_of_change_signal(closes)
+    signals["liquidity_sweep"] = liquidity_sweep_signal(highs, lows, closes)
 
     votes = {"LONG": sum(v == "LONG" for v in signals.values()), "SHORT": sum(v == "SHORT" for v in signals.values())}
     direction = "LONG" if votes["LONG"] >= min_consensus and votes["LONG"] > votes["SHORT"] else "SHORT" if votes["SHORT"] >= min_consensus and votes["SHORT"] > votes["LONG"] else "WAIT"
@@ -127,6 +187,7 @@ def evaluate_strategy_suite(
         "minimum_consensus": min_consensus,
         "latest_close": closes[-1],
         "atr_14": atr_value,
+        "market_regime": classify_price_regime(closes, atr_value),
         "risk_levels": risk_levels,
         "oi_context": oi_state,
         "support_resistance": {"support": min(lows[-20:]), "resistance": max(highs[-20:]), "lookback_bars": min(20, len(closes))},
