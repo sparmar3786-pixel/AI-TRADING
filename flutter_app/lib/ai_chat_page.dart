@@ -201,7 +201,7 @@ class _AiChatPageState extends State<AiChatPage> {
                 const Text('GEMINI CLOUD CHAT • MARKET Q&A', textAlign: TextAlign.center, style: TextStyle(color: Color(0xFF32D583), fontWeight: FontWeight.w700, fontSize: 12)),
                 const SizedBox(height: 8),
                 const Text(
-                  'This chat uses Gemini only. OpenAI and OpenRouter are tested separately for provider/validation status and are not silent chat fallbacks. Missing or stale market evidence remains unavailable.',
+                  'This chat tries Gemini first and OpenRouter as fallback. Missing or stale market evidence remains unavailable.',
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 20),
