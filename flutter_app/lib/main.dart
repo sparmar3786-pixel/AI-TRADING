@@ -709,7 +709,10 @@ class DataHealthPage extends StatelessWidget {
           return Card(child: ListTile(
             leading: Icon(fresh ? Icons.check_circle : Icons.error_outline, color: fresh ? Colors.greenAccent : Colors.orangeAccent),
             title: Text(index),
-            subtitle: Text('Price: ${_val(row['ltp'])} • Age: ${row['age_seconds'] == null ? 'unknown' : '${_val(row['age_seconds'])} sec'} • ${row['feed_mode'] ?? 'NO DATA'}'),
+            subtitle: Text(
+              'Price: ${_val(row['ltp'])} • Age: ${row['age_seconds'] == null ? 'unknown' : '${_val(row['age_seconds'])} sec'} • ${row['feed_mode'] ?? 'NO DATA'}'
+              '${(row['signal_error'] ?? row['error']) == null ? '' : '\\nSignal pipeline: ${row['signal_error'] ?? row['error']}'}',
+            ),
             trailing: Text(fresh ? 'LIVE' : hasPrice ? 'STALE' : 'NO DATA', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 11, color: fresh ? Colors.greenAccent : Colors.orangeAccent)),
           ));
         }),
