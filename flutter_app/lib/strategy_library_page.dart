@@ -164,6 +164,28 @@ class _StrategyLibraryPageState extends State<StrategyLibraryPage> {
                   padding: const EdgeInsets.only(top: 3),
                   child: Text('${entry.key}: ${entry.value}', style: const TextStyle(fontSize: 11, color: Colors.white70)),
                 )),
+              if (_suiteRun['strategy_trace'] is List) ...[
+                const SizedBox(height: 8),
+                const Text('PER-STRATEGY EXECUTION TRACE', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: Color(0xFF12D6FF))),
+                ...(_suiteRun['strategy_trace'] as List).whereType<Map>().map((rawTrace) {
+                  final item = Map<String, dynamic>.from(rawTrace);
+                  final signal = item['signal'] ?? 'WAIT';
+                  final rejection = item['rejection_reason'] ?? 'Directional output returned';
+                  return Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(top: 5),
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(color: const Color(0xFF080E17), borderRadius: BorderRadius.circular(8)),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('${item['strategy_name'] ?? 'Strategy'} • $signal', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
+                      Text('Reason: $rejection', style: const TextStyle(fontSize: 10, color: Colors.white70)),
+                      Text('ID: ${item['strategy_id'] ?? 'missing'}', style: const TextStyle(fontSize: 9, color: Colors.white54)),
+                      Text('Score: ${item['score'] ?? 'not computed'} • Input bars: ${item['input_candle_count'] ?? 'unknown'}', style: const TextStyle(fontSize: 9, color: Colors.white54)),
+                      Text('AI consumed: ${item['ai_consumed'] ?? false} • Research received: ${item['research_engine_received'] ?? false} • Trading Setup received: ${item['trading_setup_received'] ?? false}', style: const TextStyle(fontSize: 9, color: Colors.orangeAccent)),
+                    ]),
+                  );
+                }),
+              ],
             ],
             const Text('This panel reads the shared backend signal snapshot. Only fields actually returned by the backend are displayed; missing execution IDs, versions, AI-consumption and propagation evidence are explicitly marked unverified.',
               style: TextStyle(color: Colors.white60, fontSize: 10)),
