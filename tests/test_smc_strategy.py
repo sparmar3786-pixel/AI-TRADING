@@ -53,6 +53,12 @@ class SmcTests(unittest.TestCase):
         self.assertFalse(inactive["active"])
         self.assertIsNone(inactive["window"])
 
+    def test_strategy_profiles_accept_api_liquidity_tolerance(self):
+        guardeer = analyze_guardeer([], [], [], liquidity_tolerance=1.25)
+        inner_circle = analyze_inner_circle([], [], [], liquidity_tolerance=2.5)
+        self.assertEqual(guardeer["liquidity_tolerance"], 1.25)
+        self.assertEqual(inner_circle["liquidity_tolerance"], 2.5)
+
     def test_liquidity_tolerance_is_configurable(self):
         a = analyze_smc([], [], [], instrument="NIFTY", liquidity_tolerance=1.25)
         self.assertEqual(a["liquidity_tolerance"], 1.25)
