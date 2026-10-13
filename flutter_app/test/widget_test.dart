@@ -236,6 +236,12 @@ void main() {
     );
     expect(find.text('OPENAI + OPENROUTER DATA VALIDATION'), findsOneWidget);
     expect(find.text('TEST OPENAI + OPENROUTER'), findsOneWidget);
+
+    // Dispose Flow Monitor first so its periodic poll is cancelled, then let
+    // outstanding Future.timeout timers finish. This tests real cleanup rather
+    // than leaving pending fake timers behind at test teardown.
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 13));
   });
 
   testWidgets('Pro chart clearly reports missing candles instead of fabricating data', (tester) async {
