@@ -1255,8 +1255,38 @@ def _get_signals(force: bool = False) -> dict[str, Any]:
                 signals[index] = result
                 market[index] = quote
             except Exception as exc:
-                signals[index] = _wait_signal(index, str(exc)[:220])
-                market[index] = {"ltp": None, "age_seconds": None, "feed_mode": "DATA_ERROR", "source": "angelone_smartapi", "error": str(exc)[:160]}
+                # Keep independently verified spot data visible even if the
+                # heavier signal pipeline fails (e.g. insufficient candles,
+                # option Greeks or option ATR). A signal failure must not blank
+                # the Market/Dashboard pages or silently become an actionable trade.
+                reason = str(exc)[:220]
+                signals[index] = _wait_signal(index, reason)
+                market_row: dict[str, Any] = {
+                    "ltp": None, "age_seconds": None, "feed_mode": "DATA_ERROR",
+                    "source": "angelone_smartapi", "live": False,
+                    "error": reason, "signal_error": reason, "option_chain": [],
+                }
+                try:
+                    index_config = INDEXES[index]
+                    spot_fallback = _quotes(adapter, index_config["exchange"], [index_config["token"]]).get(index_config["token"])
+                    if spot_fallback:
+                        spot_ltp = _number(spot_fallback.get("ltp"))
+                        spot_timestamp = _quote_timestamp(spot_fallback)
+                        parsed_spot_timestamp = datetime.fromisoformat(_iso(spot_timestamp)) if spot_timestamp and _iso(spot_timestamp) else None
+                        spot_age = (_utc_now() - parsed_spot_timestamp).total_seconds() if parsed_spot_timestamp else None
+                        spot_live = spot_ltp is not None and spot_ltp > 0 and spot_age is not None and 0 <= spot_age <= 60
+                        market_row.update({
+                            "ltp": spot_ltp, "age_seconds": round(spot_age, 2) if spot_age is not None else None,
+                            "feed_mode": spot_fallback.get("_source_mode", "REST_FULL_DEPTH"),
+                            "source": "angelone_smartapi", "source_timestamp": spot_timestamp,
+                            "timestamp": spot_timestamp, "live": spot_live,
+                            "signal_error": reason,
+                            "error": None if spot_live else reason,
+                        })
+                except Exception:
+                    # Preserve the primary failure; never substitute server time or sample prices.
+                    pass
+                market[index] = market_row
         commodities = _commodity_snapshot(adapter, rows)
         confirmed = []
         for index, signal in signals.items():
