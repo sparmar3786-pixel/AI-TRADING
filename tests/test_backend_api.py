@@ -23,6 +23,27 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ok")
 
+    def test_ai_validation_reports_not_configured_without_server_keys(self):
+        payload = {
+            "live": False,
+            "market": {"NIFTY": {"ltp": None, "live": False}},
+            "signals": {"NIFTY": {"decision": "WAIT", "layers": {}, "reasons": ["No fresh quote"]}},
+            "generated_at": "2026-10-13T00:00:00+00:00",
+        }
+        with patch.object(api, "_get_signals", return_value=payload), \
+             patch.dict(os.environ, {"OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
+            response = self.client.post(
+                "/v1/ai/validate",
+                headers=self.device_headers,
+                json={"index": "NIFTY"},
+            )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["overall_status"], "BLOCKED_NO_LIVE_DATA")
+        self.assertEqual(data["providers"]["openai"]["status"], "not_configured")
+        self.assertEqual(data["providers"]["openrouter"]["status"], "not_configured")
+        self.assertEqual(data["deterministic_decision"], "WAIT")
+
     def test_metadata_requires_valid_device_id_and_disables_orders(self):
         self.assertEqual(self.client.get("/v1/metadata").status_code, 401)
         response = self.client.get("/v1/metadata", headers=self.device_headers)

@@ -56,6 +56,7 @@ class FreshApi {
     '/v1/option-chain',
     '/v1/market/sentiment',
     '/v1/signals',
+    '/v1/ai/validate',
     '/api/v1/signals',
     '/api/signals',
     '/v1/backtest/historical',
@@ -205,6 +206,9 @@ class FreshApi {
   Future<Map<String, dynamic>> systemDiagnostics() => getJson('/v1/system/diagnostics');
   Future<Map<String, dynamic>> metadata() => getJson('/v1/metadata');
   Future<Map<String, dynamic>> angelStatus() => getJson('/v1/angel/status');
+  Future<Map<String, dynamic>> validateAI(String index) =>
+      postJson('/v1/ai/validate', {'index': index}, timeout: const Duration(seconds: 28));
+
   Future<Map<String, dynamic>> testAIProviders() =>
       postJson('/v1/providers/ai/test', {});
   Future<Map<String, dynamic>> testSearchProviders() =>

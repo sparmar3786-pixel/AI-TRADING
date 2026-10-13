@@ -71,8 +71,8 @@ function status(){const s=$('st'),l=raw[raw.length-1],hasLevels=raw.some(c=>c.lv
 
 function agg(){const m=new Map();
  for(const c of raw){const k=Math.floor(c.t/(tf*60))*tf*60;let a=m.get(k);
-  if(!a){a={t:k,o:c.o,h:c.h,l:c.l,c:c.c,lv:{},v:0,d:0,bo:0,so:0};m.set(k,a)}
-  a.h=Math.max(a.h,c.h);a.l=Math.min(a.l,c.l);a.c=c.c;a.v+=c.v;a.d+=c.d;a.bo=c.bo;a.so=c.so;
+  if(!a){a={t:k,o:c.o,h:c.h,l:c.l,c:c.c,lv:{},v:0,d:0,bo:null,so:null};m.set(k,a)}
+  a.h=Math.max(a.h,c.h);a.l=Math.min(a.l,c.l);a.c=c.c;a.v+=Number(c.v)||0;a.d+=Number(c.d)||0;a.bo=c.bo??a.bo;a.so=c.so??a.so;
   for(const p in c.lv){const x=a.lv[p]||(a.lv[p]=[0,0]);x[0]+=c.lv[p][0];x[1]+=c.lv[p][1]}}
  return [...m.values()]}
 
@@ -115,7 +115,7 @@ function draw(){
   // bottom stats
   ctx.fillStyle='#121821';ctx.fillRect(x0,ch,cw+4,bot);
   const L=[['Δ',(c.d>0?'+':'')+f(c.d),c.d>=0?'#26c281':'#ef4b5b'],['Vol',f(c.v),'#d7dde6'],
-   ['Buy ord',c.bo,'#26c281'],['Sell ord',c.so,'#ef4b5b']];
+   ['Buy ord',c.bo??'—','#26c281'],['Sell ord',c.so??'—','#ef4b5b']];
   L.forEach((r,k)=>{ctx.fillStyle='#7d8896';ctx.textAlign='left';ctx.fillText(r[0],x0+3,ch+8+k*lh);
    ctx.fillStyle=r[2];ctx.textAlign='right';ctx.fillText(r[1],x0+cw,ch+8+k*lh)});
   ctx.fillStyle='#1f2733';ctx.fillRect(x0+colW-2,top,1,H-top)});

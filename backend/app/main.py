@@ -16,6 +16,7 @@ import threading
 import time
 import urllib.request
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -110,6 +111,11 @@ class ResearchIndicatorsRequest(BaseModel):
     atr_period: int = Field(default=14, ge=2, le=50)
     band_period: int = Field(default=20, ge=2, le=100)
     channel_period: int = Field(default=20, ge=2, le=100)
+
+
+class AIValidationRequest(BaseModel):
+    """Request a secondary evidence review; this can never override deterministic risk gates."""
+    index: str = Field(default="NIFTY", max_length=20)
 
 
 class BacktestRequest(BaseModel):
@@ -1078,6 +1084,120 @@ async def market_snapshot_stream(websocket: WebSocket) -> None:
 @app.get("/health")
 def health() -> dict[str, Any]:
     return {"status": "ok", "service": "ai-trading-readonly-api", "time": _utc_now().isoformat()}
+
+
+def _call_ai_validation_provider(
+    provider: str,
+    api_key: str | None,
+    model: str,
+    endpoint: str,
+    validation_input: dict[str, Any],
+) -> dict[str, Any]:
+    """Call an optional server-configured OpenAI-compatible provider without exposing credentials."""
+    if not api_key:
+        return {"provider": provider, "status": "not_configured", "model": model, "output": None, "duration_ms": None}
+    prompt = (
+        "Review this timestamped market snapshot as a SECONDARY data-quality reviewer. "
+        "Do not invent prices, infer missing fields, or recommend an order. "
+        "Never override the deterministic engine decision. If source timestamps are missing/stale, "
+        "or required evidence is incomplete, verdict must be BLOCK. Return concise JSON only with "
+        "keys verdict (PASS/WARN/BLOCK), summary, and issues (array). Input:\n"
+        + json.dumps(validation_input, ensure_ascii=False, default=str)[:14000]
+    )
+    request_body = json.dumps({
+        "model": model,
+        "temperature": 0,
+        "messages": [
+            {"role": "system", "content": "You are a cautious market-data validation assistant. Deterministic risk gates are authoritative."},
+            {"role": "user", "content": prompt},
+        ],
+    }).encode("utf-8")
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    if provider == "openrouter":
+        headers["HTTP-Referer"] = os.getenv("OPENROUTER_SITE_URL", "https://ai-trading.app")
+        headers["X-Title"] = "AI-TRADING secondary validator"
+    started = time.monotonic()
+    try:
+        req = urllib.request.Request(endpoint, data=request_body, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=12) as response:
+            response_body = response.read()
+            decoded = json.loads(response_body.decode("utf-8", errors="replace"))
+        choices = decoded.get("choices") if isinstance(decoded, dict) else None
+        output = None
+        if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+            message = choices[0].get("message") or {}
+            output = message.get("content") if isinstance(message, dict) else None
+        return {
+            "provider": provider, "status": "ok" if isinstance(output, str) and output.strip() else "invalid_response",
+            "model": model, "duration_ms": round((time.monotonic() - started) * 1000, 2),
+            "output": output[:2400] if isinstance(output, str) else None,
+            "error": None if isinstance(output, str) and output.strip() else "Provider returned no text content.",
+        }
+    except Exception as exc:
+        return {
+            "provider": provider, "status": "failed", "model": model,
+            "duration_ms": round((time.monotonic() - started) * 1000, 2),
+            "output": None, "error": f"{type(exc).__name__}: {str(exc)[:180]}",
+        }
+
+
+@app.post("/v1/ai/validate")
+def validate_ai_providers(body: AIValidationRequest, _: str = Depends(_device)) -> dict[str, Any]:
+    """Run optional OpenAI and OpenRouter reviews against the current server snapshot."""
+    index = body.index.strip().upper()
+    if index not in INDEXES:
+        raise HTTPException(status_code=400, detail=f"Unsupported index. Choose from {', '.join(INDEXES)}.")
+    payload = _get_signals()
+    market = dict((payload.get("market") or {}).get(index) or {})
+    signal = dict((payload.get("signals") or {}).get(index) or {})
+    validation_input = {
+        "index": index,
+        "market": market,
+        "deterministic_signal": {
+            "decision": signal.get("decision", "WAIT"),
+            "layers": signal.get("layers") or {},
+            "reasons": signal.get("reasons") or [],
+            "validation_timing_ms": signal.get("validation_timing_ms"),
+        },
+        "snapshot_live": payload.get("live") is True and market.get("live") is True,
+        "snapshot_generated_at": payload.get("generated_at"),
+    }
+    openai_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    openrouter_model = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+    providers: dict[str, Any] = {}
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        jobs = {
+            "openai": pool.submit(
+                _call_ai_validation_provider, "openai", os.getenv("OPENAI_API_KEY"),
+                openai_model, "https://api.openai.com/v1/chat/completions", validation_input,
+            ),
+            "openrouter": pool.submit(
+                _call_ai_validation_provider, "openrouter", os.getenv("OPENROUTER_API_KEY"),
+                openrouter_model, "https://openrouter.ai/api/v1/chat/completions", validation_input,
+            ),
+        }
+        for name, future in jobs.items():
+            providers[name] = future.result()
+    ready = [item for item in providers.values() if item.get("status") == "ok"]
+    configured = [item for item in providers.values() if item.get("status") != "not_configured"]
+    if not validation_input["snapshot_live"]:
+        overall = "BLOCKED_NO_LIVE_DATA"
+    elif not configured:
+        overall = "NOT_CONFIGURED"
+    elif len(ready) == 2:
+        overall = "PASS"
+    elif ready:
+        overall = "PARTIAL"
+    else:
+        overall = "FAILED"
+    return {
+        "index": index, "providers": providers, "overall_status": overall,
+        "deterministic_decision": signal.get("decision", "WAIT"),
+        "validation_timing_ms": signal.get("validation_timing_ms"),
+        "snapshot_live": validation_input["snapshot_live"],
+        "generated_at": _utc_now().isoformat(),
+        "safety": "Secondary evidence only; AI output never overrides deterministic WAIT/risk gates.",
+    }
 
 
 @app.get("/v1/metadata")
