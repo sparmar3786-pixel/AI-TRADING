@@ -1164,7 +1164,7 @@ class ResearchEnginesPage extends StatelessWidget {
       );
       String details(String name, Map<String, dynamic> value) =>
           '$name — ${value['status'] ?? 'unknown'} • model: ${value['model'] ?? '—'} • '
-          '${value['duration_ms'] ?? '—'} ms\\n'
+          '${value['duration_ms'] ?? '—'} ms\n'
           '${value['output'] ?? value['error'] ?? 'No output returned.'}';
       await showDialog<void>(
         context: context,
@@ -1172,9 +1172,9 @@ class ResearchEnginesPage extends StatelessWidget {
           title: Text('AI validation • $selectedIndex'),
           content: SingleChildScrollView(
             child: SelectableText(
-              '${details('OpenAI', openai)}\\n\\n${details('OpenRouter', router)}\\n\\n'
-              'Deterministic decision: ${result['deterministic_decision'] ?? 'WAIT'}\\n'
-              'Engine validation: ${result['validation_timing_ms'] ?? '—'} ms\\n'
+              '${details('OpenAI', openai)}\n\n${details('OpenRouter', router)}\n\n'
+              'Deterministic decision: ${result['deterministic_decision'] ?? 'WAIT'}\n'
+              'Engine validation: ${result['validation_timing_ms'] ?? '—'} ms\n'
               '${result['safety'] ?? ''}',
             ),
           ),
