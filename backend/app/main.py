@@ -1410,6 +1410,7 @@ def _get_signals(force: bool = False) -> dict[str, Any]:
                         parsed_spot_timestamp = datetime.fromisoformat(_iso(spot_timestamp)) if spot_timestamp and _iso(spot_timestamp) else None
                         spot_age = (_utc_now() - parsed_spot_timestamp).total_seconds() if parsed_spot_timestamp else None
                         spot_live = spot_ltp is not None and spot_ltp > 0 and spot_age is not None and 0 <= spot_age <= 60
+                        bid_fallback, ask_fallback, buy_depth_fallback, sell_depth_fallback = _book(spot_fallback)
                         market_row.update({
                             "ltp": spot_ltp, "age_seconds": round(spot_age, 2) if spot_age is not None else None,
                             "feed_mode": spot_fallback.get("_source_mode", "REST_FULL_DEPTH"),
@@ -1417,7 +1418,56 @@ def _get_signals(force: bool = False) -> dict[str, Any]:
                             "timestamp": spot_timestamp, "live": spot_live,
                             "signal_error": reason,
                             "error": None if spot_live else reason,
+                            "order_flow": {
+                                "bid": bid_fallback, "ask": ask_fallback,
+                                "buy_volume": buy_depth_fallback, "sell_volume": sell_depth_fallback,
+                                "semantics": "bid_ask_depth_not_classified_trade_volume",
+                            },
                         })
+                        # Keep real 5-minute candles available for charting even
+                        # when the stricter signal engine rejects this index.
+                        try:
+                            start_text, end_text = _session_range()
+                            candle_payload = adapter.candles(index_config["exchange"], index_config["token"], "FIVE_MINUTE", start_text, end_text)
+                            chart_rows: list[dict[str, Any]] = []
+                            chart_closes: list[float] = []
+                            chart_highs: list[float] = []
+                            chart_lows: list[float] = []
+                            for candle in candle_payload.get("candles") or []:
+                                if not isinstance(candle, (list, tuple)) or len(candle) < 6:
+                                    continue
+                                candle_stamp = _iso(candle[0])
+                                candle_dt = datetime.fromisoformat(candle_stamp) if candle_stamp else None
+                                candle_values = [_number(candle[pos]) for pos in (1, 2, 3, 4)]
+                                if candle_dt is None or any(value is None for value in candle_values):
+                                    continue
+                                opened, high, low, closed = candle_values
+                                chart_rows.append({
+                                    "t": int(candle_dt.timestamp()), "timestamp": candle_stamp,
+                                    "open": opened, "high": high, "low": low, "close": closed,
+                                    "volume": _number(candle[5]),
+                                })
+                                chart_closes.append(closed)
+                                chart_highs.append(high)
+                                chart_lows.append(low)
+                            chart_rows = chart_rows[-250:]
+                            chart_15m_rows: list[dict[str, Any]] = []
+                            for offset in range(0, len(chart_rows) - 2, 3):
+                                group = chart_rows[offset:offset + 3]
+                                if len(group) == 3:
+                                    volumes = [_number(row.get("volume")) for row in group]
+                                    chart_15m_rows.append({
+                                        "t": group[-1]["t"], "timestamp": group[-1]["timestamp"],
+                                        "open": group[0]["open"], "high": max(row["high"] for row in group),
+                                        "low": min(row["low"] for row in group), "close": group[-1]["close"],
+                                        "volume": sum(value for value in volumes if value is not None) if any(value is not None for value in volumes) else None,
+                                    })
+                            market_row["timeframes"] = {"1m": [], "5m": chart_rows, "15m": chart_15m_rows}
+                            if len(chart_closes) >= 30:
+                                market_row["indicators"] = _indicator_snapshot(chart_closes, candle_payload.get("candles") or [], [])
+                        except Exception:
+                            # Missing history remains missing; the valid spot quote is retained.
+                            pass
                 except Exception:
                     # Preserve the primary failure; never substitute server time or sample prices.
                     pass
