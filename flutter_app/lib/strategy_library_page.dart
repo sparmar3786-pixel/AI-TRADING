@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'api.dart';
 
 class StrategyLibraryPage extends StatefulWidget {
   const StrategyLibraryPage({required this.market, required this.signals, required this.selectedIndex, super.key});
@@ -18,6 +19,32 @@ Map<String, dynamic> marketRowFallback(Map<String, dynamic> market, String index
 class _StrategyLibraryPageState extends State<StrategyLibraryPage> {
   final search = TextEditingController();
   String category = 'All';
+  bool _runningSuite = false;
+  Map<String, dynamic> _suiteRun = const {};
+  String? _suiteRunError;
+
+  Future<void> _runSuite(Map<String, dynamic> marketRow) async {
+    final timeframes = Map<String, dynamic>.from(marketRow['timeframes'] as Map? ?? const {});
+    List? raw;
+    for (final key in ['15m', '15min', '5m', '5min', '1m', '1min']) {
+      if (timeframes[key] is List) { raw = timeframes[key] as List; break; }
+    }
+    raw ??= marketRow['candles'] is List ? marketRow['candles'] as List : null;
+    final candles = (raw ?? const []).whereType<Map>().map((row) => Map<String, dynamic>.from(row)).where((row) => row['high'] is num && row['low'] is num && row['close'] is num).toList();
+    if (candles.isEmpty) {
+      setState(() { _suiteRunError = 'No usable real OHLC candles in the current market snapshot. The strategy suite was not executed.'; _suiteRun = const {}; });
+      return;
+    }
+    setState(() { _runningSuite = true; _suiteRunError = null; _suiteRun = const {}; });
+    try {
+      final result = await FreshApi().postJson('/v1/strategies/evaluate', {'candles': candles, 'min_consensus': 3}, timeout: const Duration(seconds: 20));
+      if (mounted) setState(() { _suiteRun = result; });
+    } catch (error) {
+      if (mounted) setState(() { _suiteRunError = error.toString(); });
+    } finally {
+      if (mounted) setState(() { _runningSuite = false; });
+    }
+  }
   static const items = <Map<String, String>>[
     {'name':'EMA Trend Following','group':'Trend','detail':'Fast/slow EMA crossover; confirm trend and avoid flat markets.','risk':'Trend confirmation + ATR stop'},
     {'name':'Donchian Breakout','group':'Trend','detail':'Breakout above/below a rolling channel; use only closed candles.','risk':'ATR stop + false-breakout filter'},
@@ -106,6 +133,38 @@ class _StrategyLibraryPageState extends State<StrategyLibraryPage> {
                 ),
               );
             }),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _runningSuite ? null : () => _runSuite(marketRow),
+                icon: _runningSuite
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.play_arrow),
+                label: Text(_runningSuite ? 'RUNNING LOCAL STRATEGY SUITE…' : 'RUN STRATEGY SUITE ON CURRENT CANDLES'),
+              ),
+            ),
+            if (_suiteRunError != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(_suiteRunError!, style: const TextStyle(color: Colors.orangeAccent, fontSize: 11)),
+              ),
+            if (_suiteRun.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text('RUN RESULT: ${_suiteRun['signal'] ?? 'WAIT'} • status ${_suiteRun['status'] ?? 'unknown'} • votes ${(_suiteRun['votes'] as Map?)?.toString() ?? 'not returned'}',
+                style: const TextStyle(color: Color(0xFF12D6FF), fontWeight: FontWeight.w900, fontSize: 12)),
+              Text('Execution ID: ${_suiteRun['execution_id'] ?? 'missing'}',
+                style: const TextStyle(fontSize: 10, color: Colors.white70)),
+              Text('Input candles: ${(_suiteRun['trace'] as Map?)?['input_candle_count'] ?? 'unknown'} • SHA-256: ${((_suiteRun['trace'] as Map?)?['input_sha256'] ?? 'unknown').toString()}',
+                style: const TextStyle(fontSize: 10, color: Colors.white54)),
+              Text('AI consumed: ${(_suiteRun['trace'] as Map?)?['ai_consumed'] ?? 'not proven'} • Research received: ${(_suiteRun['trace'] as Map?)?['research_engine_received'] ?? 'not proven'} • Trading Setup received: ${(_suiteRun['trace'] as Map?)?['trading_setup_received'] ?? 'not proven'}',
+                style: const TextStyle(fontSize: 10, color: Colors.orangeAccent)),
+              if (_suiteRun['strategies'] is Map)
+                ...(_suiteRun['strategies'] as Map).entries.map((entry) => Padding(
+                  padding: const EdgeInsets.only(top: 3),
+                  child: Text('${entry.key}: ${entry.value}', style: const TextStyle(fontSize: 11, color: Colors.white70)),
+                )),
+            ],
             const Text('This panel reads the shared backend signal snapshot. Only fields actually returned by the backend are displayed; missing execution IDs, versions, AI-consumption and propagation evidence are explicitly marked unverified.',
               style: TextStyle(color: Colors.white60, fontSize: 10)),
             Text('Source: ${marketRow['source'] ?? 'not available'} • Quote age: ${marketRow['age_seconds'] ?? 'unknown'} sec', style: const TextStyle(color: Colors.white54, fontSize: 11)),
