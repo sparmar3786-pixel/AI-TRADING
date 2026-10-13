@@ -160,9 +160,12 @@ class _TradeEnginePageState extends State<TradeEnginePage> {
                     ]),
                   ))
                 else
-                  ...strategySignals.entries.map((entry) => InfoRow(
-                    entry.key.replaceAll('_', ' ').toUpperCase(),
-                    (entry.value ?? 'WAIT').toString(),
+                  ...strategySignals.entries.map((entry) => Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      '${entry.key.replaceAll('_', ' ').toUpperCase()}: ${(entry.value ?? 'WAIT').toString()}',
+                      style: const TextStyle(fontSize: 11, color: Colors.white70),
+                    ),
                   )),
                 const SizedBox(height: 6),
                 const Text('Research evidence only. It cannot bypass live-data freshness, option validation, the deterministic risk gate, or order safeguards.',
