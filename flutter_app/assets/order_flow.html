@@ -60,7 +60,8 @@ function connect(){
  ws.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch(_){mode='wait';status();return}mode=String(m.mode||'wait').toLowerCase();
   if(mode==='demo'||mode.includes('sample')){raw=[];mode='wait';status();$('info').textContent='Demo/sample feed blocked. Waiting for broker-sourced data.';dirty=1;return}
   if(m.type==='snap'){raw=Array.isArray(m.candles)?m.candles:[];step=Number(m.step)||step}
-  else{const c=m.candle,l=raw[raw.length-1];if(l&&l.t===c.t)raw[raw.length-1]=c;else if(!l||c.t>l.t)raw.push(c);else{const i=raw.findIndex(x=>x.t===c.t);if(i>=0)raw[i]=c}}
+  else if(m.type==='status'){if(Array.isArray(m.candles))raw=m.candles;$('info').textContent=String(m.message||'Waiting for broker data.');status();dirty=1;return}
+  else if(m.candle){const c=m.candle,l=raw[raw.length-1];if(l&&l.t===c.t)raw[raw.length-1]=c;else if(!l||c.t>l.t)raw.push(c);else{const i=raw.findIndex(x=>x.t===c.t);if(i>=0)raw[i]=c}}
   status();dirty=1};
  ws.onclose=()=>{$('st').className='';$('st').textContent='Reconnecting...';setTimeout(connect,Math.min(1000*++retry,8000))};
 }
