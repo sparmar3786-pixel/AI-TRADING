@@ -20,7 +20,7 @@ class SmcChartPage extends StatefulWidget {
 class _SmcChartPageState extends State<SmcChartPage> {
   @override void initState(){super.initState();_proChartController=WebViewController()..setJavaScriptMode(JavaScriptMode.unrestricted)..setBackgroundColor(const Color(0xFF0E1420))..setNavigationDelegate(NavigationDelegate(onPageFinished:(_){_proChartReady=true;_pushProChartCandles();}))..loadFlutterAsset('assets/prochart.html');}
   @override void didUpdateWidget(covariant SmcChartPage oldWidget){super.didUpdateWidget(oldWidget);if(oldWidget.market!=widget.market||oldWidget.index!=widget.index)_pushProChartCandles();}
-  void _pushProChartCandles(){if(!_proChartReady)return;final payload=jsonEncode({'symbol':widget.index,'candles':bars});_proChartController.runJavaScript('window.setMarketData($payload)');}
+  void _pushProChartCandles(){if(!_proChartReady)return;final payload=jsonEncode({'symbol':widget.index,'candles':_liveFeed?bars:const []});_proChartController.runJavaScript('window.setMarketData($payload)');}
   String tf='15m';
   String strategyFormat='Guardeer';
   late final WebViewController _proChartController;
@@ -104,7 +104,7 @@ class _SmcChartPageState extends State<SmcChartPage> {
       const SizedBox(height:8),
       Wrap(spacing:6,runSpacing:4,children:[for(final format in const ['Guardeer','Inner Circle']) ChoiceChip(label:Text(format),selected:strategyFormat==format,onSelected:(_)=>setState(()=>strategyFormat=format))]),
       const SizedBox(height:8),
-      Wrap(spacing:6,runSpacing:4,children:[for(final period in const ['1m','3m','5m','15m','30m','1H','2H','4H','1D','1W','1M']) ChoiceChip(label:Text(period),selected:tf==period,onSelected:(_)=>setState(()=>tf=period))]),
+      Wrap(spacing:6,runSpacing:4,children:[for(final period in const ['1m','3m','5m','15m','30m','1H','2H','4H','1D','1W','1M']) ChoiceChip(label:Text(period),selected:tf==period,onSelected:(_){setState(()=>tf=period);_pushProChartCandles();})]),
       const SizedBox(height:8),
       Card(child:Padding(padding:const EdgeInsets.all(10),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
         const Text('PROCHART • LIVE API ONLY',style:TextStyle(fontWeight:FontWeight.w900)),
@@ -131,7 +131,8 @@ class _SmcChartPageState extends State<SmcChartPage> {
         const SizedBox(height:8),
         FilledButton.icon(onPressed:_engineBusy?null:_runEngine,icon:Icon(_engineBusy?Icons.hourglass_top:Icons.hub),label:Text(_engineBusy?'ANALYZING…':'RUN MULTI-TIMEFRAME SMC ENGINE')),
         if(_engineResult.isNotEmpty) ...[
-          Text('Server decision: ${_engineResult['signal']??'NO TRADE'} • Bias: ${_engineResult['bias']??'UNKNOWN'}',style:const TextStyle(fontWeight:FontWeight.w900)),
+          Text('Format: ${_engineResult['strategy_format']??strategyFormat} • Server decision: ${_engineResult['signal']??'NO TRADE'} • Bias: ${_engineResult['bias']??'UNKNOWN'}',style:const TextStyle(fontWeight:FontWeight.w900)),
+          if(_engineResult['format_modules'] is Map) Text('Format evidence: ${(_engineResult['format_modules'] as Map).keys.join(' • ')}'),
           Text('Reason: ${(_engineResult['reasons'] as List? ?? const[]).join(' • ')}'),
           Text('Execution allowed: ${_engineResult['execution_allowed']??false}'),
         ],
