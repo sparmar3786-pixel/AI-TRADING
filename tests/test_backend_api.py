@@ -149,7 +149,7 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["overall_status"], "BLOCKED_NO_LIVE_DATA")
-        self.assertEqual(data["providers"]["openai"]["status"], "not_configured")
+        self.assertNotIn("openai", data["providers"])
         self.assertEqual(data["providers"]["openrouter"]["status"], "not_configured")
         self.assertEqual(data["deterministic_decision"], "WAIT")
 
@@ -353,22 +353,21 @@ class BackendApiTests(unittest.TestCase):
         self.assertIn("25000.0", body["answer"])
         self.assertIn("missing option evidence", body["answer"])
 
-    def test_ai_chat_uses_openai_when_gemini_is_unconfigured(self):
+    def test_ai_chat_uses_openrouter_when_gemini_is_unconfigured(self):
         payload = {"market": {"NIFTY": {"ltp": 25000.0, "age_seconds": 3, "live": True}},
                    "signals": {"NIFTY": {"decision": "WAIT", "reasons": ["risk gate wait"]}}}
         with patch.object(api, "_get_signals", return_value=payload), \
              patch.dict(os.environ, {"GEMINI_API_KEY": "", "GOOGLE_API_KEY": "",
-                                      "OPENAI_API_KEY": "unit-test-key", "OPENAI_MODEL": "gpt-test",
-                                      "OPENROUTER_API_KEY": ""}, clear=False), \
+                                      "OPENROUTER_API_KEY": "unit-test-key", "OPENROUTER_MODEL": "router-test"}, clear=False), \
              patch.object(api, "_run_openai_compatible_completion", return_value={
-                 "answer": "Distinct test response", "provider": "openai", "model": "gpt-test",
+                 "answer": "Distinct test response", "provider": "openrouter", "model": "router-test",
                  "llm_used": True, "ok": True, "status": "connected", "latency_ms": 12.0,
              }) as completion:
             response = self.client.post("/v1/ai/chat", headers=self.device_headers,
                                         json={"index": "NIFTY", "question": "Explain only the risk gate", "history": []})
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
-        self.assertEqual(body["provider"], "openai")
+        self.assertEqual(body["provider"], "openrouter")
         self.assertTrue(body["llm_used"])
         self.assertEqual(body["answer"], "Distinct test response")
         completion.assert_called_once()
@@ -557,7 +556,7 @@ class BackendApiTests(unittest.TestCase):
         headers = Message()
         headers["Retry-After"] = "30"
         error = api.urllib.error.HTTPError(
-            "https://api.openai.com/v1/chat/completions", 429, "Too Many Requests", headers, None
+            "https://openrouter.ai/api/v1/chat/completions", 429, "Too Many Requests", headers, None
         )
         with patch.object(api.urllib.request, "urlopen", side_effect=error):
             result = api._run_ai_validation_probe(
