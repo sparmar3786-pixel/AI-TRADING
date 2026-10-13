@@ -439,11 +439,43 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     final ist = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
     if (ist.weekday == DateTime.saturday || ist.weekday == DateTime.sunday) return false;
     final minutes = ist.hour * 60 + ist.minute;
+    if (commodityOptionUnderlyings.contains(selectedIndex)) {
+      // MCX closes at 23:30 IST in standard US time and 23:55 IST during US DST.
+      final marchFirst = DateTime(ist.year, 3, 1);
+      final marchFirstSunday = marchFirst.add(Duration(days: (7 - marchFirst.weekday) % 7));
+      final dstStart = marchFirstSunday.add(const Duration(days: 7));
+      final novemberFirst = DateTime(ist.year, 11, 1);
+      final dstEnd = novemberFirst.add(Duration(days: (7 - novemberFirst.weekday) % 7));
+      final usDst = !ist.isBefore(dstStart) && ist.isBefore(dstEnd);
+      final closeMinute = usDst ? 23 * 60 + 55 : 23 * 60 + 30;
+      return minutes >= 9 * 60 && minutes <= closeMinute;
+    }
     return minutes >= (9 * 60 + 15) && minutes <= (15 * 60 + 30);
+  }
+
+  bool get _selectedCommodityLive {
+    if (!commodityOptionUnderlyings.contains(selectedIndex)) return false;
+    final rows = optionChainsByIndex[selectedIndex] ?? const <dynamic>[];
+    final now = DateTime.now();
+    for (final value in rows) {
+      if (value is! Map) continue;
+      final stamp = value['source_timestamp'] ?? value['timestamp'];
+      final parsed = DateTime.tryParse(stamp?.toString() ?? '');
+      if (parsed == null) continue;
+      final age = now.difference(parsed.toLocal()).inSeconds;
+      if (age >= -5 && age <= 60) return true;
+    }
+    return false;
   }
 
   String get _appBarStatus {
     if (!apiOnline) return "API OFFLINE";
+    if (commodityOptionUnderlyings.contains(selectedIndex)) {
+      if (!_marketOpenNow) return "API UP • MCX CLOSED";
+      if (_selectedCommodityLive) return "API LIVE • MCX";
+      if (optionChainError != null) return "API UP • MCX DATA ERROR";
+      return "API UP • WAITING MCX DATA";
+    }
     if (!signalsEndpointOnline) return "API UP • DATA ERROR";
     if (!_marketOpenNow) return "API UP • MARKET CLOSED";
     if (status == "LIVE market feed connected.") return "API LIVE";
@@ -453,9 +485,9 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
   }
 
   Color get _appBarStatusColor {
-    if (_appBarStatus == "API LIVE") return Colors.greenAccent;
+    if (_appBarStatus.startsWith("API LIVE")) return Colors.greenAccent;
     if (_appBarStatus == "API OFFLINE") return Colors.redAccent;
-    if (_appBarStatus == "API UP • MARKET CLOSED") return const Color(0xFF94A3B8);
+    if (_appBarStatus.contains("CLOSED")) return const Color(0xFF94A3B8);
     return Colors.orangeAccent;
   }
 
