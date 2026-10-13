@@ -38,6 +38,7 @@ from quant_engine import evaluate_five_layer_signal, evaluate_futures_signal
 
 from strategies.technical import atr as technical_atr, ema as technical_ema, rsi as technical_rsi, rsi_reversion, sma as technical_sma
 from strategies.advanced import bollinger_bands, macd as advanced_macd, donchian_channels
+from strategies.suite import evaluate_strategy_suite
 from risk.position_sizing import position_size
 
 app = FastAPI(title="AI-TRADING Read-only Signals API", version="1.0.0")
@@ -2738,6 +2739,29 @@ def paper_report(_: str = Depends(_device)) -> dict[str, Any]:
         "trades": closed, "mode": "PAPER_ONLY",
         "message": "Metrics are computed only from recorded closed paper trades; they are not a forecast or live P&L.",
     }
+
+
+@app.post("/v1/strategies/evaluate")
+def evaluate_strategies(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
+    """Evaluate supplied completed candles with the local research strategy suite."""
+    candles = body.get("candles")
+    if not isinstance(candles, list) or not candles:
+        raise HTTPException(status_code=422, detail="candles must be a non-empty list.")
+    if len(candles) > 5000:
+        raise HTTPException(status_code=422, detail="At most 5000 candles may be evaluated per request.")
+    raw_consensus = body.get("min_consensus", 3)
+    if isinstance(raw_consensus, bool) or not isinstance(raw_consensus, int) or not 1 <= raw_consensus <= 8:
+        raise HTTPException(status_code=422, detail="min_consensus must be an integer from 1 to 8.")
+    reward_risk = _number(body.get("risk_reward", 2.0))
+    if reward_risk is None or reward_risk <= 0 or reward_risk > 10:
+        raise HTTPException(status_code=422, detail="risk_reward must be finite and between 0 and 10.")
+    result = evaluate_strategy_suite(
+        candles,
+        oi_change=body.get("oi_change"),
+        min_consensus=raw_consensus,
+        risk_reward=reward_risk,
+    )
+    return {**result, "source": "submitted_completed_candles", "order_placement_enabled": False}
 
 
 @app.get("/v1/signals")
