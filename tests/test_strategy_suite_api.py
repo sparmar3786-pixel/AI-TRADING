@@ -31,6 +31,14 @@ class StrategySuiteApiTests(unittest.TestCase):
         self.assertIn("oi_context", result)
         self.assertFalse(result["order_placement_enabled"])
         self.assertEqual(result["execution"], "disabled")
+        trace = result["trace"]
+        self.assertTrue(trace["execution_id"].startswith("strategy-"))
+        self.assertEqual(trace["strategy_version"], "strategy-suite-v1")
+        self.assertEqual(trace["input_candle_count"], len(candles))
+        self.assertEqual(len(trace["input_sha256"]), 64)
+        self.assertFalse(trace["ai_consumed"])
+        self.assertFalse(trace["research_engine_received"])
+        self.assertFalse(trace["trading_setup_received"])
 
     def test_evaluate_strategy_suite_rejects_empty_history(self):
         response = self.client.post(
