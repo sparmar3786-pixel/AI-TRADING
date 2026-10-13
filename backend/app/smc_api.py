@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
-from strategies.smc import analyze_smc
+from strategies.smc import analyze_guardeer, analyze_inner_circle
 
 router = APIRouter(tags=["SMC / ICT"])
 
@@ -15,12 +15,14 @@ class SmcAnalyzeRequest(BaseModel):
     ltf_candles: list[dict[str, Any]] = Field(default_factory=list, max_length=5000)
     liquidity_tolerance: float | None = Field(default=None, gt=0)
     in_killzone: bool = True
+    strategy_format: str = Field(default="Guardeer", pattern="^(Guardeer|Inner Circle)$")
 
 
 @router.post("/v1/smc/analyze")
 def smc_analyze(request: SmcAnalyzeRequest) -> dict[str, Any]:
     """Return explainable SMC evidence; never authorizes or places an order."""
-    return analyze_smc(
+    analyzer = analyze_guardeer if request.strategy_format == "Guardeer" else analyze_inner_circle
+    return analyzer(
         request.htf_candles,
         request.mtf_candles,
         request.ltf_candles,
