@@ -82,7 +82,9 @@ class _SmcChartPageState extends State<SmcChartPage> {
     for(var i=0;i<lows.length;i++){for(var j=i+1;j<lows.length;j++){if((lows[i]-lows[j]).abs()<=tol)ssl.add(lows[i]<lows[j]?lows[i]:lows[j]);}}
     final wanted=bias=='BULLISH'?'bullish':'bearish', zones=[...ob,...fvg].where((z)=>z['type']==wanted).toList();
     final poi=zones.isEmpty?null:zones.last;
-    final structure=bosUp||bosDown;
+    final previousBias=highs.length>=2&&lows.length>=2&&highs.last>highs[highs.length-2]&&lows.last>lows[lows.length-2]?'BULLISH':highs.length>=2&&lows.length>=2&&highs.last<highs[highs.length-2]&&lows.last<lows[lows.length-2]?'BEARISH':'NO CLEAR BIAS';
+    final choch=(previousBias=='BEARISH'&&bosUp)||(previousBias=='BULLISH'&&bosDown);
+    final structure=bosUp||bosDown||choch;
     final liq=bias=='BULLISH'?ssl.isNotEmpty:bsl.isNotEmpty;
     final ready=bias!='NO CLEAR BIAS'&&poi!=null&&structure&&liq;
     final reason=ready?'HTF bias + POI + structure + liquidity aligned':[
@@ -91,7 +93,7 @@ class _SmcChartPageState extends State<SmcChartPage> {
       if(!structure)'Waiting for BOS/CHoCH',
       if(!liq)'Waiting for equal-high/low liquidity'
     ].join(' • ');
-    return {'bias':bias,'signal':ready?(bias=='BULLISH'?'LONG':'SHORT'):'NO TRADE','reason':reason,'bos':structure,'choch':false,'ob':ob,'fvg':fvg,'bsl':bsl,'ssl':ssl,'poi':poi,'tol':tol};
+    return {'bias':bias,'signal':ready?(bias=='BULLISH'?'LONG':'SHORT'):'NO TRADE','reason':reason,'bos':structure,'choch':choch,'ob':ob,'fvg':fvg,'bsl':bsl,'ssl':ssl,'poi':poi,'tol':tol};
   }
   @override Widget build(BuildContext context){
     final a=_analyze(bars);
