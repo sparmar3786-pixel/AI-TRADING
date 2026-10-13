@@ -338,9 +338,12 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         market = responseMarket.map((key, value) {
           final row = Map<String, dynamic>.from(value as Map? ?? const {});
           final cachedChain = optionChainsByIndex[key];
-          if (((row['option_chain'] as List?) ?? const <dynamic>[]).isEmpty && cachedChain != null) {
-            row['option_chain'] = cachedChain;
+          final currentChain = (row['option_chain'] as List?) ?? const <dynamic>[];
+          if (currentChain.isEmpty && cachedChain != null) {
+            row['option_chain'] = _markOptionRowsFresh(cachedChain, forceStale: row['cached'] == true);
             row['option_chain_source'] = 'independent_timestamped_broker_quote';
+          } else if (currentChain.isNotEmpty) {
+            row['option_chain'] = _markOptionRowsFresh(currentChain, forceStale: row['cached'] == true);
           }
           return MapEntry(key, row);
         });
@@ -443,6 +446,18 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     super.dispose();
   }
 
+  List<dynamic> _markOptionRowsFresh(List<dynamic> rows, {bool forceStale = false}) {
+    final now = DateTime.now().toUtc();
+    return rows.whereType<Map>().map((raw) {
+      final option = Map<String, dynamic>.from(raw);
+      final stamp = DateTime.tryParse((option['source_timestamp'] ?? option['timestamp'] ?? '').toString())?.toUtc();
+      final age = stamp == null ? null : now.difference(stamp).inMilliseconds / 1000.0;
+      option['age_seconds'] = age;
+      option['live'] = !forceStale && age != null && age >= 0 && age <= 60;
+      return option;
+    }).toList();
+  }
+
   Map<String, dynamic> _signal(String i) {
     final row = Map<String, dynamic>.from(signals[i] as Map? ?? const {});
     final marketRow = _market(i);
@@ -456,12 +471,15 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     }
     return row;
   }
-  Map<String,dynamic> _market(String i) {
+  Map<String, dynamic> _market(String i) {
     final row = Map<String, dynamic>.from(market[i] as Map? ?? const {});
     final cachedChain = optionChainsByIndex[i];
-    if (((row['option_chain'] as List?) ?? const <dynamic>[]).isEmpty && cachedChain != null) {
-      row['option_chain'] = cachedChain;
+    final chain = (row['option_chain'] as List?) ?? const <dynamic>[];
+    if (chain.isEmpty && cachedChain != null) {
+      row['option_chain'] = _markOptionRowsFresh(cachedChain, forceStale: row['cached'] == true);
       row['option_chain_source'] = 'independent_timestamped_broker_quote';
+    } else if (chain.isNotEmpty) {
+      row['option_chain'] = _markOptionRowsFresh(chain, forceStale: row['cached'] == true);
     }
     return row;
   }
