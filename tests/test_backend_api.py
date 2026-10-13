@@ -180,6 +180,40 @@ class BackendApiTests(unittest.TestCase):
         self.assertIsNone(api._iso("not-a-market-timestamp"))
         self.assertIsNotNone(api._iso("12-Oct-2026 10:00:00"))
 
+    def test_shared_workspace_endpoints_do_not_404_or_claim_fake_data(self):
+        ai = self.client.get("/v1/ai/status", headers=self.device_headers)
+        self.assertEqual(ai.status_code, 200, ai.text)
+        self.assertIn("status", ai.json())
+        search = self.client.post("/v1/providers/search/status", headers=self.device_headers, json={})
+        self.assertEqual(search.status_code, 200, search.text)
+        self.assertIn("exa", search.json()["providers"])
+        orders = self.client.get("/v1/live/orders", headers=self.device_headers)
+        self.assertEqual(orders.status_code, 200, orders.text)
+        self.assertFalse(orders.json()["order_placement_enabled"])
+        self.assertEqual(orders.json()["orders"], [])
+        portfolio = self.client.get("/v1/portfolio", headers=self.device_headers)
+        self.assertEqual(portfolio.status_code, 200, portfolio.text)
+        self.assertEqual(portfolio.json()["status"], "not_available")
+        self.assertEqual(portfolio.json()["positions"], [])
+
+    def test_ai_chat_fallback_uses_real_payload_fields_and_discloses_no_llm(self):
+        payload = {
+            "market": {"NIFTY": {"ltp": 25000.0, "age_seconds": 3, "live": True}},
+            "signals": {"NIFTY": {"decision": "WAIT", "reasons": ["missing option evidence"], "live_validation": {"verdict": "WARN"}}},
+        }
+        with patch.object(api, "_get_signals", return_value=payload):
+            response = self.client.post(
+                "/v1/ai/chat",
+                headers=self.device_headers,
+                json={"index": "NIFTY", "question": "Explain the current signal", "history": []},
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertFalse(body["llm_used"])
+        self.assertEqual(body["provider"], "deterministic_fallback")
+        self.assertIn("25000.0", body["answer"])
+        self.assertIn("missing option evidence", body["answer"])
+
 
 if __name__ == "__main__":
     unittest.main()
