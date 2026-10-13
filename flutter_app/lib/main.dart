@@ -504,6 +504,24 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     return "API UP • INVALID MARKET DATA";
   }
 
+  String get _dataDiagnosticMessage {
+    final parts = <String>[];
+    if (signalsFetchError != null && signalsFetchError!.trim().isNotEmpty) {
+      parts.add(signalsFetchError!.trim());
+    }
+    final marketRows = Map<String, dynamic>.from(signals['market'] as Map? ?? const {});
+    final marketRow = Map<String, dynamic>.from(marketRows[selectedIndex] as Map? ?? const {});
+    final signalRows = Map<String, dynamic>.from(signals['signals'] as Map? ?? const {});
+    final signalRow = Map<String, dynamic>.from(signalRows[selectedIndex] as Map? ?? const {});
+    final reasons = (signalRow['reasons'] as List?) ?? const <dynamic>[];
+    if (parts.isEmpty && reasons.isNotEmpty) parts.add(reasons.first.toString());
+    final stamp = marketRow['source_timestamp'] ?? marketRow['timestamp'] ?? marketRow['last_updated'];
+    parts.add('Last source tick: ${stamp ?? 'not received'}');
+    final age = marketRow['age_seconds'];
+    if (age != null) parts.add('Tick age: $age seconds');
+    return parts.join(' • ');
+  }
+
   Color get _appBarStatusColor {
     if (_appBarStatus.startsWith("API LIVE")) return Colors.greenAccent;
     if (_appBarStatus == "API OFFLINE" || _appBarStatus == "API DISCONNECTED" ||
@@ -647,7 +665,10 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         ]),
         actions: [Padding(padding: const EdgeInsets.only(right:12), child: Row(children: [
           Icon(Icons.circle, size:10, color: _appBarStatusColor), SizedBox(width:5),
-          Text(_appBarStatus, style: TextStyle(fontSize:11, color: _appBarStatusColor)),
+          Tooltip(
+            message: _dataDiagnosticMessage,
+            child: Text(_appBarStatus, style: TextStyle(fontSize:11, color: _appBarStatusColor)),
+          ),
         ]))],
         bottom: TabBar(isScrollable: true, tabAlignment: TabAlignment.start, tabs: tabs.map((t)=>Tab(text:t)).toList()),
       ),
