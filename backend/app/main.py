@@ -401,6 +401,10 @@ def _commodity_contract_matches(row: dict[str, Any], requested: str) -> bool:
         return (name == key or symbol.startswith(key)) and not symbol.startswith("CRUDEOILM")
     if key == "CRUDEOILM":
         return symbol.startswith(key)
+    if key in {"GOLD", "SILVER"}:
+        return (name == key or symbol.startswith(key)) and not symbol.startswith(key + "M")
+    if key in {"GOLDM", "SILVERM"}:
+        return symbol.startswith(key)
     if key == "NATURALGAS":
         return name == key or symbol.startswith(key)
     if key == "NATGASMINI":
