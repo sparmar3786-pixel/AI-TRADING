@@ -1184,7 +1184,7 @@ class ResearchEnginesPage extends StatelessWidget {
             'Commodity options gate',
             chainRows.isEmpty
                 ? 'WAIT — no broker option quotes'
-                : 'WAIT until option Greeks, option ATR and risk inputs are verified',
+                : 'WAIT — Greeks/ATR required',
           ),
         ],
         const Divider(height: 22),
