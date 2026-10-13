@@ -2056,6 +2056,16 @@ def test_ai_providers(_: str = Depends(_device)) -> dict[str, Any]:
     # A test call is deliberately explicit/on-demand, not added to every market tick.
     # It validates a real broker snapshot when one is cached; no sample price is sent.
     market_row = dict(((_signal_cache or {}).get("market") or {}).get("NIFTY") or {})
+    source_stamp = _iso(market_row.get("source_timestamp") or market_row.get("timestamp"))
+    parsed_stamp = datetime.fromisoformat(source_stamp) if source_stamp else None
+    actual_age = (_utc_now() - parsed_stamp).total_seconds() if parsed_stamp else None
+    market_row["age_seconds"] = round(actual_age, 2) if actual_age is not None else None
+    market_row["live"] = (
+        market_row.get("source") == "angelone_smartapi"
+        and _number(market_row.get("ltp")) is not None
+        and (_number(market_row.get("ltp")) or 0) > 0
+        and actual_age is not None and 0 <= actual_age <= 60
+    )
     checks: list[dict[str, Any]] = [
         {"provider": "gemini", "configured": _provider_key_present("GEMINI_API_KEY", "GOOGLE_API_KEY"),
          "ok": False, "status": "configured_not_tested", "verdict": "WAIT",
