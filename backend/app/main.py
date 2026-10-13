@@ -2474,7 +2474,7 @@ def ai_status(_: str = Depends(_device)) -> dict[str, Any]:
     # Only Gemini and OpenRouter are supported cloud providers in this app.
     providers = [
         ("gemini", ("GEMINI_API_KEY", "GOOGLE_API_KEY"), os.getenv("GEMINI_MODEL", "gemini-2.5-flash")),
-        ("openrouter", ("OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY"), os.getenv("OPENROUTER_MODEL", "openrouter/free")),
+        ("openrouter", ("OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY"), os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash")),
     ]
     selected = next((item for item in providers if _provider_key_present(*item[1])), None)
     provider_status = {
@@ -2654,7 +2654,7 @@ def test_ai_providers(_: str = Depends(_device)) -> dict[str, Any]:
     openrouter_key = (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPEN_ROUTER_API_KEY") or "").strip()
     if openrouter_key:
         checks.append(_run_ai_validation_probe(
-            "openrouter", openrouter_key, os.getenv("OPENROUTER_MODEL", "openrouter/free").strip(),
+            "openrouter", openrouter_key, os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash").strip(),
             "https://openrouter.ai/api/v1/chat/completions", market_row))
     else:
         checks.append({"provider": "openrouter", "configured": False, "ok": False, "status": "not_configured", "verdict": "WAIT"})
@@ -2701,7 +2701,7 @@ def review_signal_with_gemini(payload: dict[str, Any], _: str = Depends(_device)
         providers.append(("gemini", gemini_key, os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()))
     openrouter_key = (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPEN_ROUTER_API_KEY") or "").strip()
     if openrouter_key:
-        providers.append(("openrouter", openrouter_key, os.getenv("OPENROUTER_MODEL", "openrouter/free").strip()))
+        providers.append(("openrouter", openrouter_key, os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash").strip()))
     if not providers:
         return {
             "provider": "none", "configured": False, "ok": False, "verdict": "WAIT",
@@ -3017,7 +3017,7 @@ def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
                     )
                 else:
                     result = _run_openai_compatible_completion(
-                        api_key, os.getenv("OPENROUTER_MODEL", "openrouter/free").strip(), messages,
+                        api_key, os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash").strip(), messages,
                         provider="openrouter",
                         endpoint=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1/chat/completions").strip(),
                     )
