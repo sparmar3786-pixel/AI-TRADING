@@ -90,6 +90,8 @@ class DailyAiMemory {
     required List<dynamic> commodities,
     required Map<String, List<dynamic>> optionChains,
     Map<String, dynamic> footprint = const <String, dynamic>{},
+    Map<String, dynamic> aiProviders = const <String, dynamic>{},
+    Map<String, dynamic> aiResults = const <String, dynamic>{},
   }) async {
     final now = DateTime.now();
     final minuteKey = _minuteKey(now);
@@ -186,6 +188,8 @@ class DailyAiMemory {
         'source': 'AI-TRADING observed API snapshot',
         'market_analysis': marketAnalysis,
         'signals': signals,
+        'ai_provider_status': aiProviders,
+        'ai_validation_results': aiResults,
         'commodities': commodities,
         'option_chains': chainPayload,
         'oi_analysis': chainAnalysis,
