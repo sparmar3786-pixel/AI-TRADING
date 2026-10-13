@@ -103,8 +103,8 @@ class _OrderFlowPageState extends State<OrderFlowPage> {
             children: [
               if (_controller != null) WebViewWidget(controller: _controller!),
               Positioned(
-                top: 4,
-                right: 4,
+                bottom: 12,
+                right: 8,
                 child: Material(
                   color: const Color(0xCC111923),
                   borderRadius: BorderRadius.circular(24),
