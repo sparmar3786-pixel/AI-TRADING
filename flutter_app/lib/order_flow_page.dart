@@ -50,7 +50,7 @@ class _OrderFlowPageState extends State<OrderFlowPage> {
       if (!{'https', 'http'}.contains(backend.scheme) || backend.host.isEmpty) {
         throw StateError('Signal backend URL is invalid.');
       }
-      final html = await rootBundle.loadString('assets/order_flow.html');
+      final html = await rootBundle.loadString('assets/order_flow_footprint.html');
       final controller = WebViewController()
         ..setJavaScriptMode(JavaScriptMode.unrestricted)
         ..setBackgroundColor(const Color(0xFF0B0F14))
