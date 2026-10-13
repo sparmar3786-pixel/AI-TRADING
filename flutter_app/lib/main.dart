@@ -413,6 +413,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         ' • HTTP ${metrics['status_code']}'
         ' • ${metrics['duration_ms']} ms'
         ' • ${metrics['response_bytes']} bytes received'
+        ' • ${metrics['bytes_per_second'] ?? 'n/a'} B/s'
         ' • ${metrics['received_at']}';
   }
 
