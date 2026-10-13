@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 class StrategyLibraryPage extends StatefulWidget {
   const StrategyLibraryPage({required this.market, required this.signals, required this.selectedIndex, super.key});
@@ -30,20 +29,8 @@ class _StrategyLibraryPageState extends State<StrategyLibraryPage> {
     {'name':'Portfolio Risk Parity','group':'Portfolio','detail':'Scale exposures by realized volatility and correlation, not equal rupee allocation alone.','risk':'Correlation shock + max exposure'},
     {'name':'Walk-Forward Strategy Selection','group':'Validation','detail':'Tune on rolling train windows and evaluate on untouched forward windows.','risk':'No test-set tuning; multiple-testing penalty'},
   ];
-  static const sources = <Map<String,String>>[
-    {'title':'Awesome Systematic Trading','url':'https://github.com/paperswithbacktest/awesome-systematic-trading','desc':'Strategies, backtesting tools, research papers, data and execution libraries.'},
-    {'title':'Awesome Quant','url':'https://github.com/wilsonfreitas/awesome-quant','desc':'Quant libraries for indicators, portfolio/risk, time series, market data and backtesting.'},
-    {'title':'Awesome Deep Trading','url':'https://github.com/cbailes/awesome-deep-trading','desc':'Deep-learning trading papers, reinforcement learning, datasets and code.'},
-    {'title':'Backtest-Kit: First Backtest','url':'https://backtest-kit.github.io/documents/example_02_first_backtest.html','desc':'Example walkthrough for constructing and running a backtest.'},
-  ];
   @override
   void dispose() { search.dispose(); super.dispose(); }
-  Future<void> open(String value) async {
-    final uri = Uri.tryParse(value);
-    if (uri == null || !await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open link. Check internet connection.')));
-    }
-  }
   @override
   Widget build(BuildContext context) {
     final filtered = items.where((x) => (category == 'All' || x['group'] == category) && ('${x['name']} ${x['detail']} ${x['group']}'.toLowerCase().contains(search.text.toLowerCase()))).toList();
@@ -88,16 +75,6 @@ class _StrategyLibraryPageState extends State<StrategyLibraryPage> {
           const SizedBox(height: 6),
           Text('Risk gate: ${x['risk']}', style: const TextStyle(color: Color(0xFF12D6FF), fontSize: 12)),
         ])))),
-        const SizedBox(height: 10),
-        const Text('UPSTREAM RESEARCH SOURCES', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
-        const SizedBox(height: 6),
-        ...sources.map((x) => Card(color: const Color(0xFF101722), child: ListTile(
-          leading: const Icon(Icons.open_in_new, color: Color(0xFF12D6FF)),
-          title: Text(x['title']!, style: const TextStyle(fontWeight: FontWeight.bold)),
-          subtitle: Text(x['desc']!),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => open(x['url']!),
-        ))),
         const SizedBox(height: 10),
         const Text('Safety: this page is a research catalogue, not proof of profitability. No strategy is marked live or approved here. Use timestamped market data, brokerage costs/slippage, out-of-sample and walk-forward tests, and existing fail-closed risk gates. Deep-learning/RL models must be trained and validated separately; a link is not an installed model.', style: TextStyle(color: Colors.orangeAccent, fontSize: 12)),
       ])),
