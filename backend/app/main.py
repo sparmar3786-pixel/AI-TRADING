@@ -41,9 +41,11 @@ from quant_engine import evaluate_five_layer_signal, evaluate_futures_signal
 from strategies.technical import atr as technical_atr, ema as technical_ema, rsi as technical_rsi, rsi_reversion, sma as technical_sma
 from strategies.advanced import bollinger_bands, macd as advanced_macd, donchian_channels
 from strategies.suite import evaluate_strategy_suite
+from backend.app.smc_api import router as smc_router
 from risk.position_sizing import position_size
 
 app = FastAPI(title="AI-TRADING Read-only Signals API", version="1.0.0")
+app.include_router(smc_router)
 logger = logging.getLogger("ai_trading.angel")
 # SmartAPI/logzero SDK error logs can include full request headers (API key/JWT)
 # and payloads. Silence SDK transport logs before the first broker call; only
