@@ -10,6 +10,10 @@ class FreshApi {
       : baseUrl = baseUrl ?? AppConfig.backendUrl,
         _testClient = client;
 
+  FreshApi.signal([http.Client? client])
+      : baseUrl = AppConfig.signalBackendUrl,
+        _testClient = client;
+
   static const FlutterSecureStorage _secureStorage = FlutterSecureStorage();
 
   final String baseUrl;
@@ -135,9 +139,9 @@ class FreshApi {
   Future<Map<String, dynamic>> metadata() => getJson('/v1/metadata');
   Future<Map<String, dynamic>> angelStatus() => getJson('/v1/angel/status');
   Future<Map<String, dynamic>> testAIProviders() =>
-      postJson('/v1/providers/ai/test', {});
+      FreshApi.signal().postJson('/v1/providers/ai/test', {});
   Future<Map<String, dynamic>> testSearchProviders() =>
-      postJson('/v1/providers/search/test', {});
+      FreshApi.signal().postJson('/v1/providers/search/test', {});
 
   Future<Map<String, dynamic>> saveCredentials(
     Map<String, dynamic> body,
@@ -236,14 +240,13 @@ class FreshApi {
         'notes': notes,
       });
 
-  /// Gemini + configured cloud fallback can take longer than a normal JSON call.
-  /// Keep this separate from offline Qwen, which runs directly on the handset.
+  /// NVIDIA-first cloud chat with OpenRouter fallback. Offline Qwen runs on-device.
   Future<Map<String, dynamic>> aiChat({
     required String index,
     required String question,
     List<Map<String, String>> history = const [],
-  }) => postJson(
-        '/v1/ai/chat',
+  }) => FreshApi.signal().postJson(
+        '/v1/ai/nvidia-chat',
         {
           'index': index,
           'question': question,
