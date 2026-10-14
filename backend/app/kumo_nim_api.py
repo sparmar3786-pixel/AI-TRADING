@@ -13,15 +13,16 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
-try:
-    from app.main import _device
-except ImportError:
-    # Tests importing backend.app.kumo_nim_api do not need to import main here.
-    def _device() -> str:
-        return ""
+DEVICE_ID_RE = __import__("re").compile(r"^[A-Za-z0-9_-]{43,128}$")
+
+
+def _device(x_device_id: str = Header(default="")) -> str:
+    if not DEVICE_ID_RE.fullmatch(x_device_id or ""):
+        raise HTTPException(status_code=401, detail="Missing or invalid X-Device-Id")
+    return x_device_id
 
 router = APIRouter(tags=["NVIDIA Kumo Tabular"])
 DEFAULT_TIMEOUT_SECONDS = 20
