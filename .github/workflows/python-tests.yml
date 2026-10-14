@@ -23,13 +23,22 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: npm
       - name: Verify frontend manifest
         run: |
           test -f package.json
           test -f package-lock.json
           node -e "const p=require('./package.json'); if(!p.scripts || !p.scripts.build) process.exit(1)"
+      - name: Regenerate stale npm lockfile on the runner
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Upload regenerated lockfile for repository repair
+        uses: actions/upload-artifact@v4
+        with:
+          name: regenerated-package-lock-${{ github.run_number }}
+          path: package-lock.json
+          if-no-files-found: error
+          retention-days: 3
       - name: Install frontend dependencies
         run: npm ci
       - name: Build production frontend

@@ -5,29 +5,13 @@ import { Cpu, Server, Radio, Database, CheckCircle, RefreshCw } from 'lucide-rea
 export const DataHealthPage: React.FC = () => {
   const { diagnostics, isLive, marketStatus, refresh, isRefreshing } = useTrading();
 
-  const worker = diagnostics?.backend_worker || {
-    cycle_age_seconds: 2,
-    cycle_fresh: true,
-    uptime_hours: 148.5,
-  };
-  const angel = diagnostics?.angel_one || {
-    authenticated: true,
-    stream_open: true,
-    last_tick_age_seconds: 1,
-    client_code: 'P584920 (Active)',
-  };
-  const data = diagnostics?.market_data || {
-    snapshot_count: 8640,
-    fresh_snapshot_count: 8640,
-    live_snapshot_count: 8632,
-    ticks_per_second: 38,
-  };
-  const ai = diagnostics?.ai_provider || {
-    configured: true,
-    nvidia_status: 'online',
-    openrouter_status: 'standby',
-    model: 'nvidia/llama-3.1-nemotron-70b-instruct',
-  };
+  const worker = diagnostics?.backend_worker;
+  const angel = diagnostics?.angel_one;
+  const data = diagnostics?.market_data;
+  const ai = diagnostics?.ai_provider;
+  const workerStatus = !worker ? 'UNKNOWN / NOT TESTED' : worker.cycle_fresh ? 'HEALTHY' : 'STALE';
+  const angelStatus = !angel ? 'UNKNOWN / NOT TESTED' : angel.authenticated ? 'AUTHENTICATED' : 'NOT AUTHENTICATED';
+  const aiStatus = !ai ? 'UNKNOWN / NOT TESTED' : ai.configured ? 'CONFIGURED' : 'NOT CONFIGURED';
 
   return (
     <div className="p-3 pb-8 space-y-4 select-none max-w-2xl mx-auto">
@@ -66,21 +50,21 @@ export const DataHealthPage: React.FC = () => {
               <span>Railway Algo Backend Worker</span>
             </div>
             <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-400 font-bold">
-              HEALTHY
+              {workerStatus}
             </span>
           </div>
           <div className="grid grid-cols-3 gap-2 text-center text-xs pt-1">
             <div className="p-2 rounded-lg bg-[#070B12]">
               <div className="text-[9px] text-slate-500">CYCLE AGE</div>
-              <div className="font-bold text-white mt-0.5">{worker.cycle_age_seconds}s ago</div>
+              <div className="font-bold text-white mt-0.5">{worker?.cycle_age_seconds ?? '—'}s ago</div>
             </div>
             <div className="p-2 rounded-lg bg-[#070B12]">
               <div className="text-[9px] text-slate-500">CYCLE FRESH</div>
-              <div className="font-bold text-emerald-400 mt-0.5">{worker.cycle_fresh ? 'YES' : 'NO'}</div>
+              <div className="font-bold text-emerald-400 mt-0.5">{worker ? (worker.cycle_fresh ? 'YES' : 'NO') : 'UNKNOWN'}</div>
             </div>
             <div className="p-2 rounded-lg bg-[#070B12]">
               <div className="text-[9px] text-slate-500">UPTIME</div>
-              <div className="font-bold text-white mt-0.5">{worker.uptime_hours} hrs</div>
+              <div className="font-bold text-white mt-0.5">{worker?.uptime_hours ?? '—'} hrs</div>
             </div>
           </div>
         </div>
@@ -93,21 +77,21 @@ export const DataHealthPage: React.FC = () => {
               <span>Angel One Broker Session</span>
             </div>
             <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-400 font-bold">
-              AUTHENTICATED
+              {angelStatus}
             </span>
           </div>
           <div className="grid grid-cols-3 gap-2 text-center text-xs pt-1">
             <div className="p-2 rounded-lg bg-[#070B12]">
               <div className="text-[9px] text-slate-500">WEBSOCKET</div>
-              <div className="font-bold text-emerald-400 mt-0.5">{angel.stream_open ? 'OPEN' : 'CLOSED'}</div>
+              <div className="font-bold text-emerald-400 mt-0.5">{angel ? (angel.stream_open ? 'OPEN' : 'CLOSED') : 'UNKNOWN'}</div>
             </div>
             <div className="p-2 rounded-lg bg-[#070B12]">
               <div className="text-[9px] text-slate-500">LAST TICK</div>
-              <div className="font-bold text-white mt-0.5">{angel.last_tick_age_seconds}s</div>
+              <div className="font-bold text-white mt-0.5">{angel?.last_tick_age_seconds ?? '—'}s</div>
             </div>
             <div className="p-2 rounded-lg bg-[#070B12]">
               <div className="text-[9px] text-slate-500">CLIENT CODE</div>
-              <div className="font-bold text-cyan-400 mt-0.5">{angel.client_code}</div>
+              <div className="font-bold text-cyan-400 mt-0.5">{angel?.client_code ?? 'Not verified'}</div>
             </div>
           </div>
         </div>
@@ -120,17 +104,17 @@ export const DataHealthPage: React.FC = () => {
               <span>Tick Pipeline & Instruments</span>
             </div>
             <span className="text-[10px] text-slate-400">
-              {data.ticks_per_second} ticks/sec
+              {data?.ticks_per_second ?? '—'} ticks/sec
             </span>
           </div>
           <div className="grid grid-cols-2 gap-2 text-center text-xs pt-1">
             <div className="p-2 rounded-lg bg-[#070B12]">
               <div className="text-[9px] text-slate-500">TOTAL SNAPSHOTS</div>
-              <div className="font-bold text-white mt-0.5">{data.snapshot_count}</div>
+              <div className="font-bold text-white mt-0.5">{data?.snapshot_count ?? '—'}</div>
             </div>
             <div className="p-2 rounded-lg bg-[#070B12]">
               <div className="text-[9px] text-slate-500">FRESH SNAPSHOTS</div>
-              <div className="font-bold text-emerald-400 mt-0.5">{data.fresh_snapshot_count}</div>
+              <div className="font-bold text-emerald-400 mt-0.5">{data?.fresh_snapshot_count ?? '—'}</div>
             </div>
           </div>
         </div>

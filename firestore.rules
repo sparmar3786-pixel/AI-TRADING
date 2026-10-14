@@ -1,8 +1,11 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // SECURITY HOTFIX: the previous rule allowed every caller to read and
+    // write every document. Keep access closed until collection-specific,
+    // authenticated ownership rules are implemented and tested.
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 }
