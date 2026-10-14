@@ -21,19 +21,19 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    defaults:
-      run:
-        working-directory: flutter_app
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Ensure flutter_app directory exists
+        working-directory: .
         run: |
-          if [ ! -d "flutter_app" ]; then
-            echo "flutter_app missing on current branch, fetching from feat/ai-trading-signal-apk..."
-            git checkout origin/feat/ai-trading-signal-apk -- flutter_app || true
+          set -euo pipefail
+          if [ ! -f "flutter_app/pubspec.yaml" ]; then
+            echo "flutter_app missing on current branch; attempting to restore it from feat/ai-trading-signal-apk..."
+            git checkout origin/feat/ai-trading-signal-apk -- flutter_app
           fi
+          test -f "flutter_app/pubspec.yaml" || { echo "Flutter source/pubspec.yaml is missing; refusing to continue with an empty APK build."; exit 1; }
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -86,8 +86,10 @@ jobs:
           fi
           "$NDK_DIR/ndk-build" --version
       - name: Bootstrap Android platform
+        working-directory: flutter_app
         run: flutter create --platforms=android --project-name ai_trading_signal .
       - name: Enforce Android minSdk 26
+        working-directory: flutter_app
         run: |
           set -euo pipefail
           GRADLE="android/app/build.gradle.kts"
@@ -118,6 +120,7 @@ jobs:
           python3 .github/scripts/ensure_android_desugaring.py
           grep -nE 'isCoreLibraryDesugaringEnabled|coreLibraryDesugaring' flutter_app/android/app/build.gradle.kts
       - name: Add Android network permissions
+        working-directory: flutter_app
         run: |
           set -euo pipefail
           MANIFEST=android/app/src/main/AndroidManifest.xml
@@ -136,14 +139,19 @@ jobs:
           grep -n 'applicationId\|minSdk' "$GRADLE"
           grep -n 'uses-permission' "$MANIFEST"
       - name: Install dependencies
+        working-directory: flutter_app
         run: flutter pub get
       - name: Analyze Dart
+        working-directory: flutter_app
         run: flutter analyze --no-fatal-infos
       - name: Widget and API tests
+        working-directory: flutter_app
         run: flutter test
       - name: Build release APK
+        working-directory: flutter_app
         run: flutter build apk --release --no-tree-shake-icons --dart-define=BACKEND_URL=https://nse-algo-backend-final-production.up.railway.app --dart-define=SIGNAL_BACKEND_URL=https://ai-trading-signals-api-production.up.railway.app
       - name: Build optimized ARM64 APK
+        working-directory: flutter_app
         run: |
           set -euo pipefail
           APK_DIR="build/app/outputs/flutter-apk"
@@ -153,6 +161,7 @@ jobs:
           cp /tmp/ai-trading-universal.apk "$APK_DIR/app-release.apk"
           ls -lh "$APK_DIR/app-release.apk" "$APK_DIR/app-arm64-v8a-release.apk"
       - name: Verify APK configuration and signal-only safety
+        working-directory: flutter_app
         run: |
           set -euo pipefail
           APK_DIR="build/app/outputs/flutter-apk"
