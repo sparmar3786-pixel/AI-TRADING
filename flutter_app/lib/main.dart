@@ -14,7 +14,7 @@ import 'order_flow_page.dart';
 import 'strategy_library_page.dart';
 import 'flow_monitor_page.dart';
 import 'risk_calculator_page.dart';
-import 'gemini_signal_review.dart';
+import 'nvidia_signal_review.dart';
 import 'background_monitor.dart';
 import 'daily_ai_memory.dart';
 import 'daily_ai_memory_page.dart';
