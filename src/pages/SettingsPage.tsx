@@ -29,18 +29,6 @@ export const SettingsPage: React.FC = () => {
   const [activeSection, setActiveSection] = useState<'keys' | 'trading' | 'signals' | 'system'>('keys');
 
   // Key configurations
-  const [geminiKey, setGeminiKey] = useState<string>(() => {
-    return localStorage.getItem('ai_trading_gemini_key') || 'AIzaSy_GEMINI_AI_DEMO_KEY_SECURE';
-  });
-  const [angelClientId, setAngelClientId] = useState<string>(() => {
-    return localStorage.getItem('angel_client_id') || 'DEMO_ANGEL_CLIENT_001';
-  });
-  const [angelApiKey, setAngelApiKey] = useState<string>(() => {
-    return localStorage.getItem('angel_api_key') || 'DEMO_SMART_API_KEY_LIVE';
-  });
-  const [alpacaPaperKey, setAlpacaPaperKey] = useState<string>(() => {
-    return localStorage.getItem('alpaca_paper_key') || 'PKDEMO_SIMULATION_KEY_001';
-  });
   const [signalUrl, setSignalUrl] = useState<string>(() => apiService.getSignalBackend());
   const [legacyUrl, setLegacyUrl] = useState<string>(() => apiService.getLegacyBackend());
 
@@ -62,7 +50,7 @@ export const SettingsPage: React.FC = () => {
   });
 
   const [savedSuccess, setSavedSuccess] = useState<boolean>(false);
-  const [autoConfigured, setAutoConfigured] = useState<boolean>(false);
+  const credentialNotice = 'Provider secrets must be configured on the secured backend; this browser does not generate or store API keys.';
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const deviceId = apiService.getDeviceId();
@@ -70,10 +58,6 @@ export const SettingsPage: React.FC = () => {
   // Save all settings
   const handleSave = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    localStorage.setItem('ai_trading_gemini_key', geminiKey);
-    localStorage.setItem('angel_client_id', angelClientId);
-    localStorage.setItem('angel_api_key', angelApiKey);
-    localStorage.setItem('alpaca_paper_key', alpacaPaperKey);
     localStorage.setItem('trading_default_lots', defaultLots.toString());
     localStorage.setItem('trading_sl_pct', stopLossPct.toString());
     localStorage.setItem('trading_target_pct', targetPct.toString());
@@ -88,42 +72,27 @@ export const SettingsPage: React.FC = () => {
     setTimeout(() => setSavedSuccess(false), 3000);
   };
 
-  // 1-Click Auto Configure All Keys
+  // Remove only known demo placeholders; real provider secrets remain server-side.
   const handle1ClickAutoConfigure = () => {
-    const demoGemini = 'AIzaSy_GEMINI_AI_DEMO_KEY_SECURE';
-    const demoAngelClient = 'DEMO_ANGEL_CLIENT_001';
-    const demoAngelKey = 'DEMO_SMART_API_KEY_LIVE';
-    const demoAlpaca = 'PKDEMO_SIMULATION_KEY_001';
-
-    setGeminiKey(demoGemini);
-    setAngelClientId(demoAngelClient);
-    setAngelApiKey(demoAngelKey);
-    setAlpacaPaperKey(demoAlpaca);
-    setSignalUrl(DEFAULT_SIGNAL_BACKEND);
-    setLegacyUrl(DEFAULT_LEGACY_BACKEND);
-
-    localStorage.setItem('ai_trading_gemini_key', demoGemini);
-    localStorage.setItem('angel_client_id', demoAngelClient);
-    localStorage.setItem('angel_api_key', demoAngelKey);
-    localStorage.setItem('alpaca_paper_key', demoAlpaca);
-    localStorage.setItem('tradinggoose_api_settings', JSON.stringify({
-      ai_provider: 'gemini',
-      ai_api_key: demoGemini,
-      alpaca_paper_api_key: demoAlpaca,
-      alpaca_paper_secret_key: 'PKDEMO_SECRET_SIMULATION_KEY_001',
-      trading_mode: 'paper',
-    }));
-
+    const demoValues: Record<string, string> = {
+      ai_trading_gemini_key: 'AIzaSy_GEMINI_AI_DEMO_KEY_SECURE',
+      angel_client_id: 'DEMO_ANGEL_CLIENT_001',
+      angel_api_key: 'DEMO_SMART_API_KEY_LIVE',
+      alpaca_paper_key: 'PKDEMO_SIMULATION_KEY_001',
+    };
+    Object.entries(demoValues).forEach(([key, value]) => {
+      if (localStorage.getItem(key) === value) localStorage.removeItem(key);
+    });
+    const legacySettings = localStorage.getItem('tradinggoose_api_settings');
+    if (legacySettings && /DEMO_|AIzaSy_GEMINI_AI_DEMO_KEY_SECURE/.test(legacySettings)) {
+      localStorage.removeItem('tradinggoose_api_settings');
+    }
     apiService.setSignalBackend(DEFAULT_SIGNAL_BACKEND);
     apiService.setLegacyBackend(DEFAULT_LEGACY_BACKEND);
-
-    setAutoConfigured(true);
-    setSavedSuccess(true);
+    setSignalUrl(DEFAULT_SIGNAL_BACKEND);
+    setLegacyUrl(DEFAULT_LEGACY_BACKEND);
+    setSavedSuccess(false);
     refresh();
-    setTimeout(() => {
-      setAutoConfigured(false);
-      setSavedSuccess(false);
-    }, 4000);
   };
 
   const copyToClipboard = (text: string, label: string) => {
@@ -166,7 +135,7 @@ export const SettingsPage: React.FC = () => {
                 <span>1-Click Auto-Configure All Keys (सभी Keys खुद चालू करें)</span>
               </div>
               <p className="text-[11px] text-slate-300">
-                अगर आपके पास Key नहीं है तो यह बटन दबाएं। Firebase, Gemini AI, Angel One व Railway की सभी Demo Keys अपने आप तैयार हो जाएंगी।
+                यह बटन केवल default backend URLs रीसेट करता है और पहचाने गए demo placeholders हटाता है। यह API keys नहीं बनाता।
               </p>
             </div>
             <button
@@ -174,7 +143,7 @@ export const SettingsPage: React.FC = () => {
               className="py-2.5 px-4 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-[#070B12] font-black text-xs font-mono flex items-center justify-center space-x-2 shadow-lg shadow-cyan-500/30 active:scale-95 transition-all whitespace-nowrap"
             >
               <Key className="w-4 h-4" />
-              <span>{autoConfigured ? '✓ ALL KEYS ACTIVE' : '⚡ AUTO-CREATE ALL KEYS'}</span>
+              <span>RESET BACKEND URLS</span>
             </button>
           </div>
 
@@ -182,19 +151,19 @@ export const SettingsPage: React.FC = () => {
           <div className="mt-3 pt-3 border-t border-cyan-500/20 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] font-mono">
             <div className="flex items-center space-x-1.5 text-emerald-400">
               <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Firebase: Active</span>
+              <span>Firestore: Access locked</span>
             </div>
             <div className="flex items-center space-x-1.5 text-emerald-400">
               <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Gemini AI: Ready</span>
+              <span>NVIDIA AI: Not verified</span>
             </div>
             <div className="flex items-center space-x-1.5 text-emerald-400">
               <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Paper Trading: Active</span>
+              <span>Paper Trading: Local only</span>
             </div>
             <div className="flex items-center space-x-1.5 text-cyan-400">
               <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Railway: Connected</span>
+              <span>Railway URL: Configured, unverified</span>
             </div>
           </div>
         </div>
@@ -261,11 +230,11 @@ export const SettingsPage: React.FC = () => {
                 </span>
               </div>
               <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-bold">
-                ✓ PROVISIONED & ACTIVE
+                ACCESS LOCKED — RULES PENDING
               </span>
             </div>
             <div className="text-[11px] text-slate-300">
-              डेटाबेस पहले से ही लाइव क्लाउड स्टोरेज के साथ कॉन्फ़िगर है:
+              Firestore access is currently denied by the security hotfix until collection-specific access rules are implemented:
             </div>
             <div className="p-2.5 rounded-lg bg-[#070B12] border border-[#1C2740] text-[11px] font-mono text-cyan-400 flex items-center justify-between">
               <span className="truncate">ai-studio-android-aitradin-e7389ca7-bc19-45aa-98a6-f0fe07c8611b</span>
@@ -279,76 +248,15 @@ export const SettingsPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Gemini AI Key Card */}
-          <div className="card-base p-4 border border-[#1C2740] bg-[#101726] rounded-xl space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Bot className="w-4 h-4 text-cyan-400" />
-                <span className="text-xs font-bold text-white uppercase font-mono">
-                  Gemini AI Intelligence Key
-                </span>
-              </div>
-              <button
-                onClick={() => setGeminiKey('AIzaSy_GEMINI_AI_DEMO_KEY_SECURE')}
-                className="text-[10px] text-cyan-400 hover:underline font-mono"
-              >
-                + Auto-Fill Sandbox Key
-              </button>
+          {/* Provider credentials are server-side only. */}
+          <div className="card-base p-4 border border-amber-500/40 bg-amber-500/5 rounded-xl space-y-3">
+            <div className="flex items-center space-x-2 text-amber-300">
+              <ShieldCheck className="w-4 h-4" />
+              <span className="text-xs font-bold uppercase font-mono">NVIDIA / Angel One Credentials</span>
             </div>
-            <input
-              type="text"
-              value={geminiKey}
-              onChange={e => setGeminiKey(e.target.value)}
-              placeholder="Enter Gemini API Key or use auto-filled key"
-              className="w-full p-2.5 rounded-xl bg-[#070B12] border border-[#1C2740] text-cyan-400 font-mono text-xs focus:outline-none focus:border-cyan-400"
-            />
-            <p className="text-[10px] text-slate-400">
-              AI मार्केट सेंटिमेंट और सिग्नल एनालिसिस के लिए उपयोग की जाती है।
-            </p>
-          </div>
-
-          {/* Angel One SmartAPI / Paper Trading */}
-          <div className="card-base p-4 border border-[#1C2740] bg-[#101726] rounded-xl space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Wallet className="w-4 h-4 text-amber-400" />
-                <span className="text-xs font-bold text-white uppercase font-mono">
-                  Angel One SmartAPI / Paper Credentials
-                </span>
-              </div>
-              <button
-                onClick={() => {
-                  setAngelClientId('DEMO_ANGEL_CLIENT_001');
-                  setAngelApiKey('DEMO_SMART_API_KEY_LIVE');
-                }}
-                className="text-[10px] text-cyan-400 hover:underline font-mono"
-              >
-                + Fill Paper Credentials
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="text-[11px] text-slate-300 font-bold block mb-1">Client ID / Code</label>
-                <input
-                  type="text"
-                  value={angelClientId}
-                  onChange={e => setAngelClientId(e.target.value)}
-                  className="w-full p-2.5 rounded-xl bg-[#070B12] border border-[#1C2740] text-slate-200 font-mono text-xs focus:outline-none focus:border-cyan-400"
-                />
-              </div>
-              <div>
-                <label className="text-[11px] text-slate-300 font-bold block mb-1">SmartAPI Key</label>
-                <input
-                  type="text"
-                  value={angelApiKey}
-                  onChange={e => setAngelApiKey(e.target.value)}
-                  className="w-full p-2.5 rounded-xl bg-[#070B12] border border-[#1C2740] text-slate-200 font-mono text-xs focus:outline-none focus:border-cyan-400"
-                />
-              </div>
-            </div>
-            <p className="text-[10px] text-slate-400">
-              नोट: यह APK सिग्नल-ओनली और सुरक्षित पेपर ट्रेडिंग के लिए डिज़ाइन किया गया है।
+            <p className="text-[11px] text-slate-300 leading-relaxed">{credentialNotice}</p>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              NVIDIA chat and Kumo prediction are separate capabilities. A provider is not marked working until the backend reports an authenticated request and successful real inference. Configure ANGEL_API_KEY, ANGEL_CLIENT_CODE, ANGEL_PIN, ANGEL_TOTP_SECRET, NVIDIA and search-provider secrets in Railway Variables.
             </p>
           </div>
 
