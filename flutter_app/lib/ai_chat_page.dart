@@ -39,7 +39,7 @@ class _AiChatPageState extends State<AiChatPage> {
 
   Future<void> _checkAiProvider() async {
     try {
-      final status = await FreshApi(widget.backendUrl).getJson('/v1/ai/status');
+      final status = await FreshApi.signal().getJson('/v1/ai/status');
       if (!mounted) return;
       setState(() {
         _aiProvider = (status['provider'] ?? 'unknown').toString();
@@ -83,7 +83,7 @@ class _AiChatPageState extends State<AiChatPage> {
     _scrollToBottom();
 
     try {
-      final response = await FreshApi(widget.backendUrl).aiChat(
+      final response = await FreshApi.signal().aiChat(
         index: _selectedIndex,
         question: question,
         history: history,
