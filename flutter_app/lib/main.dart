@@ -2528,6 +2528,7 @@ class _ProCandlestickChartState extends State<ProCandlestickChart> with WidgetsB
   bool _disposed = false, _loading = false, _connected = false, _resyncing = false;
   int _lastSeq = 0, _reconnectAttempt = 0;
   DateTime? _lastTickAt;
+  int? _lastRenderMs, _snapshotRttMs;
   String? _error;
   static const int _maxBars = 1200;
 
@@ -2577,12 +2578,14 @@ class _ProCandlestickChartState extends State<ProCandlestickChart> with WidgetsB
   Future<void> _syncChart() async {
     if (_disposed || _loading) return;
     _loading = true;
+    final snapshotClock = Stopwatch()..start();
     try {
       final uri = Uri.parse('$_baseUrl/snapshot').replace(queryParameters: {
         'symbol': widget.index, 'tf': _tf, 'limit': '1000',
       });
       final response = await http.get(uri).timeout(const Duration(seconds: 8));
       if (response.statusCode != 200) throw Exception('Snapshot HTTP ${response.statusCode}');
+      snapshotClock.stop();
       final body = jsonDecode(response.body);
       if (body is! Map) throw const FormatException('Invalid chart snapshot');
       final incoming = <Map<String, dynamic>>[];
@@ -2603,6 +2606,7 @@ class _ProCandlestickChartState extends State<ProCandlestickChart> with WidgetsB
           bars = dedup.values.toList(growable: false);
           if (bars.length > _maxBars) bars = bars.sublist(bars.length - _maxBars);
           _lastSeq = seq > _lastSeq ? seq : _lastSeq;
+          _snapshotRttMs = snapshotClock.elapsedMilliseconds;
           _error = body['source'] == 'memory' ? 'Backend memory cache • configure Redis for multi-instance continuity' : null;
         });
       }
@@ -2660,6 +2664,7 @@ class _ProCandlestickChartState extends State<ProCandlestickChart> with WidgetsB
       }
       final candle = _candle(decoded);
       if (candle == null) return;
+      final renderClock = Stopwatch()..start();
       setState(() {
         final index = bars.indexWhere((b) => b['time'] == candle['time']);
         if (index >= 0) {
@@ -2675,6 +2680,10 @@ class _ProCandlestickChartState extends State<ProCandlestickChart> with WidgetsB
         _lastTickAt = DateTime.now();
         _connected = true;
         _error = null;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        renderClock.stop();
+        if (!_disposed && mounted) setState(() => _lastRenderMs = renderClock.elapsedMilliseconds);
       });
     } catch (_) {
       // Ignore malformed frames; the next gap/reconnect forces a fresh snapshot.
@@ -2782,6 +2791,7 @@ class _ProCandlestickChartState extends State<ProCandlestickChart> with WidgetsB
             _chartLegend(Colors.redAccent, 'Bear candle'),
             Text('VWAP ${_val(indicators['vwap'])}', style: const TextStyle(fontSize: 11, color: Colors.white70)),
             Text('seq $_lastSeq • $age', style: const TextStyle(fontSize: 10, color: Colors.white54)),
+            Text('snapshot RTT ${_snapshotRttMs == null ? '—' : '$_snapshotRttMs ms'} • receive→render ${_lastRenderMs == null ? '—' : '$_lastRenderMs ms'}', style: const TextStyle(fontSize: 10, color: Colors.white54)),
           ]),
           if (_error != null) Padding(
             padding: const EdgeInsets.only(top: 5),
