@@ -329,7 +329,7 @@ void main() {
       ),
     );
 
-    expect(find.text('PRO CHART • LIVE SNAPSHOT + DELTAS'), findsOneWidget);
+    expect(find.text('PRO CHART'), findsOneWidget);
     expect(find.text('Waiting for real candle history'), findsOneWidget);
     expect(find.text('No synthetic candles are displayed'), findsOneWidget);
   });
