@@ -106,6 +106,7 @@ export const SmcChartPage: React.FC = () => {
 
   useEffect(() => { void runAnalysis(); }, [runAnalysis]);
 
+  const timeframeLabel = timeframe === 'ONE_MINUTE' ? '1m' : timeframe === 'FIVE_MINUTE' ? '5m' : timeframe === 'FIFTEEN_MINUTE' ? '15m' : '1h';
   const chartCandles = useMemo(() => ltfCandles.slice(-32), [ltfCandles]);
   const chartBounds = useMemo(() => {
     if (!chartCandles.length) return { min: 0, max: 1, range: 1 };
@@ -160,7 +161,7 @@ export const SmcChartPage: React.FC = () => {
       {loading && <div className="card-base p-4 border border-[#1C2740] bg-[#101726] text-xs text-slate-300">Fetching real HTF/MTF/LTF candles and calculating SMC structure…</div>}
 
       <div className="grid grid-cols-3 gap-2 text-[10px] font-mono">
-        {[['HTF 1D', htfCandles.length], ['MTF 1H', mtfCandles.length], [`LTF ${timeframe.replace('_MINUTE', 'm').replace('ONE_HOUR', '1h')}`, ltfCandles.length]].map(([label, count]) => (
+        {[['HTF 1D', htfCandles.length], ['MTF 1H', mtfCandles.length], [`LTF ${timeframeLabel}`, ltfCandles.length]].map(([label, count]) => (
           <div key={String(label)} className="p-3 rounded-xl bg-[#101726] border border-[#1C2740]">
             <div className="text-slate-500">{label}</div><div className="text-white font-black text-sm mt-1">{count} candles</div>
           </div>
