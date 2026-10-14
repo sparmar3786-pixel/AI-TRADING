@@ -2224,6 +2224,24 @@ def _stale_signal_snapshot(cached: dict[str, Any], age_seconds: float | None) ->
                 "signal_only": True,
             })
             row["trade_plan"] = trade_plan
+            # Nested engine objects must agree with the final WAIT shown on every page.
+            for engine_key in ("five_layer_engine", "quant_engine"):
+                engine_payload = row.get(engine_key)
+                if isinstance(engine_payload, dict):
+                    engine_payload["decision"] = "WAIT"
+                    engine_payload["data_fresh"] = False
+                    row[engine_key] = engine_payload
+            strategy_filter = dict(row.get("strategy_filter") or {})
+            if strategy_filter:
+                strategy_filter.update({
+                    "pass": False, "state": "BLOCKED_BY_STALE_DATA",
+                    "reason": "Signal refresh is in progress; stale market data cannot authorize a trade.",
+                })
+                row["strategy_filter"] = strategy_filter
+            stability = dict(row.get("signal_stability") or {})
+            if stability:
+                stability["state"] = "BLOCKED_BY_STALE_DATA"
+                row["signal_stability"] = stability
             validation = dict(row.get("live_validation") or {})
             validation["decision"] = "WAIT"
             validation["verdict"] = "WARN"
