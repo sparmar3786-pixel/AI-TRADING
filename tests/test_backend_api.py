@@ -98,7 +98,7 @@ class BackendApiTests(unittest.TestCase):
         }
         with (
             patch.object(api, "_signal_cache", payload),
-            patch.dict(os.environ, {"NVIDIA_API_KEY": "test-key", "GOOGLE_API_KEY": ""}, clear=False),
+            patch.dict(os.environ, {"NVIDIA_API_KEY": "test-key", "KUMO_NVIDIA_API_KEY": ""}, clear=False),
             patch.object(
                 api,
                 "_run_openai_compatible_completion",
@@ -121,7 +121,7 @@ class BackendApiTests(unittest.TestCase):
 
         with (
             patch.object(api, "_signal_cache", payload),
-            patch.dict(os.environ, {"NVIDIA_API_KEY": "test-key", "GOOGLE_API_KEY": ""}, clear=False),
+            patch.dict(os.environ, {"NVIDIA_API_KEY": "test-key", "KUMO_NVIDIA_API_KEY": ""}, clear=False),
             patch.object(
                 api,
                 "_run_openai_compatible_completion",
@@ -159,7 +159,7 @@ class BackendApiTests(unittest.TestCase):
             "generated_at": "2026-10-13T00:00:00+00:00",
         }
         with patch.object(api, "_get_signals", return_value=payload), \
-             patch.dict(os.environ, {"NVIDIA_API_KEY": "", "GOOGLE_API_KEY": "", "OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
+             patch.dict(os.environ, {"NVIDIA_API_KEY": "", "KUMO_NVIDIA_API_KEY": "", "OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
             response = self.client.post(
                 "/v1/ai/validate",
                 headers=self.device_headers,
@@ -174,7 +174,7 @@ class BackendApiTests(unittest.TestCase):
 
     def test_openai_environment_key_is_ignored_by_ai_status(self):
         with patch.dict(os.environ, {
-            "NVIDIA_API_KEY": "", "GOOGLE_API_KEY": "",
+            "NVIDIA_API_KEY": "", "KUMO_NVIDIA_API_KEY": "",
             "OPENROUTER_API_KEY": "", "OPEN_ROUTER_API_KEY": "",
             "OPENAI_API_KEY": "legacy-key-must-be-ignored",
             "OPENAI_MODEL": "legacy-model-must-be-ignored",
@@ -373,7 +373,7 @@ class BackendApiTests(unittest.TestCase):
             "signals": {"NIFTY": {"decision": "WAIT", "reasons": ["missing option evidence"], "live_validation": {"verdict": "WARN"}}},
         }
         with patch.object(api, "_get_signals", return_value=payload), \
-             patch.dict(os.environ, {"NVIDIA_API_KEY": "", "GOOGLE_API_KEY": "", "OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
+             patch.dict(os.environ, {"NVIDIA_API_KEY": "", "KUMO_NVIDIA_API_KEY": "", "OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
             response = self.client.post(
                 "/v1/ai/chat",
                 headers=self.device_headers,
@@ -396,7 +396,7 @@ class BackendApiTests(unittest.TestCase):
                    }},
                    "signals": {"NIFTY": {"decision": "WAIT", "reasons": ["risk gate wait"]}}}
         with patch.object(api, "_get_signals", return_value=payload), \
-             patch.dict(os.environ, {"NVIDIA_API_KEY": "", "GOOGLE_API_KEY": "",
+             patch.dict(os.environ, {"NVIDIA_API_KEY": "", "KUMO_NVIDIA_API_KEY": "",
                                       "OPENROUTER_API_KEY": "unit-test-key", "OPENROUTER_MODEL": "router-test"}, clear=False), \
              patch.object(api, "_run_openai_compatible_completion", return_value={
                  "answer": "Distinct test response", "provider": "openrouter", "model": "router-test",
@@ -419,7 +419,7 @@ class BackendApiTests(unittest.TestCase):
         payload = {"market": {"NIFTY": {"ltp": 25000.0, "age_seconds": 3, "live": True}},
                    "signals": {"NIFTY": {"decision": "WAIT", "reasons": ["risk gate wait"]}}}
         with patch.object(api, "_get_signals", return_value=payload), \
-             patch.dict(os.environ, {"NVIDIA_API_KEY": "nvidia-test-key", "GOOGLE_API_KEY": "",
+             patch.dict(os.environ, {"NVIDIA_API_KEY": "nvidia-test-key", "KUMO_NVIDIA_API_KEY": "",
                                       "OPENROUTER_API_KEY": "router-test-key", "OPENROUTER_MODEL": "router-test"}, clear=False), \
              patch.object(api, "_run_openai_compatible_completion", side_effect=[
                  RuntimeError("nvidia_http_503"),
@@ -448,7 +448,7 @@ class BackendApiTests(unittest.TestCase):
             }],
         }
         with patch.object(api, "_get_signals", return_value=payload), \
-             patch.dict(os.environ, {"NVIDIA_API_KEY": "", "GOOGLE_API_KEY": "", "OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
+             patch.dict(os.environ, {"NVIDIA_API_KEY": "", "KUMO_NVIDIA_API_KEY": "", "OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
             response = self.client.post(
                 "/v1/ai/chat", headers=self.device_headers,
                 json={"index": "CRUDEOILM", "question": "Analyze current MCX context", "history": []},
@@ -473,7 +473,7 @@ class BackendApiTests(unittest.TestCase):
                 return json.dumps({"choices": [{"message": {"content": "Snapshot reviewed; risk gate remains WAIT."}}]}).encode()
 
         with patch.object(api, "_get_signals", return_value=payload), \
-             patch.dict(os.environ, {"NVIDIA_API_KEY": "test-key", "NVIDIA_MODEL": "nvidia/llama-3.3-nemotron-super-49b-v1.5", "GOOGLE_API_KEY": "", "OPENAI_API_KEY": "openai-key-must-not-be-used", "OPENAI_MODEL": "gpt-4o-mini", "OPENROUTER_API_KEY": "router-key-must-not-be-used"}, clear=False), \
+             patch.dict(os.environ, {"NVIDIA_API_KEY": "test-key", "NVIDIA_CHAT_MODEL": "nvidia/llama-3.3-nemotron-super-49b-v1.5", "KUMO_NVIDIA_API_KEY": "", "OPENAI_API_KEY": "openai-key-must-not-be-used", "OPENAI_MODEL": "gpt-4o-mini", "OPENROUTER_API_KEY": "router-key-must-not-be-used"}, clear=False), \
              patch.object(api.urllib.request, "urlopen", return_value=FakeResponse()):
             response = self.client.post(
                 "/v1/ai/chat", headers=self.device_headers,
