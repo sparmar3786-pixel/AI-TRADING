@@ -3,14 +3,8 @@ name: Build AI-TRADING Android APK
 on:
   push:
     branches: [main]
-    paths:
-      - 'flutter_app/**'
-      - '.github/workflows/android-apk.yml'
   pull_request:
     branches: [main]
-    paths:
-      - 'flutter_app/**'
-      - '.github/workflows/android-apk.yml'
   workflow_dispatch:
 
 permissions:
