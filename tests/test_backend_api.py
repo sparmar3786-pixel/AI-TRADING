@@ -822,5 +822,19 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(sell_orders, 3)
         self.assertEqual(api._footprint_levels({}, step=5.0), ({}, 0, 0))
 
+    def test_option_chain_returns_short_cache_hit_without_broker_call(self):
+        payload = {
+            "index": "NIFTY", "contracts": [], "option_chain": [],
+            "observed_at": "2026-10-14T00:00:00+00:00", "signal_only": True,
+        }
+        cache_entry = (api.time.monotonic(), payload)
+        with patch.dict(api._option_chain_cache, {"NIFTY": cache_entry}, clear=False):
+            with patch.object(api, "OPTION_CHAIN_CACHE_TTL_SECONDS", 2.0):
+                with patch.object(api, "_require_adapter", side_effect=AssertionError("cache miss")):
+                    response = self.client.get("/v1/option-chain?index=NIFTY", headers=self.device_headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["cache"]["hit"])
+        self.assertLess(response.json()["request_elapsed_ms"], 100)
+
 if __name__ == "__main__":
     unittest.main()
