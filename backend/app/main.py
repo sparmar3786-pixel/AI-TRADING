@@ -2672,7 +2672,7 @@ def _provider_config_fingerprint(provider: str) -> str:
     """Fingerprint key/model/endpoint configuration without exposing secrets."""
     if provider == "nvidia":
         values = (
-            os.getenv("NVIDIA_API_KEY") or os.getenv("KUMO_NVIDIA_API_KEY") or "",
+            os.getenv("NVIDIA_API_KEY") or "",
             os.getenv("NVIDIA_CHAT_MODEL", "nvidia/llama-3.3-nemotron-super-49b-v1.5"),
             os.getenv("NVIDIA_CHAT_BASE_URL", "https://integrate.api.nvidia.com/v1/chat/completions"),
         )
@@ -2691,7 +2691,7 @@ def _provider_config_fingerprint(provider: str) -> str:
 def ai_status(_: str = Depends(_device)) -> dict[str, Any]:
     # NVIDIA is primary; OpenRouter is an optional fallback.
     providers = [
-        ("nvidia", ("NVIDIA_API_KEY", "KUMO_NVIDIA_API_KEY"), os.getenv("NVIDIA_CHAT_MODEL", "nvidia/llama-3.3-nemotron-super-49b-v1.5")),
+        ("nvidia", ("NVIDIA_API_KEY",), os.getenv("NVIDIA_CHAT_MODEL", "nvidia/llama-3.3-nemotron-super-49b-v1.5")),
         ("openrouter", ("OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY"), os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct")),
     ]
     selected = next((item for item in providers if _provider_key_present(*item[1])), None)
@@ -2813,7 +2813,7 @@ def ai_validate_snapshot(body: dict[str, Any], _: str = Depends(_device)) -> dic
     )
     providers: dict[str, Any] = {}
     for provider, env_names in (
-        ("nvidia", ("NVIDIA_API_KEY", "KUMO_NVIDIA_API_KEY")),
+        ("nvidia", ("NVIDIA_API_KEY",)),
         ("openrouter", ("OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY")),
     ):
         configured = any(os.getenv(name, "").strip() for name in env_names)
@@ -2851,7 +2851,7 @@ def test_ai_providers(_: str = Depends(_device)) -> dict[str, Any]:
         and actual_age is not None and 0 <= actual_age <= 60
     )
     checks: list[dict[str, Any]] = []
-    nvidia_key = (os.getenv("NVIDIA_API_KEY") or os.getenv("KUMO_NVIDIA_API_KEY") or "").strip()
+    nvidia_key = (os.getenv("NVIDIA_API_KEY") or "").strip()
     nvidia_model = os.getenv("NVIDIA_CHAT_MODEL", "nvidia/llama-3.3-nemotron-super-49b-v1.5").strip()
     if nvidia_key:
         try:
@@ -2919,7 +2919,7 @@ def review_signal_with_nvidia(payload: dict[str, Any], _: str = Depends(_device)
             "signal_only": True, "order_placement_enabled": False,
         }
     providers: list[tuple[str, str, str]] = []
-    nvidia_key = (os.getenv("NVIDIA_API_KEY") or os.getenv("KUMO_NVIDIA_API_KEY") or "").strip()
+    nvidia_key = (os.getenv("NVIDIA_API_KEY") or "").strip()
     if nvidia_key:
         providers.append(("nvidia", nvidia_key, os.getenv("NVIDIA_CHAT_MODEL", "nvidia/llama-3.3-nemotron-super-49b-v1.5").strip()))
     openrouter_key = (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPEN_ROUTER_API_KEY") or "").strip()
@@ -2929,7 +2929,7 @@ def review_signal_with_nvidia(payload: dict[str, Any], _: str = Depends(_device)
         return {
             "provider": "none", "configured": False, "ok": False, "verdict": "WAIT",
             "decision": "WAIT", "status": "not_configured",
-            "reason": "Configure NVIDIA_API_KEY (or KUMO_NVIDIA_API_KEY) and/or OPENROUTER_API_KEY on the backend.",
+            "reason": "Configure NVIDIA_API_KEY for NVIDIA chat and/or OPENROUTER_API_KEY on the backend. KUMO_NVIDIA_API_KEY is reserved for Kumo Tabular inference.",
             "blocks": ["AI_PROVIDER_NOT_CONFIGURED"],
             "checks": {"backend_validation": True, "ai_direction_consistent": False},
             "signal_only": True, "order_placement_enabled": False,
@@ -3195,7 +3195,7 @@ def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
         # not success: each provider must return a real inference response.
         failures: list[dict[str, str]] = []
         providers = [
-            ("nvidia", (os.getenv("NVIDIA_API_KEY") or os.getenv("KUMO_NVIDIA_API_KEY") or "").strip()),
+            ("nvidia", (os.getenv("NVIDIA_API_KEY") or "").strip()),
             ("openrouter", (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPEN_ROUTER_API_KEY") or "").strip()),
         ]
         for provider, api_key in providers:
