@@ -679,13 +679,18 @@ class BackendApiTests(unittest.TestCase):
                         "entry": 100.0, "exit": 115.0, "stop_loss": 95.0, "target": 115.0,
                     },
                     "live_validation": {"verdict": "PASS", "blocks": []},
-                    "five_layer_engine": {"decision": "CALL BUY"},
-                    "quant_engine": {"decision": "CALL BUY"},
+                    "five_layer_engine": {"decision": "CALL BUY", "entry": 101.0, "stop_loss": 96.0, "target": 118.0},
+                    "quant_engine": {"decision": "CALL BUY", "trade_plan": {"strike": 25000, "entry": 102.0}},
                     "strategy_filter": {"pass": True, "state": "PASS"},
                     "signal_stability": {"state": "CONFIRMED"},
                 }
             },
             "market": {"NIFTY": {"ltp": 25000.0, "live": True}},
+            "commodities": [{
+                "name": "CRUDEOIL", "decision": "CALL BUY", "strike": 6200,
+                "entry": 6200.0, "stop_loss": 6150.0, "target": 6300.0,
+                "quant_engine": {"decision": "CALL BUY", "target": 6350.0},
+            }],
             "trade_plans": [{"index": "NIFTY"}],
             "qualified_trade_count": 1,
         }
@@ -698,7 +703,21 @@ class BackendApiTests(unittest.TestCase):
             self.assertIsNone(signal[key])
         self.assertEqual(signal["trade_plan"]["selection_grade"], "WAIT")
         self.assertEqual(signal["five_layer_engine"]["decision"], "WAIT")
+        self.assertIsNone(signal["five_layer_engine"]["entry"])
+        self.assertIsNone(signal["five_layer_engine"]["stop_loss"])
+        self.assertIsNone(signal["five_layer_engine"]["target"])
         self.assertEqual(signal["quant_engine"]["decision"], "WAIT")
+        self.assertIsNone(signal["quant_engine"]["trade_plan"]["strike"])
+        self.assertIsNone(signal["quant_engine"]["trade_plan"]["entry"])
+        commodity = stale["commodities"][0]
+        self.assertEqual(commodity["decision"], "WAIT")
+        self.assertFalse(commodity["live"])
+        self.assertIsNone(commodity["strike"])
+        self.assertIsNone(commodity["entry"])
+        self.assertIsNone(commodity["stop_loss"])
+        self.assertIsNone(commodity["target"])
+        self.assertEqual(commodity["quant_engine"]["decision"], "WAIT")
+        self.assertIsNone(commodity["quant_engine"]["target"])
         self.assertFalse(signal["strategy_filter"]["pass"])
         self.assertEqual(signal["signal_stability"]["state"], "BLOCKED_BY_STALE_DATA")
         self.assertEqual(stale["trade_plans"], [])
