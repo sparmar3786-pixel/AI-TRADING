@@ -410,11 +410,11 @@ class BackendApiTests(unittest.TestCase):
             "market": {"NIFTY": {"ltp": 25000.0, "age_seconds": 3, "live": True}},
             "signals": {"NIFTY": {"decision": "WAIT", "reasons": ["risk gate wait"]}},
         }
-        with patch.object(api, "_get_signals", return_value=payload), \\
+        with patch.object(api, "_get_signals", return_value=payload), \
              patch.dict(os.environ, {
                  "NVIDIA_API_KEY": "", "KUMO_NVIDIA_API_KEY": "kumo-only-key",
                  "OPENROUTER_API_KEY": "", "OPEN_ROUTER_API_KEY": "",
-             }, clear=False), \\
+             }, clear=False), \
              patch.object(api, "_run_openai_compatible_completion") as completion:
             status = self.client.get("/v1/ai/status", headers=self.device_headers)
             response = self.client.post(
