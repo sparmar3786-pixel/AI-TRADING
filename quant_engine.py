@@ -443,8 +443,21 @@ def evaluate_futures_signal(
 
     contract = snapshot.get("contract") if isinstance(snapshot.get("contract"), dict) else {}
     volume, oi, lot_size = map(_number, (contract.get("volume"), contract.get("oi"), contract.get("lot_size")))
-    expiry_text = str(contract.get("expiry") or "")
-    expiry = _timestamp(expiry_text + "T23:59:00+00:00") if expiry_text else None
+    expiry_text = str(contract.get("expiry") or "").strip()
+    expiry = None
+    if expiry_text:
+        # Commodity futures can trade into the evening. Keep a date-only
+        # contract valid through the end of that exchange-local calendar day,
+        # but never into the following morning because of a UTC date shift.
+        try:
+            expiry_date = datetime.strptime(expiry_text, "%Y-%m-%d").date()
+            expiry = datetime.combine(
+                expiry_date,
+                datetime.min.time().replace(hour=23, minute=59, second=59),
+                ZoneInfo("Asia/Kolkata"),
+            ).astimezone(timezone.utc)
+        except ValueError:
+            expiry = _timestamp(expiry_text)
     contract_ok = volume is not None and volume > 0 and oi is not None and oi > 0 and lot_size is not None and lot_size > 0 and expiry is not None and expiry > now_utc
     layers["contract_selection"] = {"pass": contract_ok, "symbol": contract.get("symbol"), "expiry": expiry_text or None, "volume": volume, "oi": oi, "lot_size": lot_size, "spread_pct": round(spread_pct, 4) if spread_pct is not None else None}
     if not contract_ok:
