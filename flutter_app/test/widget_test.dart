@@ -211,8 +211,12 @@ void main() {
 
     expect(find.text('TRADE ENGINE'), findsOneWidget);
     expect(find.text('SIGNAL ENGINE'), findsOneWidget);
-    final engineScrollable = find.ancestor(
+    final engineList = find.ancestor(
       of: find.text('TRADE ENGINE'),
+      matching: find.byType(ListView),
+    ).first;
+    final engineScrollable = find.descendant(
+      of: engineList,
       matching: find.byType(Scrollable),
     ).first;
     final riskLayer = find.text('RISK & 10-MINUTE STABILITY');
