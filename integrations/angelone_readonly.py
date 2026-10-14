@@ -7,6 +7,7 @@ placement, modification, or cancellation methods.
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 from datetime import datetime, timezone
@@ -126,7 +127,15 @@ class AngelOneReadOnly:
                 ) from exc
 
             client = SmartConnect(api_key=api_key)
-            response = _ok(client.generateSession(client_code, pin, pyotp.TOTP(totp_secret).now()))
+            # The mobile connect form sends the current six-digit OTP. Treat it
+            # as the code directly; only generate a code when given a Base32 seed
+            # from Railway's ANGEL_TOTP_SECRET variable.
+            totp_code = (
+                totp_secret
+                if re.fullmatch(r"[0-9]{6}", totp_secret)
+                else pyotp.TOTP(totp_secret).now()
+            )
+            response = _ok(client.generateSession(client_code, pin, totp_code))
             data = response.get("data") or {}
             # SDK generateSession may return a profile object after it has
             # already populated these token properties.
