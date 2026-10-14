@@ -1,9 +1,4 @@
-"""NVIDIA Kumo Tabular NIM proxy for structured trading-feature inference.
-
-The NIM container must run on a separate NVIDIA-GPU host. This API never
-pretends a model is ready unless KUMO_NIM_BASE_URL is configured and a live
-health request succeeds. It never places broker orders.
-"""
+"""NVIDIA Kumo Tabular proxy for self-hosted NIM and NVIDIA API Catalog."""
 from __future__ import annotations
 
 import json
@@ -17,6 +12,10 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
 DEVICE_ID_RE = __import__("re").compile(r"^[A-Za-z0-9_-]{43,128}$")
+NVIDIA_CATALOG_BASE = "https://ai.api.nvidia.com/v1/structured-data/nvidia/kumo-tabular"
+router = APIRouter(tags=["NVIDIA Kumo Tabular"])
+DEFAULT_TIMEOUT_SECONDS = 25
+MAX_REQUEST_BYTES = 512_000
 
 
 def _device(x_device_id: str = Header(default="")) -> str:
@@ -24,63 +23,105 @@ def _device(x_device_id: str = Header(default="")) -> str:
         raise HTTPException(status_code=401, detail="Missing or invalid X-Device-Id")
     return x_device_id
 
-router = APIRouter(tags=["NVIDIA Kumo Tabular"])
-DEFAULT_TIMEOUT_SECONDS = 20
-MAX_REQUEST_BYTES = 512_000
-
 
 class KumoPredictionRequest(BaseModel):
-    # This is deliberately a generic structured table payload. Use real,
-    # validated trading feature rows; do not send customer-renewal demo data.
-    data: list[dict[str, Any]] = Field(min_length=1, max_length=256)
+    # Hosted Catalog requires the full Universal TFM request envelope. The
+    # legacy data field remains accepted only for self-hosted proxy compatibility.
+    request: dict[str, Any] | None = None
+    data: list[dict[str, Any]] | None = Field(default=None, min_length=1, max_length=256)
     model: str | None = Field(default=None, max_length=128)
 
 
-def _base_url() -> str:
+def _self_hosted_base() -> str:
     return os.getenv("KUMO_NIM_BASE_URL", "").strip().rstrip("/")
 
 
-def _call_nim(path: str, payload: dict[str, Any] | None = None) -> tuple[int, Any, float]:
-    base = _base_url()
-    if not base:
-        raise HTTPException(
-            status_code=503,
-            detail="Kumo NIM is not configured. Set KUMO_NIM_BASE_URL to the private/reachable GPU host URL.",
-        )
-    if not base.startswith(("https://", "http://")):
-        raise HTTPException(status_code=503, detail="KUMO_NIM_BASE_URL must be an http(s) URL.")
-    url = base + path
-    headers = {"Accept": "application/json", "User-Agent": "AI-TRADING-Kumo-Proxy/1.0"}
-    token = os.getenv("KUMO_NIM_API_KEY", "").strip()
+def _hosted_key() -> str:
+    # Prefer the provider-specific variable; NVIDIA_API_KEY is supported as an alias.
+    return (os.getenv("KUMO_NVIDIA_API_KEY") or os.getenv("NVIDIA_API_KEY") or "").strip()
+
+
+def _http_json(url: str, method: str = "GET", payload: dict[str, Any] | None = None,
+               token: str = "") -> tuple[int, Any, float]:
+    headers = {"Accept": "application/json", "User-Agent": "AI-TRADING-Kumo-Proxy/1.1"}
     if token:
         headers["Authorization"] = "Bearer " + token
     body = None
     if payload is not None:
-        body = json.dumps(payload, separators=(",", ":"), allow_nan=False).encode("utf-8")
+        try:
+            body = json.dumps(payload, separators=(",", ":"), allow_nan=False).encode("utf-8")
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail="Kumo request must be valid finite JSON.") from exc
         if len(body) > MAX_REQUEST_BYTES:
             raise HTTPException(status_code=413, detail="Kumo request exceeds 512 KB.")
         headers["Content-Type"] = "application/json"
-    request = urllib.request.Request(url, data=body, headers=headers, method="POST" if body is not None else "GET")
+    request = urllib.request.Request(url, data=body, headers=headers, method=method)
     started = time.perf_counter()
     try:
         with urllib.request.urlopen(request, timeout=DEFAULT_TIMEOUT_SECONDS) as response:
             raw = response.read(MAX_REQUEST_BYTES + 1)
             if len(raw) > MAX_REQUEST_BYTES:
-                raise HTTPException(status_code=502, detail="Kumo NIM response exceeds 512 KB.")
+                raise HTTPException(status_code=502, detail="Kumo response exceeds 512 KB.")
             parsed = json.loads(raw.decode("utf-8")) if raw else {}
             return response.status, parsed, round((time.perf_counter() - started) * 1000, 2)
     except HTTPException:
         raise
     except urllib.error.HTTPError as exc:
-        # Do not forward raw upstream bodies: they may contain sensitive data.
-        raise HTTPException(status_code=502, detail=f"Kumo NIM returned HTTP {exc.code}.") from exc
+        # Never return upstream bodies: they may include sensitive request details.
+        if exc.code in (401, 403):
+            detail = "NVIDIA rejected the API key or its permissions."
+        elif exc.code in (400, 422):
+            detail = "NVIDIA rejected the Kumo request schema or input data."
+        elif exc.code == 429:
+            detail = "NVIDIA Kumo API rate limit reached."
+        else:
+            detail = f"NVIDIA Kumo API returned HTTP {exc.code}."
+        raise HTTPException(status_code=502, detail=detail) from exc
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise HTTPException(status_code=502, detail="Kumo NIM is unreachable or returned invalid JSON.") from exc
+        raise HTTPException(status_code=502, detail="Kumo endpoint is unreachable or returned invalid JSON.") from exc
+
+
+def _self_hosted_call(path: str, payload: dict[str, Any] | None = None) -> tuple[int, Any, float]:
+    base = _self_hosted_base()
+    if not base:
+        raise HTTPException(status_code=503, detail="Kumo NIM is not configured.")
+    if not base.startswith(("https://", "http://")):
+        raise HTTPException(status_code=503, detail="KUMO_NIM_BASE_URL must be an http(s) URL.")
+    token = os.getenv("KUMO_NIM_API_KEY", "").strip()
+    return _http_json(base + path, method="POST" if payload is not None else "GET", payload=payload, token=token)
 
 
 @router.get("/v1/ai/kumo/status")
 def kumo_status(_: str = Depends(_device)) -> dict[str, Any]:
-    if not _base_url():
+    # NVIDIA API Catalog is a hosted endpoint: it has a models endpoint, not the
+    # self-hosted NIM /v1/health/ready endpoint.
+    key = _hosted_key()
+    if key:
+        try:
+            code, data, elapsed = _http_json(NVIDIA_CATALOG_BASE + "/models", token=key)
+            return {
+                "provider": "nvidia_kumo_tabular",
+                "mode": "hosted_api_catalog",
+                "status": "ready" if 200 <= code < 300 else "unhealthy",
+                "configured": True,
+                "ready": 200 <= code < 300,
+                "latency_ms": elapsed,
+                "upstream": data if isinstance(data, dict) else {},
+                "capability": "structured_tabular_prediction",
+                "general_chat_supported": False,
+            }
+        except HTTPException as exc:
+            return {
+                "provider": "nvidia_kumo_tabular",
+                "mode": "hosted_api_catalog",
+                "status": "unreachable",
+                "configured": True,
+                "ready": False,
+                "capability": "structured_tabular_prediction",
+                "general_chat_supported": False,
+                "message": str(exc.detail),
+            }
+    if not _self_hosted_base():
         return {
             "provider": "nvidia_kumo_tabular",
             "status": "not_configured",
@@ -88,24 +129,25 @@ def kumo_status(_: str = Depends(_device)) -> dict[str, Any]:
             "ready": False,
             "capability": "structured_tabular_prediction",
             "general_chat_supported": False,
-            "message": "Set KUMO_NIM_BASE_URL to a reachable GPU-hosted Kumo NIM endpoint.",
+            "message": "Set KUMO_NVIDIA_API_KEY for NVIDIA hosted API, or KUMO_NIM_BASE_URL for self-hosted NIM.",
         }
     try:
-        code, data, elapsed = _call_nim("/v1/health/ready")
-        ready = 200 <= code < 300
+        code, data, elapsed = _self_hosted_call("/v1/health/ready")
         return {
             "provider": "nvidia_kumo_tabular",
-            "status": "ready" if ready else "unhealthy",
+            "mode": "self_hosted_nim",
+            "status": "ready" if 200 <= code < 300 else "unhealthy",
             "configured": True,
-            "ready": ready,
+            "ready": 200 <= code < 300,
             "latency_ms": elapsed,
-            "upstream": data if isinstance(data, dict) else {"response": str(data)[:200]},
+            "upstream": data if isinstance(data, dict) else {},
             "capability": "structured_tabular_prediction",
             "general_chat_supported": False,
         }
     except HTTPException as exc:
         return {
             "provider": "nvidia_kumo_tabular",
+            "mode": "self_hosted_nim",
             "status": "unreachable",
             "configured": True,
             "ready": False,
@@ -117,20 +159,43 @@ def kumo_status(_: str = Depends(_device)) -> dict[str, Any]:
 
 @router.post("/v1/ai/kumo/predict")
 def kumo_predict(body: KumoPredictionRequest, _: str = Depends(_device)) -> dict[str, Any]:
-    """Proxy a structured feature batch to Kumo NIM; no fabricated fallback."""
-    payload: dict[str, Any] = {"data": body.data}
-    if body.model:
-        payload["model"] = body.model
-    code, result, elapsed = _call_nim("/v1/predictions", payload)
+    """Proxy real Kumo structured prediction; never places orders or fabricates fallback."""
+    hosted_key = _hosted_key()
+    if hosted_key:
+        payload = body.request
+        if not isinstance(payload, dict):
+            raise HTTPException(
+                status_code=422,
+                detail="Hosted Kumo requires the full NVIDIA request envelope in the 'request' field (model, task, schema, context, predict, output).",
+            )
+        required = {"model", "task", "schema", "context", "predict", "output"}
+        if not required.issubset(payload):
+            raise HTTPException(status_code=422, detail="Kumo request is missing required fields: model, task, schema, context, predict, output.")
+        if payload.get("model") != "kumo-tabular":
+            raise HTTPException(status_code=422, detail="Hosted Kumo request model must be 'kumo-tabular'.")
+        code, result, elapsed = _http_json(NVIDIA_CATALOG_BASE + "/predictions", method="POST", payload=payload, token=hosted_key)
+        mode = "hosted_api_catalog"
+    else:
+        request_payload = body.request
+        if request_payload is None:
+            # Preserve the previous proxy contract for callers during migration.
+            if not body.data:
+                raise HTTPException(status_code=422, detail="Provide a full 'request' envelope for Kumo prediction.")
+            request_payload = {"data": body.data}
+            if body.model:
+                request_payload["model"] = body.model
+        code, result, elapsed = _self_hosted_call("/v1/predictions", request_payload)
+        mode = "self_hosted_nim"
     if not 200 <= code < 300:
-        raise HTTPException(status_code=502, detail="Kumo NIM prediction failed.")
+        raise HTTPException(status_code=502, detail="Kumo prediction failed.")
     return {
         "status": "ok",
         "provider": "nvidia_kumo_tabular",
+        "mode": mode,
         "task": "structured_tabular_prediction",
         "latency_ms": elapsed,
         "result": result,
         "signal_only": True,
         "order_placement_enabled": False,
-        "note": "Prediction is model output, not a trade instruction; validate with the deterministic quant and risk gates.",
+        "note": "Model output is not a trade instruction; validate with deterministic quant, data-quality and risk gates.",
     }
