@@ -427,24 +427,49 @@ def evaluate_futures_signal(
 
     flow = snapshot.get("order_flow") if isinstance(snapshot.get("order_flow"), dict) else {}
     bid, ask, flow_ltp = map(_number, (flow.get("bid"), flow.get("ask"), flow.get("ltp")))
+    # SmartAPI depth is resting book liquidity, not classified executed trade volume.
+    bid_depth, ask_depth = map(_number, (flow.get("bid_depth"), flow.get("ask_depth")))
     buy_volume, sell_volume = map(_number, (flow.get("buy_volume"), flow.get("sell_volume")))
+    uses_book_depth = bid_depth is not None or ask_depth is not None
+    flow_left, flow_right = (bid_depth, ask_depth) if uses_book_depth else (buy_volume, sell_volume)
+    flow_measure = "BOOK_DEPTH_IMBALANCE" if uses_book_depth else "TRADE_VOLUME_IMBALANCE"
+    flow_semantics = "bid_ask_depth_not_classified_trade_volume" if uses_book_depth else "classified_executed_trade_volume"
     flow_ok = (
         bid is not None and ask is not None and bid > 0 and ask > bid
         and flow_ltp is not None and bid <= flow_ltp <= ask
-        and buy_volume is not None and sell_volume is not None
-        and buy_volume + sell_volume > 0
-        and ((buy_volume >= sell_volume) if trend == "BULLISH" else (sell_volume >= buy_volume) if trend == "BEARISH" else False)
+        and flow_left is not None and flow_right is not None
+        and flow_left + flow_right > 0
+        and ((flow_left >= flow_right) if trend == "BULLISH" else (flow_right >= flow_left) if trend == "BEARISH" else False)
     )
     spread_pct = ((ask - bid) / ((ask + bid) / 2) * 100) if bid is not None and ask is not None and ask > bid else None
     flow_ok = flow_ok and spread_pct is not None and spread_pct <= 0.5
-    layers["order_flow"] = {"pass": flow_ok, "bid": bid, "ask": ask, "spread_pct": round(spread_pct, 4) if spread_pct is not None else None, "buy_volume": buy_volume, "sell_volume": sell_volume}
+    layers["order_flow"] = {
+        "pass": flow_ok, "bid": bid, "ask": ask,
+        "spread_pct": round(spread_pct, 4) if spread_pct is not None else None,
+        "bid_depth": bid_depth, "ask_depth": ask_depth,
+        "buy_volume": buy_volume, "sell_volume": sell_volume,
+        "measure": flow_measure, "semantics": flow_semantics,
+    }
     if not flow_ok:
         reasons.append("Commodity bid/ask, depth imbalance or spread does not pass the execution gate")
 
     contract = snapshot.get("contract") if isinstance(snapshot.get("contract"), dict) else {}
     volume, oi, lot_size = map(_number, (contract.get("volume"), contract.get("oi"), contract.get("lot_size")))
-    expiry_text = str(contract.get("expiry") or "")
-    expiry = _timestamp(expiry_text + "T23:59:00+00:00") if expiry_text else None
+    expiry_text = str(contract.get("expiry") or "").strip()
+    expiry = None
+    if expiry_text:
+        # Commodity futures can trade into the evening. Keep a date-only
+        # contract valid through the end of that exchange-local calendar day,
+        # but never into the following morning because of a UTC date shift.
+        try:
+            expiry_date = datetime.strptime(expiry_text, "%Y-%m-%d").date()
+            expiry = datetime.combine(
+                expiry_date,
+                datetime.min.time().replace(hour=23, minute=59, second=59),
+                ZoneInfo("Asia/Kolkata"),
+            ).astimezone(timezone.utc)
+        except ValueError:
+            expiry = _timestamp(expiry_text)
     contract_ok = volume is not None and volume > 0 and oi is not None and oi > 0 and lot_size is not None and lot_size > 0 and expiry is not None and expiry > now_utc
     layers["contract_selection"] = {"pass": contract_ok, "symbol": contract.get("symbol"), "expiry": expiry_text or None, "volume": volume, "oi": oi, "lot_size": lot_size, "spread_pct": round(spread_pct, 4) if spread_pct is not None else None}
     if not contract_ok:
