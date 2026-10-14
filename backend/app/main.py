@@ -51,8 +51,14 @@ except ModuleNotFoundError:
     from backend.app.smc_api import router as smc_router
 from risk.position_sizing import position_size
 
+try:
+    from app.kumo_nim_api import router as kumo_router
+except ModuleNotFoundError:
+    from backend.app.kumo_nim_api import router as kumo_router
+
 app = FastAPI(title="AI-TRADING Read-only Signals API", version="1.0.0")
 app.include_router(smc_router)
+app.include_router(kumo_router)
 logger = logging.getLogger("ai_trading.angel")
 # SmartAPI/logzero SDK error logs can include full request headers (API key/JWT)
 # and payloads. Silence SDK transport logs before the first broker call; only
