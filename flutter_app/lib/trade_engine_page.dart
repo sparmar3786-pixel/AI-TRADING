@@ -84,6 +84,7 @@ class _TradeEnginePageState extends State<TradeEnginePage> {
     final mode = (liveStatus['mode'] ?? 'CHECK STATUS').toString();
 
     return ListView(
+      key: const ValueKey('trade-engine-primary-list'),
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 24),
       children: [
         Row(
