@@ -1587,14 +1587,14 @@ class DashboardPage extends StatelessWidget {
     final providers=Map<String,dynamic>.from(aiProviders['providers'] as Map? ?? const{});
     final nvidia=Map<String,dynamic>.from(providers['nvidia'] as Map? ?? const{});
     final openrouter=Map<String,dynamic>.from(providers['openrouter'] as Map? ?? const{});
-    final d=(s['decision']??'WAIT').toString().toUpperCase(),fresh=s['data_fresh']==true&&connected,buy=_n(f['buy_volume']),sell=_n(f['sell_volume']),total=buy+sell;
+    final d=(s['decision']??'WAIT').toString().toUpperCase(),fresh=s['data_fresh']==true&&connected,buy=_n(f['bid_depth']??f['buy_volume']),sell=_n(f['ask_depth']??f['sell_volume']),total=buy+sell;
     final layers=<List<dynamic>>[
       ['Market data integrity','Angel One quote + freshness',_has(m['ltp'])&&fresh],
       ['Trend structure','EMA alignment',_has(i['ema_fast'])&&_has(i['ema_slow'])],
       ['Momentum','RSI evidence',_has(i['rsi'])],
       ['Volatility','ATR evidence',_has(i['atr14'])],
       ['Market regime','Trend / range state',_has(s['regime'])],
-      ['Order flow','Buy/sell volume evidence',f.isNotEmpty],
+      ['Order flow','Bid/ask book-depth evidence',f.isNotEmpty],
       ['Options analytics','Strike and side',_has(s['strike'])&&_has(s['option_side'])],
       ['Strategy consensus','Backend decision',_has(s['decision'])],
       ['Quant scoring','Quant evidence',_n(s['quant_score']) > 0 || _has(s['quant'])],
@@ -1625,9 +1625,9 @@ class DashboardPage extends StatelessWidget {
       ])),
       const SizedBox(height:18),const Text('ORDER FLOW',style:TextStyle(fontSize:15,fontWeight:FontWeight.w900,letterSpacing:1)),
       const SizedBox(height:8),Container(padding:const EdgeInsets.all(14),decoration:BoxDecoration(color:const Color(0xFF101722),borderRadius:BorderRadius.circular(16),border:Border.all(color:const Color(0xFF202D3A))),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-        Row(children:[Expanded(child:_metric('BUY VOLUME',f.isEmpty?'—':_fmt(buy),const Color(0xFF35D39A))),Expanded(child:_metric('SELL VOLUME',f.isEmpty?'—':_fmt(sell),const Color(0xFFFF6577))),Expanded(child:_metric('DELTA',f.isEmpty?'—':_fmt(buy-sell),(buy-sell)>=0?const Color(0xFF35D39A):const Color(0xFFFF6577)))]),
+        Row(children:[Expanded(child:_metric('BID DEPTH',f.isEmpty?'—':_fmt(buy),const Color(0xFF35D39A))),Expanded(child:_metric('ASK DEPTH',f.isEmpty?'—':_fmt(sell),const Color(0xFFFF6577))),Expanded(child:_metric('DEPTH DELTA',f.isEmpty?'—':_fmt(buy-sell),(buy-sell)>=0?const Color(0xFF35D39A):const Color(0xFFFF6577)))]),
         const SizedBox(height:14),if(total>0)ClipRRect(borderRadius:BorderRadius.circular(6),child:SizedBox(height:12,child:Row(children:[Expanded(flex:(buy/total*1000).round().clamp(1,1000),child:Container(color:const Color(0xFF35D39A))),Expanded(flex:(sell/total*1000).round().clamp(1,1000),child:Container(color:const Color(0xFFFF6577)))])))else Container(height:12,color:const Color(0xFF202D3A)),
-        const SizedBox(height:8),Text(f.isEmpty?'Order-flow unavailable. Waiting for broker evidence; no synthetic live chart is shown.':'Volume split is indicative and is not guaranteed exchange aggressor-side data.',style:const TextStyle(fontSize:11,color:Colors.white60)),
+        const SizedBox(height:8),Text(f.isEmpty?'Order-flow unavailable. Waiting for broker evidence; no synthetic live chart is shown.':'Bid/ask depth shows resting order-book liquidity, not classified executed trade volume.',style:const TextStyle(fontSize:11,color:Colors.white60)),
       ])),
       const SizedBox(height:18),Row(children:[const Expanded(child:Text('10-LAYER TRADING ENGINE',style:TextStyle(fontSize:14,fontWeight:FontWeight.w900))),Text(layers.where((x)=>x[2]==true).length.toString()+'/10 READY',style:const TextStyle(color:Color(0xFF6DDBFF),fontWeight:FontWeight.w800))]),
       const SizedBox(height:8),...layers.asMap().entries.map((e)=>_layer(e.key+1,e.value[0].toString(),e.value[1].toString(),e.value[2]==true)),
