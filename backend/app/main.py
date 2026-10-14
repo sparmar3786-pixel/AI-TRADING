@@ -1010,6 +1010,97 @@ def _aggregate_weekly_chart_rows(rows: list[dict[str, Any]]) -> list[dict[str, A
     return result
 
 
+def _apply_strategy_confluence_filter(
+    result: dict[str, Any],
+    strategy_suite: dict[str, Any],
+    execution_id: str,
+) -> dict[str, Any]:
+    """Make the completed-candle strategy consensus a mandatory live-signal gate.
+
+    Strategy LONG must agree with the Quant Engine CALL BUY candidate; SHORT
+    must agree with PUT BUY. A mismatch keeps the response signal-only WAIT and
+    removes actionable levels while preserving the proposal for diagnostics.
+    """
+    candidate = str(result.get("candidate_decision") or result.get("decision") or "WAIT").strip().upper()
+    expected_side = {"CALL BUY": "LONG", "PUT BUY": "SHORT"}.get(candidate)
+    strategy_side = str(strategy_suite.get("signal") or "WAIT").strip().upper()
+    votes = strategy_suite.get("votes") if isinstance(strategy_suite.get("votes"), dict) else {}
+    long_votes = int(votes.get("LONG") or 0)
+    short_votes = int(votes.get("SHORT") or 0)
+    expected_votes = long_votes if expected_side == "LONG" else short_votes
+    opposing_votes = short_votes if expected_side == "LONG" else long_votes
+    has_candidate = expected_side is not None
+    passed = bool(
+        has_candidate
+        and strategy_suite.get("status") == "ok"
+        and strategy_side == expected_side
+        and expected_votes >= 3
+        and expected_votes > opposing_votes
+    )
+    gate = {
+        "pass": passed,
+        "state": "PASS" if passed else "BLOCKED" if has_candidate else "NO_QUANT_CANDIDATE",
+        "quant_candidate": candidate,
+        "expected_strategy_side": expected_side,
+        "strategy_signal": strategy_side,
+        "votes": {"LONG": long_votes, "SHORT": short_votes},
+        "minimum_consensus": 3,
+        "strategy_execution_id": execution_id,
+        "source": "same_completed_5m_angelone_candles",
+        "reason": (
+            "Strategy consensus agrees with the Quant candidate."
+            if passed else
+            "No actionable Quant candidate exists; final decision remains WAIT."
+            if not has_candidate else
+            "Strategy consensus is missing, below three votes, or conflicts with the Quant candidate."
+        ),
+    }
+    result["strategy_filter"] = gate
+    plan = result.get("trade_plan")
+    if not isinstance(plan, dict):
+        plan = {}
+        result["trade_plan"] = plan
+    plan["strategy_filter"] = gate
+    if has_candidate and not passed:
+        result["candidate_setup"] = {
+            "decision": candidate,
+            "option_type": result.get("option_type"),
+            "option_side": result.get("option_side"),
+            "strike": result.get("strike"),
+            "expiry": result.get("expiry"),
+            "entry": result.get("entry"),
+            "stop_loss": result.get("stop_loss"),
+            "target": result.get("target"),
+            "status": "BLOCKED_NOT_ACTIONABLE",
+        }
+        result["decision"] = "WAIT"
+        for key in ("strike", "expiry", "entry", "stop_loss", "target", "option_type", "option_side"):
+            result[key] = None
+        plan.update({
+            "selection_grade": "WAIT", "strike": None, "expiry": None,
+            "entry": None, "stop_loss": None, "target": None,
+        })
+        stability = result.get("signal_stability")
+        if isinstance(stability, dict):
+            stability["state"] = "BLOCKED_BY_STRATEGY"
+        reasons = list(result.get("reasons") or [])
+        reasons.append("STRATEGY_CONFLUENCE_BLOCKED: " + gate["reason"])
+        result["reasons"] = list(dict.fromkeys(reasons))
+        result["reason"] = list(result["reasons"])
+        result["guards"] = list(result["reasons"])
+        validation = result.get("live_validation")
+        if isinstance(validation, dict):
+            blocks = list(validation.get("blocks") or [])
+            blocks.append("STRATEGY_CONFLUENCE_BLOCKED")
+            validation["blocks"] = list(dict.fromkeys(blocks))
+            validation["verdict"] = "BLOCKED"
+    engine = result.get("five_layer_engine")
+    if isinstance(engine, dict):
+        engine["decision"] = result.get("decision", "WAIT")
+        result["quant_engine"] = engine
+    return result
+
+
 def _index_snapshot(
     adapter: AngelOneReadOnly,
     rows: list[dict[str, Any]],
@@ -1385,8 +1476,16 @@ def _index_snapshot(
             "order_placement_enabled": False,
         })
     strategy_suite["execution_id"] = strategy_execution_id
+    # This trace is truthful: the suite is now consumed by the live Quant gate
+    # and by the shared trade-plan contract, not just displayed in the UI.
+    strategy_trace["research_engine_received"] = True
+    strategy_trace["trading_setup_received"] = True
+    for trace_row in strategy_trace_rows:
+        trace_row["research_engine_received"] = True
+        trace_row["trading_setup_received"] = True
     strategy_suite["trace"] = strategy_trace
     strategy_suite["strategy_trace"] = strategy_trace_rows
+    result = _apply_strategy_confluence_filter(result, strategy_suite, strategy_execution_id)
     result["strategy_suite"] = strategy_suite
     result["indicators"] = indicators
     result["oi_summary"] = {
