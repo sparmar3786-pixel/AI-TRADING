@@ -600,6 +600,16 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(result["signals"]["NIFTY"]["decision"], "WAIT")
         self.assertIn("insufficient candle history", result["market"]["NIFTY"]["signal_error"])
 
+    def test_strategy_inputs_exclude_incomplete_five_minute_candle(self):
+        now = datetime.fromisoformat("2026-10-14T04:05:30+00:00")
+        rows = [
+            {"timestamp": "2026-10-14T04:00:00+00:00", "close": 100.0},
+            {"timestamp": "2026-10-14T04:05:00+00:00", "close": 101.0},
+        ]
+        completed = api._completed_candle_rows(rows, timeframe_minutes=5, now=now)
+        self.assertEqual(len(completed), 1)
+        self.assertEqual(completed[0]["close"], 100.0)
+
     def test_stale_signal_snapshot_clears_actionable_levels(self):
         cached = {
             "signals": {
