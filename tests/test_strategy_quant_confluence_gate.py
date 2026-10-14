@@ -55,6 +55,22 @@ class StrategyQuantConfluenceGateTests(unittest.TestCase):
         self.assertEqual(filtered["live_validation"]["verdict"], "BLOCKED")
         self.assertIn("STRATEGY_CONFLUENCE_BLOCKED", filtered["live_validation"]["blocks"])
 
+    def test_quant_validation_failure_cannot_be_reported_as_strategy_pass(self):
+        result = self._result()
+        result["decision"] = "WAIT"
+        result["candidate_decision"] = "CALL BUY"
+        result["live_validation"] = {"verdict": "BLOCKED", "blocks": ["STALE_OPTION_QUOTE"]}
+        result["five_layer_engine"]["decision"] = "WAIT"
+        suite = {"status": "ok", "signal": "LONG", "votes": {"LONG": 5, "SHORT": 0}}
+        filtered = _apply_strategy_confluence_filter(result, suite, "strategy-test")
+        self.assertEqual(filtered["decision"], "WAIT")
+        self.assertFalse(filtered["strategy_filter"]["pass"])
+        self.assertEqual(filtered["strategy_filter"]["state"], "BLOCKED_BY_QUANT_VALIDATION")
+        self.assertIn("QUANT_VALIDATION_BLOCKED", filtered["live_validation"]["blocks"])
+        self.assertIsNone(filtered["strike"])
+        self.assertIsNone(filtered["entry"])
+        self.assertIsNone(filtered["target"])
+
     def test_weak_consensus_blocks_candidate(self):
         result = self._result()
         suite = {"status": "ok", "signal": "LONG", "votes": {"LONG": 2, "SHORT": 0}}
