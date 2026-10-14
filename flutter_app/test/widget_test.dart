@@ -202,7 +202,9 @@ void main() {
     await tester.pumpWidget(const FreshApp());
     await tester.tap(find.byKey(const ValueKey('open-navigation-menu')));
     await tester.pumpAndSettle();
+    final drawerScrollable = find.byType(Scrollable).last;
     final engineTab = find.byKey(const ValueKey('drawer-tab-5-Layer Quant Signal Engine'));
+    await tester.scrollUntilVisible(engineTab, 250, scrollable: drawerScrollable);
     expect(engineTab, findsOneWidget);
     await tester.tap(engineTab);
     await tester.pumpAndSettle();
