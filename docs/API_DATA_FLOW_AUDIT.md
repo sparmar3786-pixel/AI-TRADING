@@ -96,3 +96,12 @@ The live /v1/signals path now passes each index's completed 5-minute Angel One c
 - Added regression tests for matching, conflicting, weak-consensus and no-Quant-candidate cases.
 
 This does not claim NVIDIA chat or Kumo Tabular prediction is a verified live-signal input. Kumo still needs a validated feature/target schema and successful prediction evidence before it can be made a mandatory model gate. Deterministic data-quality, Quant, strategy-confluence and risk checks remain authoritative; no broker orders are placed.
+
+
+## Additional fail-closed corrections
+
+- Strategy votes are computed only from 5-minute bars whose timestamp plus five minutes is no later than the current UTC time; the in-progress bar is excluded from indicators/strategy votes.
+- A strategy consensus cannot mark the gate PASS unless the original Five-Layer Quant decision and live-validation verdict are both still PASS for the same candidate.
+- When Quant/live-data validation blocks a candidate, the response records BLOCKED_BY_QUANT_VALIDATION rather than reporting a misleading strategy mismatch/pass.
+- WAIT and stale-refresh responses clear actionable strike, expiry, entry, exit, stop-loss, target and option-side fields, and set the shared trade plan grade to WAIT. The stale snapshot remains detached from the cache.
+- Regression tests cover stale snapshot clearing, incomplete-candle exclusion, conflicting/weak strategy votes, and prevention of Quant-validation bypass.
