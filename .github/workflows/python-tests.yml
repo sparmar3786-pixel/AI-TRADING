@@ -1,7 +1,7 @@
 name: Python tests
 on:
   push:
-    branches: [main, integrate-trading-research-v2-20261010, fix/commodity-footprint-ai-provider-ui]
+    branches: [main, integrate-trading-research-v2-20261010, fix/commodity-footprint-ai-provider-ui, fix/signal-backend-health-status]
   pull_request:
     branches: [main]
   workflow_dispatch:
