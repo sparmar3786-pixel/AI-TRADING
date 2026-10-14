@@ -44,11 +44,29 @@ class _RiskCalculatorState extends State<RiskCalculator> {
     }
   }
 
+  bool _isSupportedSymbol(String symbol, List<dynamic> commodities) {
+    final normalized = symbol.trim().toUpperCase();
+    if (normalized.isEmpty) return false;
+    if (_indices.contains(normalized)) return true;
+    for (final item in commodities) {
+      if (item is! Map) continue;
+      final row = Map<String, dynamic>.from(item);
+      final name = (row['name'] ?? row['symbol'] ?? '').toString().trim().toUpperCase();
+      final code = (row['symbol'] ?? row['name'] ?? '').toString().trim().toUpperCase();
+      if (normalized == name || normalized == code) return true;
+    }
+    return false;
+  }
+
   @override
   void didUpdateWidget(covariant RiskCalculator oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.selectedIndex != widget.selectedIndex && _indices.contains(widget.selectedIndex)) {
-      _symbol = widget.selectedIndex;
+    final nextSymbol = widget.selectedIndex.trim().toUpperCase();
+    if (oldWidget.selectedIndex.trim().toUpperCase() != nextSymbol &&
+        _isSupportedSymbol(nextSymbol, widget.commodities)) {
+      _symbol = nextSymbol;
+      // Never carry an entry/SL/target/lot-size from the previously selected
+      // instrument into a different index or MCX contract.
       _entry.clear();
       _stop.clear();
       _target.clear();
