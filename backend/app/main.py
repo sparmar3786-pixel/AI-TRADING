@@ -2282,6 +2282,37 @@ def _refresh_signals_worker() -> None:
 def _stale_signal_snapshot(cached: dict[str, Any], age_seconds: float | None) -> dict[str, Any]:
     # JSON round-trip makes a detached copy so stale flags never mutate the cache.
     snapshot = json.loads(json.dumps(cached, default=str))
+    actionable_keys = {
+        "strike", "expiry", "entry", "entry_price", "entry_price_ltp",
+        "exit", "exit_price", "stop_loss", "stop_loss_price", "sl",
+        "target", "target_price", "take_profit", "trigger_price",
+        "limit_price", "order_type", "quantity", "qty", "lots",
+        "contract_token",
+    }
+    active_decisions = {
+        "CALL BUY", "PUT BUY", "BUY", "SELL", "CE BUY", "PE BUY",
+        "BUY CE", "BUY PE", "BUY CALL", "BUY PUT", "LONG", "SHORT",
+    }
+
+    def sanitize_stale_payload(value: Any) -> Any:
+        if isinstance(value, list):
+            return [sanitize_stale_payload(item) for item in value]
+        if not isinstance(value, dict):
+            return value
+        row = {key: sanitize_stale_payload(child) for key, child in value.items()}
+        for key in list(row):
+            if str(key).lower() in actionable_keys:
+                row[key] = None
+        decision = str(row.get("decision") or "").strip().upper()
+        if decision in active_decisions:
+            row["candidate_decision"] = row.get("candidate_decision") or decision
+            row["decision"] = "WAIT"
+        if "data_fresh" in row:
+            row["data_fresh"] = False
+        if "live" in row:
+            row["live"] = False
+        return row
+
     snapshot["live"] = False
     snapshot["refreshing"] = True
     snapshot["cache_age_seconds"] = round(age_seconds, 1) if age_seconds is not None else None
@@ -2291,55 +2322,88 @@ def _stale_signal_snapshot(cached: dict[str, Any], age_seconds: float | None) ->
             row["live"] = False
             row["cached"] = True
             row["feed_mode"] = "CACHED_REFRESHING"
+            if isinstance(row.get("option_chain"), list):
+                row["option_chain"] = [
+                    {**item, "live": False, "cached": True, "freshness": "STALE"}
+                    for item in row["option_chain"] if isinstance(item, dict)
+                ]
     for row in (snapshot.get("signals") or {}).values():
-        if isinstance(row, dict):
-            decision = str(row.get("decision") or "WAIT").upper()
-            if decision in ("CALL BUY", "PUT BUY"):
-                row["candidate_decision"] = decision
-            row["decision"] = "WAIT"
-            row["data_fresh"] = False
-            # Stale snapshots may show market context, but never actionable levels.
-            for key in ("strike", "expiry", "entry", "exit", "stop_loss", "target", "option_type", "option_side"):
-                row[key] = None
-            trade_plan = dict(row.get("trade_plan") or {})
-            trade_plan.update({
-                "selection_grade": "WAIT", "strike": None, "expiry": None,
-                "entry": None, "exit": None, "stop_loss": None, "target": None,
-                "signal_only": True,
+        if not isinstance(row, dict):
+            continue
+        decision = str(row.get("decision") or "WAIT").upper()
+        if decision in active_decisions:
+            row["candidate_decision"] = row.get("candidate_decision") or decision
+        row["decision"] = "WAIT"
+        row["data_fresh"] = False
+        row["live"] = False
+        row["cached"] = True
+        row["feed_mode"] = "CACHED_REFRESHING"
+        sanitized = sanitize_stale_payload(row)
+        row.clear()
+        row.update(sanitized)
+        row["decision"] = "WAIT"
+        row["data_fresh"] = False
+        row["live"] = False
+        row["cached"] = True
+        row["feed_mode"] = "CACHED_REFRESHING"
+        trade_plan = dict(row.get("trade_plan") or {})
+        trade_plan.update({
+            "selection_grade": "WAIT", "strike": None, "expiry": None,
+            "entry": None, "exit": None, "stop_loss": None, "target": None,
+            "signal_only": True, "data_fresh": False, "decision": "WAIT",
+        })
+        row["trade_plan"] = trade_plan
+        for engine_key in ("five_layer_engine", "quant_engine"):
+            engine_payload = row.get(engine_key)
+            if isinstance(engine_payload, dict):
+                engine_payload["decision"] = "WAIT"
+                engine_payload["data_fresh"] = False
+                row[engine_key] = engine_payload
+        strategy_filter = dict(row.get("strategy_filter") or {})
+        if strategy_filter:
+            strategy_filter.update({
+                "pass": False, "state": "BLOCKED_BY_STALE_DATA",
+                "reason": "Signal refresh is in progress; stale market data cannot authorize a trade.",
             })
+            row["strategy_filter"] = strategy_filter
+            trade_plan["strategy_filter"] = strategy_filter
             row["trade_plan"] = trade_plan
-            # Nested engine objects must agree with the final WAIT shown on every page.
-            for engine_key in ("five_layer_engine", "quant_engine"):
-                engine_payload = row.get(engine_key)
-                if isinstance(engine_payload, dict):
-                    engine_payload["decision"] = "WAIT"
-                    engine_payload["data_fresh"] = False
-                    row[engine_key] = engine_payload
-            strategy_filter = dict(row.get("strategy_filter") or {})
-            if strategy_filter:
-                strategy_filter.update({
-                    "pass": False, "state": "BLOCKED_BY_STALE_DATA",
-                    "reason": "Signal refresh is in progress; stale market data cannot authorize a trade.",
-                })
-                row["strategy_filter"] = strategy_filter
-                trade_plan["strategy_filter"] = strategy_filter
-                row["trade_plan"] = trade_plan
-            stability = dict(row.get("signal_stability") or {})
-            if stability:
-                stability["state"] = "BLOCKED_BY_STALE_DATA"
-                row["signal_stability"] = stability
-            validation = dict(row.get("live_validation") or {})
-            validation["decision"] = "WAIT"
-            validation["verdict"] = "WARN"
-            blocks = list(validation.get("blocks") or [])
+        stability = dict(row.get("signal_stability") or {})
+        stability["state"] = "BLOCKED_BY_STALE_DATA"
+        row["signal_stability"] = stability
+        validation = dict(row.get("live_validation") or {})
+        validation["decision"] = "WAIT"
+        validation["verdict"] = "WARN"
+        blocks = list(validation.get("blocks") or [])
+        if not any("cached data is not actionable" in str(block).lower() for block in blocks):
             blocks.append("Signal refresh is in progress; cached data is not actionable.")
-            validation["blocks"] = blocks
-            row["live_validation"] = validation
+        validation["blocks"] = blocks
+        row["live_validation"] = validation
+
+    stale_commodities = []
+    for raw in (snapshot.get("commodities") or []):
+        if not isinstance(raw, dict):
+            continue
+        row = sanitize_stale_payload(raw)
+        decision = str(row.get("decision") or "WAIT").upper()
+        if decision in active_decisions:
+            row["candidate_decision"] = row.get("candidate_decision") or decision
+        row.update({
+            "decision": "WAIT",
+            "data_fresh": False,
+            "live": False,
+            "cached": True,
+            "feed_mode": "CACHED_REFRESHING",
+            "signal_stability": {"state": "BLOCKED_BY_STALE_DATA"},
+        })
+        stale_commodities.append(row)
+    if "commodities" in snapshot:
+        snapshot["commodities"] = stale_commodities
+
     snapshot["trade_plans"] = []
     snapshot["qualified_trade_count"] = 0
     snapshot["message"] = "Showing cached quotes as stale while the broker snapshot refreshes in the background."
     return snapshot
-
 
 def _get_signals(force: bool = False) -> dict[str, Any]:
     """Serve immediately and refresh expired market snapshots in a single background worker."""
