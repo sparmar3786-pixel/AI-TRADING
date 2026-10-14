@@ -100,8 +100,13 @@ def _process_tick(tick: dict[str, Any]) -> None:
             current = None
         if not isinstance(current, dict) or int(current.get("t", -1)) != bucket:
             if isinstance(current, dict) and current.get("t") is not None:
-                pipe.rpush(f"candles:{key}", json.dumps(current, separators=(",", ":")))
+                closed = {**current, "type": "closed"}
+                encoded_closed = json.dumps(closed, separators=(",", ":"))
+                pipe.rpush(f"candles:{key}", encoded_closed)
                 pipe.ltrim(f"candles:{key}", -max(100, min(int(os.getenv("CHART_MAX_CANDLES", "2000")), 5000)), -1)
+                # Dedicated durable/engine worker consumes closed candles only.
+                pipe.xadd("chart:candle_closed", {"payload": encoded_closed,
+                    "event_id": f"{symbol}:{tf}:{current.get('t')}"}, maxlen=50000, approximate=True)
             current = {"t": bucket, "o": float(price), "h": float(price),
                        "l": float(price), "c": float(price), "v": delta_volume,
                        "type": "new", "symbol": symbol, "tf": tf}
