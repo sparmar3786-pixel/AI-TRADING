@@ -15,7 +15,9 @@ from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 
-router = APIRouter(tags=["realtime-chart"])\n_async_redis_client = None\n_async_redis_lock = asyncio.Lock()
+router = APIRouter(tags=["realtime-chart"])
+_async_redis_client = None
+_async_redis_lock = asyncio.Lock()
 MAX_CANDLES = max(100, min(int(os.getenv("CHART_MAX_CANDLES", "2000")), 5000))
 THROTTLE_SECONDS = max(0.1, min(float(os.getenv("CHART_DELTA_THROTTLE_MS", "200")) / 1000, 1.0))
 _memory: dict[str, deque[dict[str, Any]]] = defaultdict(lambda: deque(maxlen=MAX_CANDLES))
