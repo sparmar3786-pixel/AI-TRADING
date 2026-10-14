@@ -21,6 +21,7 @@ _QUERIES = {
     "MIDCPNIFTY": "India midcap stocks market news today",
     "SENSEX": "India BSE Sensex stock market news today",
     "BANKEX": "India BSE banking index market news today",
+    "MCX": "India MCX commodity market news crude oil natural gas gold silver copper futures today",
 }
 
 _POSITIVE = (
