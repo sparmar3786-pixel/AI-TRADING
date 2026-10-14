@@ -155,6 +155,8 @@ export interface PaperTrade {
   pnl: number;
   pnl_percent: number;
   status: 'OPEN' | 'CLOSED' | 'CANCELLED';
+  mark_status?: 'WAITING_FOR_LIVE_OPTION_QUOTE' | 'LIVE_OPTION_QUOTE' | 'UNAVAILABLE';
+  mark_timestamp?: string;
   closed_at?: string;
   exit_price?: number;
 }

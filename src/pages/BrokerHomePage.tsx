@@ -115,7 +115,7 @@ export const BrokerHomePage: React.FC = () => {
             Active Open Positions ({openTrades.length})
           </span>
           <span className="text-[10px] text-cyan-400 font-mono">
-            Real-time Tick Evaluator
+            Verified option LTP only
           </span>
         </div>
 
@@ -125,7 +125,10 @@ export const BrokerHomePage: React.FC = () => {
           </div>
         ) : (
           openTrades.map(trade => {
-            const isProfit = trade.pnl >= 0;
+            const markTime = trade.mark_timestamp ? Date.parse(trade.mark_timestamp) : Number.NaN;
+            const markAge = Date.now() - markTime;
+            const markVerified = trade.mark_status === 'LIVE_OPTION_QUOTE' && Number.isFinite(markTime) && markAge >= 0 && markAge <= 120000;
+            const isProfit = markVerified && trade.pnl >= 0;
 
             return (
               <div
@@ -157,10 +160,10 @@ export const BrokerHomePage: React.FC = () => {
                         isProfit ? 'text-emerald-400' : 'text-rose-400'
                       }`}
                     >
-                      {isProfit ? '+' : ''}₹{trade.pnl.toLocaleString('en-IN')}
+                      {markVerified ? `${isProfit ? '+' : ''}₹${trade.pnl.toLocaleString('en-IN')}` : 'P&L —'}
                     </div>
                     <div className="text-[10px] font-mono text-slate-400">
-                      ({isProfit ? '+' : ''}{trade.pnl_percent.toFixed(2)}%)
+                      {markVerified ? `(${isProfit ? '+' : ''}${trade.pnl_percent.toFixed(2)}%)` : 'WAITING FOR VERIFIED OPTION LTP'}
                     </div>
                   </div>
                 </div>
@@ -173,7 +176,7 @@ export const BrokerHomePage: React.FC = () => {
                   </div>
                   <div>
                     <div className="text-[9px] text-cyan-400">CURRENT</div>
-                    <div className="font-bold text-cyan-300">₹{trade.current_price}</div>
+                    <div className="font-bold text-cyan-300">{markVerified ? `₹${trade.current_price.toLocaleString('en-IN')}` : '—'}</div>
                   </div>
                   <div>
                     <div className="text-[9px] text-rose-400">SL</div>
@@ -189,9 +192,10 @@ export const BrokerHomePage: React.FC = () => {
                 <div className="pt-1 flex justify-end">
                   <button
                     onClick={() => closePaperTrade(trade.id)}
-                    className="py-1 px-3 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 font-bold text-xs font-mono border border-rose-500/40 active:scale-95 transition-all"
+                    disabled={!markVerified}
+                    className="py-1 px-3 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 font-bold text-xs font-mono border border-rose-500/40 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    SQUARE OFF POSITION
+                    {markVerified ? 'SQUARE OFF POSITION' : 'WAIT FOR VERIFIED LTP'}
                   </button>
                 </div>
               </div>
@@ -219,12 +223,14 @@ export const BrokerHomePage: React.FC = () => {
                 </div>
               </div>
               <div className="text-right">
-                <span className={`font-bold ${trade.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  {trade.pnl >= 0 ? '+' : ''}₹{trade.pnl.toLocaleString('en-IN')}
-                </span>
-                <div className="text-[9px] text-slate-500">
-                  {trade.pnl_percent >= 0 ? '+' : ''}{trade.pnl_percent.toFixed(2)}%
-                </div>
+                {trade.mark_status === 'LIVE_OPTION_QUOTE' ? (
+                  <>
+                    <span className={`font-bold ${trade.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {trade.pnl >= 0 ? '+' : ''}₹{trade.pnl.toLocaleString('en-IN')}
+                    </span>
+                    <div className="text-[9px] text-slate-500">{trade.pnl_percent >= 0 ? '+' : ''}{trade.pnl_percent.toFixed(2)}%</div>
+                  </>
+                ) : <span className="text-slate-500">P&amp;L not verified</span>}
               </div>
             </div>
           ))}

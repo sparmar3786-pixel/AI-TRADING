@@ -70,31 +70,25 @@ export const TradingProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   const [paperTrades, setPaperTrades] = useState<PaperTrade[]>(() => {
     const saved = localStorage.getItem('fresh_paper_trades');
-    return saved ? JSON.parse(saved) : [
-      {
-        id: 'PT-10492',
-        timestamp: new Date(Date.now() - 3600000 * 2).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
-        symbol: 'NIFTY',
-        option_name: 'NIFTY 24900 CE',
-        side: 'CE',
-        action: 'BUY',
-        lots: 2,
-        quantity: 150,
-        entry_price: 138.50,
-        current_price: 162.20,
-        stop_loss: 112.00,
-        target: 205.00,
-        pnl: 3555.00,
-        pnl_percent: 17.11,
-        status: 'OPEN',
-      },
-    ];
+    if (!saved) return [];
+    try {
+      const parsed = JSON.parse(saved);
+      if (!Array.isArray(parsed)) return [];
+      // Remove the exact hard-coded demo position from older app versions; preserve real user trades.
+      return parsed.filter((trade: PaperTrade) => !(
+        trade?.id === 'PT-10492' &&
+        trade?.option_name === 'NIFTY 24900 CE' &&
+        trade?.entry_price === 138.50
+      ));
+    } catch {
+      return [];
+    }
   });
 
   // Save paper trading to localStorage
   useEffect(() => {
     localStorage.setItem('fresh_paper_balance', paperBalance.toString());
-  }, [paperBalance]);
+  }, [paperBalance, market]);
 
   useEffect(() => {
     localStorage.setItem('fresh_paper_trades', JSON.stringify(paperTrades));
@@ -112,23 +106,44 @@ export const TradingProvider: React.FC<{ children: ReactNode }> = ({ children })
       setLastUpdated(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
       setMarketStatus(apiService.getMarketOpenStatus());
 
-      // Update P&L on open paper trades based on latest market prices
+      // Mark open positions only from a fresh, broker-validated option LTP.
+      // Underlying spot movement is not a valid substitute for option premium.
       setPaperTrades(prev => prev.map(trade => {
         if (trade.status !== 'OPEN') return trade;
+        if (!data.isLive || trade.action !== 'BUY') {
+          return { ...trade, mark_status: 'UNAVAILABLE' };
+        }
         const currentMkt = data.market[trade.symbol];
-        if (!currentMkt) return trade;
-
-        // Approximate option current price movement with spot delta ~ 0.5
-        const spotDiff = currentMkt.ltp - currentMkt.open;
-        const estOptionPrice = Math.max(5, Number((trade.entry_price + (trade.side === 'CE' ? spotDiff * 0.45 : -spotDiff * 0.45)).toFixed(2)));
-        const pnl = Number(((estOptionPrice - trade.entry_price) * trade.quantity).toFixed(2));
-        const pnl_percent = Number(((estOptionPrice - trade.entry_price) / trade.entry_price * 100).toFixed(2));
-
+        const timestampMs = currentMkt?.timestamp ? Date.parse(currentMkt.timestamp) : Number.NaN;
+        const ageMs = Date.now() - timestampMs;
+        if (
+          !currentMkt ||
+          currentMkt.live !== true ||
+          !Number.isFinite(timestampMs) ||
+          ageMs < 0 ||
+          ageMs > 120000
+        ) {
+          return { ...trade, mark_status: 'UNAVAILABLE' };
+        }
+        const strikeMatch = trade.option_name.match(/(\d+(?:\.\d+)?)(?=\s*(?:CE|PE)\b)/i);
+        if (!strikeMatch) return { ...trade, mark_status: 'UNAVAILABLE' };
+        const strike = Number(strikeMatch[1]);
+        const quote = currentMkt.option_chain?.find(row => Math.abs(row.strike - strike) < 0.01);
+        const optionPrice = trade.side === 'CE' ? quote?.ce_ltp : quote?.pe_ltp;
+        if (typeof optionPrice !== 'number' || !Number.isFinite(optionPrice) || optionPrice <= 0) {
+          return { ...trade, mark_status: 'UNAVAILABLE' };
+        }
+        const pnl = Number(((optionPrice - trade.entry_price) * trade.quantity).toFixed(2));
+        const pnl_percent = trade.entry_price > 0
+          ? Number(((optionPrice - trade.entry_price) / trade.entry_price * 100).toFixed(2))
+          : 0;
         return {
           ...trade,
-          current_price: estOptionPrice,
+          current_price: optionPrice,
           pnl,
           pnl_percent,
+          mark_status: 'LIVE_OPTION_QUOTE',
+          mark_timestamp: currentMkt.timestamp,
         };
       }));
 
@@ -152,9 +167,47 @@ export const TradingProvider: React.FC<{ children: ReactNode }> = ({ children })
     stop_loss: number;
     target: number;
   }) => {
+    if (trade.action !== 'BUY') {
+      alert('SELL option paper trades are disabled until a short-option margin model is implemented.');
+      return;
+    }
+    if (!Number.isFinite(trade.entry_price) || trade.entry_price <= 0 || trade.lots <= 0) {
+      alert('Entry price and lot quantity must be valid positive values.');
+      return;
+    }
+    const currentMkt = market[trade.symbol as IndexSymbol];
+    const timestampMs = currentMkt?.timestamp ? Date.parse(currentMkt.timestamp) : Number.NaN;
+    const ageMs = Date.now() - timestampMs;
+    if (
+      !currentMkt ||
+      currentMkt.live !== true ||
+      !Number.isFinite(timestampMs) ||
+      ageMs < 0 ||
+      ageMs > 120000
+    ) {
+      alert('Paper order blocked: no fresh live market snapshot is available.');
+      return;
+    }
+    const strikeMatch = trade.option_name.match(/(\\d+(?:\\.\\d+)?)(?=\\s*(?:CE|PE)\\b)/i);
+    if (!strikeMatch) {
+      alert('Paper order blocked: option strike could not be matched to a broker quote.');
+      return;
+    }
+    const strike = Number(strikeMatch[1]);
+    const quote = currentMkt.option_chain?.find(row => Math.abs(row.strike - strike) < 0.01);
+    const actualPrice = trade.side === 'CE' ? quote?.ce_ltp : quote?.pe_ltp;
+    if (typeof actualPrice !== 'number' || !Number.isFinite(actualPrice) || actualPrice <= 0) {
+      alert('Paper order blocked: no verified option LTP is available for this strike.');
+      return;
+    }
+    if (Math.abs(actualPrice - trade.entry_price) > Math.max(1, actualPrice * 0.02)) {
+      alert('Option price changed by more than 2%. Refresh the option chain and place the paper order again.');
+      return;
+    }
     const lotSize = INDEX_CONFIG[trade.symbol as IndexSymbol]?.lotSize || 50;
     const quantity = trade.lots * lotSize;
-    const requiredMargin = trade.entry_price * quantity;
+    const entryPrice = actualPrice;
+    const requiredMargin = entryPrice * quantity;
 
     if (requiredMargin > paperBalance) {
       alert(`Insufficient margin! Required ₹${requiredMargin.toLocaleString('en-IN')} but available is ₹${paperBalance.toLocaleString('en-IN')}`);
@@ -170,13 +223,15 @@ export const TradingProvider: React.FC<{ children: ReactNode }> = ({ children })
       action: trade.action,
       lots: trade.lots,
       quantity,
-      entry_price: trade.entry_price,
-      current_price: trade.entry_price,
+      entry_price: entryPrice,
+      current_price: entryPrice,
       stop_loss: trade.stop_loss,
       target: trade.target,
       pnl: 0,
       pnl_percent: 0,
       status: 'OPEN',
+      mark_status: 'LIVE_OPTION_QUOTE',
+      mark_timestamp: currentMkt.timestamp,
     };
 
     setPaperBalance(prev => prev - requiredMargin);
@@ -184,20 +239,37 @@ export const TradingProvider: React.FC<{ children: ReactNode }> = ({ children })
   }, [paperBalance]);
 
   const closePaperTrade = useCallback((id: string) => {
-    setPaperTrades(prev => prev.map(trade => {
-      if (trade.id === id && trade.status === 'OPEN') {
-        const exitMargin = trade.current_price * trade.quantity;
-        setPaperBalance(bal => bal + exitMargin);
-        return {
-          ...trade,
-          status: 'CLOSED',
-          closed_at: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
-          exit_price: trade.current_price,
-        };
-      }
-      return trade;
-    }));
-  }, []);
+    const trade = paperTrades.find(item => item.id === id && item.status === 'OPEN');
+    if (!trade) return;
+    const markTime = trade.mark_timestamp ? Date.parse(trade.mark_timestamp) : Number.NaN;
+    const markAge = Date.now() - markTime;
+    if (
+      trade.action !== 'BUY' ||
+      trade.mark_status !== 'LIVE_OPTION_QUOTE' ||
+      !Number.isFinite(markTime) ||
+      markAge < 0 ||
+      markAge > 120000
+    ) {
+      alert('Square-off blocked: a fresh verified option LTP is not available. No estimated exit price was used.');
+      return;
+    }
+    const exitPrice = trade.current_price;
+    const pnl = Number(((exitPrice - trade.entry_price) * trade.quantity).toFixed(2));
+    const pnl_percent = trade.entry_price > 0
+      ? Number(((exitPrice - trade.entry_price) / trade.entry_price * 100).toFixed(2))
+      : 0;
+    setPaperBalance(balance => balance + exitPrice * trade.quantity);
+    setPaperTrades(prev => prev.map(item => item.id === id && item.status === 'OPEN' ? {
+      ...item,
+      status: 'CLOSED',
+      closed_at: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+      exit_price: exitPrice,
+      current_price: exitPrice,
+      pnl,
+      pnl_percent,
+      mark_status: 'LIVE_OPTION_QUOTE',
+    } : item));
+  }, [paperTrades]);
 
   const resetPaperAccount = useCallback(() => {
     setPaperBalance(1000000);
