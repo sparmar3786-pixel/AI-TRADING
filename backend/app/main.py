@@ -2949,7 +2949,8 @@ def _commodity_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]]) -
                         "indicators": indicators,
                         "order_flow": {
                             "bid": bid, "ask": ask, "ltp": ltp,
-                            "buy_volume": buy_depth, "sell_volume": sell_depth,
+                            "bid_depth": buy_depth, "ask_depth": sell_depth,
+                            "semantics": "bid_ask_depth_not_classified_trade_volume",
                         },
                         "contract": {
                             "symbol": contract.get("symbol"), "expiry": _expiry_date(contract.get("expiry")).isoformat(),
