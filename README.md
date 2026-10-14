@@ -1,38 +1,35 @@
-# AI-TRADING — Strategy Research Workspace
+# AI Trading Signals — Android Terminal
 
-This repository is a research workspace for systematic strategies and an eventual server-side broker/data integration. It contains original strategy/backtest/risk helpers and partial upstream imports. It is not a live trading service and does not guarantee returns.
+A high-performance algorithmic trading terminal for NSE equity indices (`NIFTY`, `BANKNIFTY`, `FINNIFTY`, `MIDCPNIFTY`, `SENSEX`, `BANKEX`) and MCX commodities (`CRUDEOIL`, `NATURALGAS`, `GOLD`, `SILVER`, `COPPER`).
 
-## Start here
+## Core Architecture & Features
 
-- [Integration guide](INTEGRATION_GUIDE.md) — modules, example, test command and safety boundaries.
-- [Upstream repository inventory](UPSTREAM_REPOSITORIES.md) — trading-related GitHub sources collected for review.
-- [Upstream audit](UPSTREAM_AUDIT.md) — what has been checked and imported.
-- [Copy status](COPY_STATUS.md) — exact files and remaining work.
+### 1. 10-Minute Signal Stability Gate
+- Algorithmic BUY candidates (`CALL BUY` or `PUT BUY`) must pass comprehensive 5-layer quant validation and maintain the exact same option side and strike for **10 continuous minutes (600 seconds)** before becoming actionable.
+- Any change in candidate strike/side, validation failure, or gap longer than 60 seconds between refreshes automatically resets the confirmation timer.
+- If live data disconnects or backend falls back to cache, signals are immediately reverted to display-only `WAIT` state with zero live broker risk.
 
-## Original research components
+### 2. 5-Layer Quant Confluence Engine
+- **Layer 1: Trend Alignment** — EMA 8/13/21 stack and Supertrend buy/sell state.
+- **Layer 2: Momentum & Volatility** — RSI (14), ATR (14), and Bollinger Band expansion.
+- **Layer 3: Smart Money Concepts (SMC)** — Bullish/Bearish Order Blocks (OB), Fair Value Gaps (FVG), Change of Character (CHoCH), and Liquidity Sweeps.
+- **Layer 4: Options Open Interest & PCR Flow** — Put-Call Ratio dynamics and institutional strike clustering.
+- **Layer 5: Execution Safeguard & Spread Guard** — Bid-Ask spread tolerance and slippage filters.
 
-- `strategies/technical.py`: SMA, EMA, RSI, ATR, EMA crossover and RSI reversion.
-- `strategies/advanced.py`: Bollinger bands/re-entry, MACD, Donchian breakout/channels and VWAP.
-- `strategy_engine.py`: explainable confluence diagnostics.
-- `backtesting/engine.py`: a simple delayed-signal close-to-close backtest.
-- `risk/position_sizing.py` and `risk/controls.py`: sizing, ATR levels and fail-closed proposed-order checks.
-- `vendor/`: partial imports of TradingAgents, FinGPT, FinRobot and Qlib with per-project import notes/licenses.
+### 3. Integrated Modules & Tools
+- **Live Option Chain & Greeks**: Real-time strike ladder with ATM tagging, CE/PE LTP, OI change, and Max Pain strike.
+- **SMC Pro Chart**: Interactive institutional liquidity visualization with order block zones and character change markers.
+- **Paper Broker**: Virtual margin account (₹10,00,000) for real-time order simulation and live mark-to-market P&L tracking.
+- **MCX Commodities**: Live quotes for Crude Oil, Natural Gas, Gold, Silver, and Copper with IST market hours tracking.
+- **AI Market Intelligence**: Conversational market analyst for quick queries, signal review, and order book synthesis.
+- **Telemetry & Diagnostics**: Real-time worker cycle tracking, Angel One broker session health, and scoped Android device identification (`X-Device-Id`).
 
-## Read-only live backend
-
-The deployable FastAPI service lives in `backend/` and is built with the root `Dockerfile` and configured in Railway service settings. It exposes health, Angel One connection/status, market quotes/option-chain, timestamp-validated five-layer signal analysis, and historical candle backtesting. The API is signal-only: it does not submit, modify, or cancel broker orders. Deploy this service as a **separate Railway service** from the existing Fresh-Apk backend so the older app is not disrupted. Configure `ANGEL_API_KEY`, `ANGEL_CLIENT_CODE`, `ANGEL_PIN`, `ANGEL_TOTP_SECRET`, and a strong 32-byte `CREDENTIALS_ENCRYPTION_KEY` in the new service's Railway variables. For encrypted remembered credentials, attach a persistent volume at `/data`. Never put broker credentials or tokens in the APK or Git.
-
-The Android APK currently has a separate configured backend URL. After deploying this service, switch the APK's `BACKEND_URL` build define to the new service's verified HTTPS domain, then rebuild and test with a real Angel One account.
-
-## Run tests
+## Development & Build
 
 ```bash
-python -m pip install -r backend/requirements.txt
-python -m unittest discover -s tests -v
+# Run local dev server (port 3000)
+npm run dev
+
+# Build production bundle
+npm run build
 ```
-
-## Security and integration boundaries
-
-The Android app should call a backend over HTTPS. Angel One credentials, MPIN, TOTP seeds, JWT/feed tokens and AI keys must remain server-side and must never be embedded in an APK or committed to GitHub. No code in the strategy modules authenticates Angel One or submits live orders.
-
-Not every upstream repository is copied; many are references pending detailed license, dependency and security review. Validate strategy results with realistic costs, spread, slippage, out-of-sample data and paper trading before considering live use.

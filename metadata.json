@@ -1,0 +1,8 @@
+{
+  "name": "AI Trading Signals",
+  "description": "Android algorithmic trading terminal for NSE equity indices and MCX commodities featuring 10-minute signal stability gate, 5-layer quant confluence engine, SMC pro charts, and paper broker execution.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

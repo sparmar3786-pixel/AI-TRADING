@@ -1,0 +1,140 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
+:root {
+  --bg-primary: #070B12;
+  --bg-surface: #0E1524;
+  --bg-card: #121A2D;
+  --bg-card-hover: #17223B;
+  --border-subtle: #1C2740;
+  --border-focus: #12D6FF;
+  
+  --color-cyan: #12D6FF;
+  --color-cyan-dim: rgba(18, 214, 255, 0.15);
+  --color-bullish: #22C55E;
+  --color-bullish-dim: rgba(34, 197, 94, 0.15);
+  --color-bearish: #EF4444;
+  --color-bearish-dim: rgba(239, 68, 68, 0.15);
+  --color-warning: #F59E0B;
+  --color-warning-dim: rgba(245, 158, 11, 0.15);
+  --color-neutral: #94A3B8;
+  
+  --text-primary: #F8FAFC;
+  --text-secondary: #94A3B8;
+  --text-muted: #64748B;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  overflow-x: hidden;
+  touch-action: manipulation;
+}
+
+.font-mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-subtle);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-cyan);
+}
+
+/* Animations */
+@keyframes pulseGlow {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.08); }
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 2s infinite ease-in-out;
+}
+
+@keyframes liveBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.animate-live-blink {
+  animation: liveBlink 1.4s infinite ease-in-out;
+}
+
+/* Custom UI Utility classes */
+.card-base {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+}
+
+.card-hover:hover {
+  background: var(--bg-card-hover);
+  border-color: rgba(18, 214, 255, 0.3);
+}
+
+.chip {
+  padding: 6px 14px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.chip-active {
+  background: #12D6FF;
+  color: #070B12;
+  box-shadow: 0 0 12px rgba(18, 214, 255, 0.35);
+}
+
+.chip-inactive {
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+}
+.chip-inactive:hover {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.pill-bullish {
+  background: var(--color-bullish-dim);
+  color: var(--color-bullish);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.pill-bearish {
+  background: var(--color-bearish-dim);
+  color: var(--color-bearish);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.pill-warning {
+  background: var(--color-warning-dim);
+  color: var(--color-warning);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.pill-cyan {
+  background: var(--color-cyan-dim);
+  color: var(--color-cyan);
+  border: 1px solid rgba(18, 214, 255, 0.3);
+}
