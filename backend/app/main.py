@@ -2287,7 +2287,7 @@ def _stale_signal_snapshot(cached: dict[str, Any], age_seconds: float | None) ->
         "exit", "exit_price", "stop_loss", "stop_loss_price", "sl",
         "target", "target_price", "take_profit", "trigger_price",
         "limit_price", "order_type", "quantity", "qty", "lots",
-        "contract_token",
+        "contract_token", "option_type", "option_side",
     }
     active_decisions = {
         "CALL BUY", "PUT BUY", "BUY", "SELL", "CE BUY", "PE BUY",
