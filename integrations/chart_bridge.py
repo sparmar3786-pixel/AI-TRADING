@@ -15,7 +15,11 @@ from typing import Any
 
 _client = None
 _client_lock = threading.Lock()
-_volume_by_token: dict[str, float] = {}\n_state_lock = threading.RLock()\n_current_by_key: dict[str, dict[str, Any]] = {}\n_sequence_by_key: dict[str, int] = {}\n_loaded_keys: set[str] = set()
+_volume_by_token: dict[str, float] = {}
+_state_lock = threading.RLock()
+_current_by_key: dict[str, dict[str, Any]] = {}
+_sequence_by_key: dict[str, int] = {}
+_loaded_keys: set[str] = {}
 _volume_lock = threading.Lock()
 _tick_queue: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=4096)
 _worker_lock = threading.Lock()
