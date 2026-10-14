@@ -73,7 +73,7 @@ void main() {
     expect(requested[1].url.path, '/v1/angel/connect');
   });
 
-  test('Cloud AI remains on the legacy backend', () async {
+  test('Cloud AI chat uses the AI-TRADING signal service', () async {
     Uri? requestedUri;
     final client = MockClient((request) async {
       requestedUri = request.url;
@@ -82,7 +82,7 @@ void main() {
     addTearDown(client.close);
     final api = FreshApi('https://legacy.example.test', client, 'https://signals.example.test');
     await api.aiChat(index: 'NIFTY', question: 'test');
-    expect(requestedUri!.origin, 'https://legacy.example.test');
+    expect(requestedUri!.origin, 'https://signals.example.test');
     expect(requestedUri!.path, '/v1/ai/chat');
   });
 
@@ -99,6 +99,27 @@ void main() {
     expect(requestedUri!.path, '/v1/ai/nvidia-chat');
   });
 
+  test('Search provider checks and Kumo routes use the AI-TRADING service', () async {
+    final requested = <http.Request>[];
+    final client = MockClient((request) async {
+      requested.add(request);
+      return http.Response(jsonEncode({'status': 'ok', 'ready': true}), 200);
+    });
+    addTearDown(client.close);
+    final api = FreshApi('https://legacy.example.test', client, 'https://signals.example.test');
+    await api.postJson('/v1/providers/search/status', {});
+    await api.postJson('/v1/providers/search/test', {});
+    await api.kumoStatus();
+    await api.kumoPredict({'model': 'kumo-tabular'});
+    expect(requested.map((request) => request.url.origin), everyElement('https://signals.example.test'));
+    expect(requested.map((request) => request.url.path), [
+      '/v1/providers/search/status',
+      '/v1/providers/search/test',
+      '/v1/ai/kumo/status',
+      '/v1/ai/kumo/predict',
+    ]);
+    expect(jsonDecode(requested.last.body)['request']['model'], 'kumo-tabular');
+  });
   test('signals keeps query parameters separate from the path', () async {
     Uri? requestedUri;
     final client = MockClient((request) async {
