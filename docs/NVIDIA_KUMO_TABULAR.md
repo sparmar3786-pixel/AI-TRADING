@@ -22,7 +22,7 @@ After redeploy, call `GET /v1/ai/kumo/status` with a valid `X-Device-Id` header 
 
 ### Hosted prediction request
 
-`POST /v1/ai/kumo/predict` expects the full NVIDIA Universal TFM request envelope under the `request` property. The request must contain `model`, `task`, `schema`, `context`, `predict`, and `output`; `model` must be `kumo-tabular`. Use NVIDIA's official example and replace its demo data with a validated, representative trading dataset and a defined target:
+`POST /v1/ai/kumo/predict` expects the full NVIDIA Universal TFM request envelope under the `request` property. Optionally include `index` (for example `NIFTY`) to attach the real inference result to that index’s current `quant_engine.kumo_tabular_evidence` snapshot. The request must contain `model`, `task`, `schema`, `context`, `predict`, and `output`; `model` must be `kumo-tabular`. Use NVIDIA's official example and replace its demo data with a validated, representative trading dataset and a defined target:
 
 https://docs.api.nvidia.com/nim/reference/nvidia-kumo-tabular-statuspolling
 
@@ -56,5 +56,5 @@ The self-hosted container exposes `GET /v1/health/ready` and `POST /v1/predictio
 
 - Kumo Tabular predicts classification labels or regression values from structured tables. It is not a general-purpose chat model and does not replace Gemini/OpenRouter chat.
 - A green status only indicates provider API reachability/authentication. Verify a real prediction before marking inference as working.
-- Prediction output is not an approved trade. Keep market-data freshness, deterministic quant, strategy, and risk gates authoritative. No broker order placement is enabled by this integration.
+- Prediction output is not an approved trade. When `index` is supplied, the response includes `quant_connection` with the real model output attached as external evidence, the current deterministic gate verdict, and the unchanged Quant decision. This is deliberately not a trade-direction mapping: Kumo task/target semantics must be explicitly defined and validated before its label can participate in a decision. The bridge does not mutate the cached signal or override WAIT. Keep market-data freshness, deterministic quant, strategy, and risk gates authoritative. No broker order placement is enabled by this integration.
 - The NVIDIA NGC registry token used to pull a Docker image is not the hosted API Catalog key. Never use an NGC registry token as the API key. If a token was shared or committed, revoke and rotate it.
