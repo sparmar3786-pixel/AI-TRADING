@@ -2238,6 +2238,8 @@ def _stale_signal_snapshot(cached: dict[str, Any], age_seconds: float | None) ->
                     "reason": "Signal refresh is in progress; stale market data cannot authorize a trade.",
                 })
                 row["strategy_filter"] = strategy_filter
+                trade_plan["strategy_filter"] = strategy_filter
+                row["trade_plan"] = trade_plan
             stability = dict(row.get("signal_stability") or {})
             if stability:
                 stability["state"] = "BLOCKED_BY_STALE_DATA"
