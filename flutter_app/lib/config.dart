@@ -1,7 +1,7 @@
 class AppConfig {
-  // BACKEND_URL preserves the existing AI/chat service in release builds.
-  // SIGNAL_BACKEND_URL owns Angel One market data, signals, paper ledger and
-  // read-only account routes. They are intentionally separate in the APK.
+  // BACKEND_URL remains a legacy compatibility/health endpoint.
+  // SIGNAL_BACKEND_URL owns AI providers, Angel One market data, signals,
+  // paper ledger and read-only account routes for the AI-TRADING repository.
   static const String backendUrl = String.fromEnvironment(
     'BACKEND_URL',
     defaultValue: 'https://nse-algo-backend-final-production.up.railway.app',

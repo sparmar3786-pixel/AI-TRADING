@@ -14,7 +14,7 @@ import os
 import re
 import sys
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 import time
 import urllib.error
 import urllib.parse
@@ -104,6 +104,11 @@ _saved_meta: dict[str, Any] = {}
 _master_rows: list[dict[str, Any]] = []
 _master_loaded_at = 0.0
 _market_data_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="market-data")
+# A short cache absorbs aggressive mobile polling without masking market moves.
+# Signal gates independently enforce freshness and never treat cache age as a live tick.
+OPTION_CHAIN_CACHE_TTL_SECONDS = max(0.0, min(float(os.getenv("OPTION_CHAIN_CACHE_TTL_SECONDS", "2.0")), 5.0))
+OPTION_CHAIN_UPSTREAM_TIMEOUT_SECONDS = max(1.0, min(float(os.getenv("OPTION_CHAIN_UPSTREAM_TIMEOUT_SECONDS", "4.0")), 10.0))
+_option_chain_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
 _signal_cache: dict[str, Any] | None = None
 _signal_cache_at = 0.0
@@ -1010,6 +1015,156 @@ def _aggregate_weekly_chart_rows(rows: list[dict[str, Any]]) -> list[dict[str, A
     return result
 
 
+def _apply_strategy_confluence_filter(
+    result: dict[str, Any],
+    strategy_suite: dict[str, Any],
+    execution_id: str,
+) -> dict[str, Any]:
+    """Make the completed-candle strategy consensus a mandatory live-signal gate.
+
+    Strategy LONG must agree with the Quant Engine CALL BUY candidate; SHORT
+    must agree with PUT BUY. A mismatch keeps the response signal-only WAIT and
+    removes actionable levels while preserving the proposal for diagnostics.
+    """
+    candidate = str(result.get("candidate_decision") or result.get("decision") or "WAIT").strip().upper()
+    expected_side = {"CALL BUY": "LONG", "PUT BUY": "SHORT"}.get(candidate)
+    strategy_side = str(strategy_suite.get("signal") or "WAIT").strip().upper()
+    votes = strategy_suite.get("votes") if isinstance(strategy_suite.get("votes"), dict) else {}
+    long_votes = int(votes.get("LONG") or 0)
+    short_votes = int(votes.get("SHORT") or 0)
+    expected_votes = long_votes if expected_side == "LONG" else short_votes
+    opposing_votes = short_votes if expected_side == "LONG" else long_votes
+    has_candidate = expected_side is not None
+    quant_gate_pass = (
+        isinstance(result.get("live_validation"), dict)
+        and result["live_validation"].get("verdict") == "PASS"
+        and str(result.get("decision") or "").strip().upper() == candidate
+        and isinstance(result.get("five_layer_engine"), dict)
+        and str(result["five_layer_engine"].get("decision") or "").strip().upper() == candidate
+    )
+    strategy_pass = bool(
+        has_candidate
+        and strategy_suite.get("status") == "ok"
+        and strategy_side == expected_side
+        and expected_votes >= 3
+        and expected_votes > opposing_votes
+    )
+    passed = bool(quant_gate_pass and strategy_pass)
+    gate_state = (
+        "PASS" if passed else
+        "NO_QUANT_CANDIDATE" if not has_candidate else
+        "BLOCKED_BY_QUANT_VALIDATION" if not quant_gate_pass else
+        "BLOCKED_BY_STRATEGY"
+    )
+    gate = {
+        "pass": passed,
+        "state": gate_state,
+        "quant_candidate": candidate,
+        "expected_strategy_side": expected_side,
+        "strategy_signal": strategy_side,
+        "votes": {"LONG": long_votes, "SHORT": short_votes},
+        "minimum_consensus": 3,
+        "strategy_execution_id": execution_id,
+        "source": "same_completed_5m_angelone_candles",
+        "reason": (
+            "Quant validation and strategy consensus agree with the candidate."
+            if passed else
+            "No actionable Quant candidate exists; final decision remains WAIT."
+            if not has_candidate else
+            "The Five-Layer Quant or live-data validation gate did not pass."
+            if not quant_gate_pass else
+            "Strategy consensus is missing, below three votes, or conflicts with the Quant candidate."
+        ),
+    }
+    result["strategy_filter"] = gate
+    plan = result.get("trade_plan")
+    if not isinstance(plan, dict):
+        plan = {}
+        result["trade_plan"] = plan
+    plan["strategy_filter"] = gate
+    # A signal's exit field is the target-price reference, not an order or a
+    # promise of execution. Keep the meaning explicit for every consumer page.
+    result["exit"] = result.get("target")
+    result["exit_semantics"] = "target price reference; signal-only, no order placement"
+    plan["exit"] = result.get("exit")
+    plan["exit_semantics"] = result["exit_semantics"]
+    if has_candidate and not passed:
+        result["candidate_setup"] = {
+            "decision": candidate,
+            "option_type": result.get("option_type"),
+            "option_side": result.get("option_side"),
+            "strike": result.get("strike"),
+            "expiry": result.get("expiry"),
+            "entry": result.get("entry"),
+            "exit": result.get("exit"),
+            "stop_loss": result.get("stop_loss"),
+            "target": result.get("target"),
+            "status": "BLOCKED_NOT_ACTIONABLE",
+        }
+        result["decision"] = "WAIT"
+        for key in ("strike", "expiry", "entry", "exit", "stop_loss", "target", "option_type", "option_side"):
+            result[key] = None
+        plan.update({
+            "selection_grade": "WAIT", "strike": None, "expiry": None,
+            "entry": None, "exit": None, "stop_loss": None, "target": None,
+        })
+        stability = result.get("signal_stability")
+        if isinstance(stability, dict):
+            stability["state"] = "BLOCKED_BY_QUANT_VALIDATION" if not quant_gate_pass else "BLOCKED_BY_STRATEGY"
+        reasons = list(result.get("reasons") or [])
+        reasons.append(("QUANT_VALIDATION_BLOCKED: " if not quant_gate_pass else "STRATEGY_CONFLUENCE_BLOCKED: ") + gate["reason"])
+        result["reasons"] = list(dict.fromkeys(reasons))
+        result["reason"] = list(result["reasons"])
+        result["guards"] = list(result["reasons"])
+        validation = result.get("live_validation")
+        if isinstance(validation, dict):
+            blocks = list(validation.get("blocks") or [])
+            blocks.append("QUANT_VALIDATION_BLOCKED" if not quant_gate_pass else "STRATEGY_CONFLUENCE_BLOCKED")
+            validation["blocks"] = list(dict.fromkeys(blocks))
+            validation["verdict"] = "BLOCKED"
+    elif not has_candidate:
+        # WAIT/no-candidate responses must not leak old levels from a prior setup.
+        for key in ("strike", "expiry", "entry", "exit", "stop_loss", "target", "option_type", "option_side"):
+            result[key] = None
+        plan.update({
+            "selection_grade": "WAIT", "strike": None, "expiry": None,
+            "entry": None, "exit": None, "stop_loss": None, "target": None,
+        })
+    engine = result.get("five_layer_engine")
+    if isinstance(engine, dict):
+        engine["decision"] = result.get("decision", "WAIT")
+        result["quant_engine"] = engine
+    return result
+
+
+def _completed_candle_rows(
+    rows: list[dict[str, Any]],
+    timeframe_minutes: int = 5,
+    *,
+    now: datetime | None = None,
+) -> list[dict[str, Any]]:
+    """Drop candles whose start + timeframe has not elapsed yet."""
+    if timeframe_minutes < 1:
+        raise ValueError("timeframe_minutes must be positive")
+    current = now or _utc_now()
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    current = current.astimezone(timezone.utc)
+    completed: list[dict[str, Any]] = []
+    for row in rows:
+        stamp_text = row.get("timestamp")
+        try:
+            stamp = datetime.fromisoformat(str(stamp_text))
+        except (TypeError, ValueError):
+            continue
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        stamp = stamp.astimezone(timezone.utc)
+        if stamp + timedelta(minutes=timeframe_minutes) <= current:
+            completed.append(row)
+    return completed
+
+
 def _index_snapshot(
     adapter: AngelOneReadOnly,
     rows: list[dict[str, Any]],
@@ -1309,6 +1464,8 @@ def _index_snapshot(
             "open": opened, "high": high, "low": low, "close": closed,
             "volume": _number(candle[5]),
         })
+    # Do not feed an in-progress 5-minute candle to indicators or strategy votes.
+    chart_5m = _completed_candle_rows(chart_5m, timeframe_minutes=5)
     chart_5m = chart_5m[-250:]
     chart_1h = _aggregate_hourly_chart_rows(chart_5m)
     chart_1d: list[dict[str, Any]] = []
@@ -1385,8 +1542,19 @@ def _index_snapshot(
             "order_placement_enabled": False,
         })
     strategy_suite["execution_id"] = strategy_execution_id
+    # Do not claim downstream delivery merely because the suite was computed.
+    # The shared signal payload exposes the result; separate page-level receipt
+    # must be instrumented by the actual consumers before these flags turn true.
+    strategy_trace["shared_signal_payload_available"] = True
+    strategy_trace["research_engine_received"] = False
+    strategy_trace["trading_setup_received"] = False
+    for trace_row in strategy_trace_rows:
+        trace_row["shared_signal_payload_available"] = True
+        trace_row["research_engine_received"] = False
+        trace_row["trading_setup_received"] = False
     strategy_suite["trace"] = strategy_trace
     strategy_suite["strategy_trace"] = strategy_trace_rows
+    result = _apply_strategy_confluence_filter(result, strategy_suite, strategy_execution_id)
     result["strategy_suite"] = strategy_suite
     result["indicators"] = indicators
     result["oi_summary"] = {
@@ -1897,6 +2065,18 @@ def market_ticks(_: str = Depends(_device)) -> dict[str, Any]:
 @app.get("/v1/option-chain")
 def option_chain(index: str = Query(default="NIFTY"), _: str = Depends(_device)) -> dict[str, Any]:
     index = index.strip().upper()
+    request_started = time.monotonic()
+    cached = _option_chain_cache.get(index)
+    if cached and OPTION_CHAIN_CACHE_TTL_SECONDS > 0:
+        cached_at, cached_payload = cached
+        cache_age = time.monotonic() - cached_at
+        if cache_age <= OPTION_CHAIN_CACHE_TTL_SECONDS:
+            return {
+                **cached_payload,
+                "cache": {"hit": True, "age_ms": round(cache_age * 1000, 1)},
+                "request_elapsed_ms": round((time.monotonic() - request_started) * 1000, 1),
+            }
+        _option_chain_cache.pop(index, None)
     adapter = _require_adapter()
     rows = _load_master()
     commodity = index in COMMODITY_NAMES
@@ -1919,14 +2099,32 @@ def option_chain(index: str = Query(default="NIFTY"), _: str = Depends(_device))
         future_expiries = sorted({_expiry_date(row.get("expiry")) for row in futures if _expiry_date(row.get("expiry"))})
         future = next((row for row in futures if _expiry_date(row.get("expiry")) == future_expiries[0]), futures[0])
         future_token = str(future.get("token", ""))
-        spot_quote = _quotes(adapter, "MCX", [future_token]).get(future_token)
+        spot_future = _market_data_executor.submit(_quotes, adapter, "MCX", [future_token])
+        try:
+            spot_quote = spot_future.result(timeout=OPTION_CHAIN_UPSTREAM_TIMEOUT_SECONDS).get(future_token)
+        except FutureTimeoutError:
+            spot_future.cancel()
+            raise HTTPException(status_code=504, detail={
+                "message": "Angel One underlying quote timed out; no cached or fabricated spot was used.",
+                "stage": "option_chain_underlying_quote", "timeout_seconds": OPTION_CHAIN_UPSTREAM_TIMEOUT_SECONDS,
+                "retryable": True,
+            })
         spot = _number(spot_quote.get("ltp")) if spot_quote else None
         segment = "MCX"
         option_instrument = "OPTFUT"
         option_name = index
     else:
         config = _find_index_contract(rows, index)
-        spot_quote = _quotes(adapter, config["exchange"], [config["token"]]).get(config["token"])
+        spot_future = _market_data_executor.submit(_quotes, adapter, config["exchange"], [config["token"]])
+        try:
+            spot_quote = spot_future.result(timeout=OPTION_CHAIN_UPSTREAM_TIMEOUT_SECONDS).get(config["token"])
+        except FutureTimeoutError:
+            spot_future.cancel()
+            raise HTTPException(status_code=504, detail={
+                "message": "Angel One underlying quote timed out; no cached or fabricated spot was used.",
+                "stage": "option_chain_underlying_quote", "timeout_seconds": OPTION_CHAIN_UPSTREAM_TIMEOUT_SECONDS,
+                "retryable": True,
+            })
         spot = _number(spot_quote.get("ltp")) if spot_quote else None
         segment = "BFO" if index in ("SENSEX", "BANKEX") else "NFO"
         option_instrument = "OPTIDX"
@@ -1951,11 +2149,33 @@ def option_chain(index: str = Query(default="NIFTY"), _: str = Depends(_device))
     atm = min(range(len(strikes)), key=lambda i: abs(strikes[i] - spot)) if strikes else 0
     wanted = set(strikes[max(0, atm - 10): min(len(strikes), atm + 11)])
     contracts = [row for row in contracts if _strike_value(row.get("strike"), spot) in wanted][:100]
-    quote_map = _quotes(adapter, segment, [str(row.get("token", "")) for row in contracts if row.get("token")])
-    # Request broker Greeks for MCX as well as index options. Some broker
-    # accounts/underlyings may not return MCX Greeks; _greeks_map fails closed
-    # to an empty map, so absent values remain null and cannot qualify a trade.
-    greek_map = _greeks_map(adapter, index, expiries[0].strftime("%d%b%Y").upper())
+    # Quotes and Greeks are independent upstream requests. Fetch them concurrently
+    # to avoid serially paying both broker latencies on every option-chain refresh.
+    quote_future = _market_data_executor.submit(
+        _quotes, adapter, segment,
+        [str(row.get("token", "")) for row in contracts if row.get("token")],
+    )
+    greek_future = _market_data_executor.submit(
+        _greeks_map, adapter, index, expiries[0].strftime("%d%b%Y").upper(),
+    )
+    timed_out: list[str] = []
+    # Both futures share one deadline; sequential full timeouts would double the
+    # UI wait under a simultaneous broker slowdown.
+    upstream_deadline = time.monotonic() + OPTION_CHAIN_UPSTREAM_TIMEOUT_SECONDS
+    try:
+        quote_map = quote_future.result(timeout=max(0.01, upstream_deadline - time.monotonic()))
+    except FutureTimeoutError:
+        quote_future.cancel()
+        quote_map = {}
+        timed_out.append("quotes")
+    # Greeks are supplemental and may time out independently. Missing values
+    # remain null; never synthesize Greeks or use them to qualify a trade.
+    try:
+        greek_map = greek_future.result(timeout=max(0.01, upstream_deadline - time.monotonic()))
+    except FutureTimeoutError:
+        greek_future.cancel()
+        greek_map = {}
+        timed_out.append("greeks")
     output = []
     for row in contracts:
         token = str(row.get("token", ""))
@@ -1978,7 +2198,31 @@ def option_chain(index: str = Query(default="NIFTY"), _: str = Depends(_device))
             "buy_depth": buy_depth, "sell_depth": sell_depth,
             "timestamp": _quote_timestamp(quote), "source_timestamp": _quote_timestamp(quote),
         })
-    return {"index": index, "spot": spot, "expiry": expiries[0].isoformat(), "contracts": output, "option_chain": _market_chain_rows(output), "source": "angelone_smartapi", "observed_at": _utc_now().isoformat(), "signal_only": True, "underlying_type": "MCX_FUTURE" if commodity else "INDEX"}
+    elapsed_ms = round((time.monotonic() - request_started) * 1000, 1)
+    payload = {
+        "index": index, "spot": spot, "expiry": expiries[0].isoformat(),
+        "contracts": output, "option_chain": _market_chain_rows(output),
+        "source": "angelone_smartapi", "observed_at": _utc_now().isoformat(),
+        "signal_only": True, "underlying_type": "MCX_FUTURE" if commodity else "INDEX",
+        "cache": {"hit": False, "ttl_seconds": OPTION_CHAIN_CACHE_TTL_SECONDS},
+        "upstream": {
+            "quotes": "timeout" if "quotes" in timed_out else "received",
+            "greeks": "timeout" if "greeks" in timed_out else "received",
+            "timed_out": timed_out,
+            "timeout_seconds": OPTION_CHAIN_UPSTREAM_TIMEOUT_SECONDS,
+        },
+        "request_elapsed_ms": elapsed_ms,
+    }
+    if timed_out:
+        payload["status"] = "WAIT"
+        payload["reason"] = "Upstream timeout; missing option-chain fields are unavailable and cannot qualify a trade."
+    elif not output:
+        payload["status"] = "WAIT"
+        payload["reason"] = "No complete live option quotes were received."
+    # Cache only complete quote responses; never cache timeout/partial data.
+    if not timed_out and output and OPTION_CHAIN_CACHE_TTL_SECONDS > 0:
+        _option_chain_cache[index] = (time.monotonic(), payload)
+    return payload
 
 
 @app.get("/v1/market/sentiment")
@@ -2054,6 +2298,36 @@ def _stale_signal_snapshot(cached: dict[str, Any], age_seconds: float | None) ->
                 row["candidate_decision"] = decision
             row["decision"] = "WAIT"
             row["data_fresh"] = False
+            # Stale snapshots may show market context, but never actionable levels.
+            for key in ("strike", "expiry", "entry", "exit", "stop_loss", "target", "option_type", "option_side"):
+                row[key] = None
+            trade_plan = dict(row.get("trade_plan") or {})
+            trade_plan.update({
+                "selection_grade": "WAIT", "strike": None, "expiry": None,
+                "entry": None, "exit": None, "stop_loss": None, "target": None,
+                "signal_only": True,
+            })
+            row["trade_plan"] = trade_plan
+            # Nested engine objects must agree with the final WAIT shown on every page.
+            for engine_key in ("five_layer_engine", "quant_engine"):
+                engine_payload = row.get(engine_key)
+                if isinstance(engine_payload, dict):
+                    engine_payload["decision"] = "WAIT"
+                    engine_payload["data_fresh"] = False
+                    row[engine_key] = engine_payload
+            strategy_filter = dict(row.get("strategy_filter") or {})
+            if strategy_filter:
+                strategy_filter.update({
+                    "pass": False, "state": "BLOCKED_BY_STALE_DATA",
+                    "reason": "Signal refresh is in progress; stale market data cannot authorize a trade.",
+                })
+                row["strategy_filter"] = strategy_filter
+                trade_plan["strategy_filter"] = strategy_filter
+                row["trade_plan"] = trade_plan
+            stability = dict(row.get("signal_stability") or {})
+            if stability:
+                stability["state"] = "BLOCKED_BY_STALE_DATA"
+                row["signal_stability"] = stability
             validation = dict(row.get("live_validation") or {})
             validation["decision"] = "WAIT"
             validation["verdict"] = "WARN"
@@ -2475,11 +2749,30 @@ def _provider_key_present(*names: str) -> bool:
     return any(os.getenv(name, "").strip() for name in names)
 
 
+def _provider_config_fingerprint(provider: str) -> str:
+    """Fingerprint key/model/endpoint configuration without exposing secrets."""
+    if provider == "nvidia":
+        values = (
+            os.getenv("NVIDIA_API_KEY") or "",
+            os.getenv("NVIDIA_CHAT_MODEL", "nvidia/llama-3.3-nemotron-super-49b-v1.5"),
+            os.getenv("NVIDIA_CHAT_BASE_URL", "https://integrate.api.nvidia.com/v1/chat/completions"),
+        )
+    elif provider == "openrouter":
+        values = (
+            os.getenv("OPENROUTER_API_KEY") or os.getenv("OPEN_ROUTER_API_KEY") or "",
+            os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct"),
+            os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1/chat/completions"),
+        )
+    else:
+        raise ValueError("Unsupported AI provider")
+    return hashlib.sha256(json.dumps(values, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
 @app.get("/v1/ai/status")
 def ai_status(_: str = Depends(_device)) -> dict[str, Any]:
     # NVIDIA is primary; OpenRouter is an optional fallback.
     providers = [
-        ("nvidia", ("NVIDIA_API_KEY", "KUMO_NVIDIA_API_KEY"), os.getenv("NVIDIA_CHAT_MODEL", "nvidia/llama-3.3-nemotron-super-49b-v1.5")),
+        ("nvidia", ("NVIDIA_API_KEY",), os.getenv("NVIDIA_CHAT_MODEL", "nvidia/llama-3.3-nemotron-super-49b-v1.5")),
         ("openrouter", ("OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY"), os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct")),
     ]
     selected = next((item for item in providers if _provider_key_present(*item[1])), None)
@@ -2495,8 +2788,14 @@ def ai_status(_: str = Depends(_device)) -> dict[str, Any]:
     with _lock:
         for name in ("nvidia", "openrouter"):
             cached = _ai_provider_test_cache.get(name)
-            if cached and cached.get("configured") == provider_status[name]["configured"]:
-                provider_status[name] = dict(cached)
+            if (
+                cached
+                and cached.get("configured") == provider_status[name]["configured"]
+                and cached.get("_config_fingerprint") == _provider_config_fingerprint(name)
+            ):
+                provider_status[name] = {
+                    key: value for key, value in cached.items() if key != "_config_fingerprint"
+                }
     return {
         "provider": selected[0] if selected else "deterministic_fallback",
         "model": selected[2] if selected else "five-layer-quant-context",
@@ -2595,7 +2894,7 @@ def ai_validate_snapshot(body: dict[str, Any], _: str = Depends(_device)) -> dic
     )
     providers: dict[str, Any] = {}
     for provider, env_names in (
-        ("nvidia", ("NVIDIA_API_KEY", "KUMO_NVIDIA_API_KEY")),
+        ("nvidia", ("NVIDIA_API_KEY",)),
         ("openrouter", ("OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY")),
     ):
         configured = any(os.getenv(name, "").strip() for name in env_names)
@@ -2633,7 +2932,7 @@ def test_ai_providers(_: str = Depends(_device)) -> dict[str, Any]:
         and actual_age is not None and 0 <= actual_age <= 60
     )
     checks: list[dict[str, Any]] = []
-    nvidia_key = (os.getenv("NVIDIA_API_KEY") or os.getenv("KUMO_NVIDIA_API_KEY") or "").strip()
+    nvidia_key = (os.getenv("NVIDIA_API_KEY") or "").strip()
     nvidia_model = os.getenv("NVIDIA_CHAT_MODEL", "nvidia/llama-3.3-nemotron-super-49b-v1.5").strip()
     if nvidia_key:
         try:
@@ -2664,7 +2963,9 @@ def test_ai_providers(_: str = Depends(_device)) -> dict[str, Any]:
     tested = [item for item in checks if item.get("provider") in ("nvidia", "openrouter")]
     with _lock:
         for item in tested:
-            _ai_provider_test_cache[item["provider"]] = dict(item)
+            cached_item = dict(item)
+            cached_item["_config_fingerprint"] = _provider_config_fingerprint(str(item["provider"]))
+            _ai_provider_test_cache[item["provider"]] = cached_item
     succeeded = [item for item in tested if item.get("ok") is True]
     return {
         "status": "ok" if succeeded else ("not_configured" if not any(item.get("configured") for item in tested) else "failed"),
@@ -2699,7 +3000,7 @@ def review_signal_with_nvidia(payload: dict[str, Any], _: str = Depends(_device)
             "signal_only": True, "order_placement_enabled": False,
         }
     providers: list[tuple[str, str, str]] = []
-    nvidia_key = (os.getenv("NVIDIA_API_KEY") or os.getenv("KUMO_NVIDIA_API_KEY") or "").strip()
+    nvidia_key = (os.getenv("NVIDIA_API_KEY") or "").strip()
     if nvidia_key:
         providers.append(("nvidia", nvidia_key, os.getenv("NVIDIA_CHAT_MODEL", "nvidia/llama-3.3-nemotron-super-49b-v1.5").strip()))
     openrouter_key = (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPEN_ROUTER_API_KEY") or "").strip()
@@ -2709,7 +3010,7 @@ def review_signal_with_nvidia(payload: dict[str, Any], _: str = Depends(_device)
         return {
             "provider": "none", "configured": False, "ok": False, "verdict": "WAIT",
             "decision": "WAIT", "status": "not_configured",
-            "reason": "Configure NVIDIA_API_KEY (or KUMO_NVIDIA_API_KEY) and/or OPENROUTER_API_KEY on the backend.",
+            "reason": "Configure NVIDIA_API_KEY for NVIDIA chat and/or OPENROUTER_API_KEY on the backend. KUMO_NVIDIA_API_KEY is reserved for Kumo Tabular inference.",
             "blocks": ["AI_PROVIDER_NOT_CONFIGURED"],
             "checks": {"backend_validation": True, "ai_direction_consistent": False},
             "signal_only": True, "order_placement_enabled": False,
@@ -2975,7 +3276,7 @@ def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
         # not success: each provider must return a real inference response.
         failures: list[dict[str, str]] = []
         providers = [
-            ("nvidia", (os.getenv("NVIDIA_API_KEY") or os.getenv("KUMO_NVIDIA_API_KEY") or "").strip()),
+            ("nvidia", (os.getenv("NVIDIA_API_KEY") or "").strip()),
             ("openrouter", (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPEN_ROUTER_API_KEY") or "").strip()),
         ]
         for provider, api_key in providers:

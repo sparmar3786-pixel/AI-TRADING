@@ -172,6 +172,25 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(data["providers"]["openrouter"]["status"], "not_configured")
         self.assertEqual(data["deterministic_decision"], "WAIT")
 
+    def test_ai_status_invalidates_cached_test_after_provider_configuration_changes(self):
+        stale_cache = {
+            'nvidia': {
+                'provider': 'nvidia', 'configured': True, 'ok': True, 'status': 'ok',
+                'model': 'old-model', '_config_fingerprint': 'old-key-fingerprint',
+            },
+        }
+        with patch.dict(os.environ, {
+            'NVIDIA_API_KEY': 'rotated-key', 'KUMO_NVIDIA_API_KEY': '',
+            'NVIDIA_CHAT_MODEL': 'test-model',
+            'NVIDIA_CHAT_BASE_URL': 'https://integrate.api.nvidia.com/v1/chat/completions',
+            'OPENROUTER_API_KEY': '', 'OPEN_ROUTER_API_KEY': '',
+        }, clear=False), patch.object(api, '_ai_provider_test_cache', stale_cache):
+            response = self.client.get('/v1/ai/status', headers=self.device_headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        provider = response.json()['providers']['nvidia']
+        self.assertFalse(provider['ok'])
+        self.assertEqual(provider['status'], 'configured_not_tested')
+        self.assertNotIn('_config_fingerprint', provider)
     def test_openai_environment_key_is_ignored_by_ai_status(self):
         with patch.dict(os.environ, {
             "NVIDIA_API_KEY": "", "KUMO_NVIDIA_API_KEY": "",
@@ -386,6 +405,63 @@ class BackendApiTests(unittest.TestCase):
         self.assertIn("25000.0", body["answer"])
         self.assertIn("missing option evidence", body["answer"])
 
+    def test_signals_and_ai_chat_consume_the_same_shared_signal_snapshot(self):
+        snapshot = {
+            "generated_at": "2026-10-14T02:00:00+00:00",
+            "market": {"NIFTY": {"ltp": 25000.0, "source": "angelone_smartapi", "live": False}},
+            "signals": {
+                "NIFTY": {
+                    "decision": "WAIT",
+                    "quant_engine": {"decision": "WAIT", "passed_layers": 1},
+                    "five_layer_engine": {"decision": "WAIT", "passed_layers": 1},
+                    "live_validation": {"verdict": "WAIT", "blocks": ["STALE_MARKET_DATA"]},
+                    "reasons": ["STALE_MARKET_DATA"],
+                }
+            },
+        }
+        with patch.object(api, "_get_signals", return_value=snapshot), \
+             patch.dict(os.environ, {
+                 "NVIDIA_API_KEY": "", "KUMO_NVIDIA_API_KEY": "",
+                 "OPENROUTER_API_KEY": "", "OPEN_ROUTER_API_KEY": "",
+             }, clear=False):
+            signals_response = self.client.get("/v1/signals", headers=self.device_headers)
+            chat_response = self.client.post(
+                "/v1/ai/chat", headers=self.device_headers,
+                json={"index": "NIFTY", "question": "Explain the current signal", "history": []},
+            )
+        self.assertEqual(signals_response.status_code, 200, signals_response.text)
+        self.assertEqual(chat_response.status_code, 200, chat_response.text)
+        signal = signals_response.json()["signals"]["NIFTY"]
+        chat_signal = chat_response.json()["signal"]
+        self.assertEqual(chat_signal["decision"], signal["decision"])
+        self.assertEqual(chat_signal["quant_engine"]["decision"], signal["quant_engine"]["decision"])
+        self.assertEqual(chat_signal["five_layer_engine"]["decision"], signal["five_layer_engine"]["decision"])
+        self.assertEqual(chat_signal["live_validation"]["verdict"], signal["live_validation"]["verdict"])
+        self.assertEqual(signal["decision"], "WAIT")
+
+    def test_kumo_key_does_not_configure_nvidia_chat(self):
+        payload = {
+            "market": {"NIFTY": {"ltp": 25000.0, "age_seconds": 3, "live": True}},
+            "signals": {"NIFTY": {"decision": "WAIT", "reasons": ["risk gate wait"]}},
+        }
+        with patch.object(api, "_get_signals", return_value=payload), \
+             patch.dict(os.environ, {
+                 "NVIDIA_API_KEY": "", "KUMO_NVIDIA_API_KEY": "kumo-only-key",
+                 "OPENROUTER_API_KEY": "", "OPEN_ROUTER_API_KEY": "",
+             }, clear=False), \
+             patch.object(api, "_run_openai_compatible_completion") as completion:
+            status = self.client.get("/v1/ai/status", headers=self.device_headers)
+            response = self.client.post(
+                "/v1/ai/chat", headers=self.device_headers,
+                json={"index": "NIFTY", "question": "Explain the current signal", "history": []},
+            )
+        self.assertEqual(status.status_code, 200, status.text)
+        self.assertFalse(status.json()["providers"]["nvidia"]["configured"])
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["provider"], "deterministic_fallback")
+        self.assertFalse(response.json()["llm_used"])
+        completion.assert_not_called()
+
     def test_ai_chat_uses_openrouter_when_nvidia_is_unconfigured(self):
         payload = {"market": {"NIFTY": {
                        "ltp": 25000.0, "age_seconds": 3, "live": True,
@@ -581,6 +657,54 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(result["signals"]["NIFTY"]["decision"], "WAIT")
         self.assertIn("insufficient candle history", result["market"]["NIFTY"]["signal_error"])
 
+    def test_strategy_inputs_exclude_incomplete_five_minute_candle(self):
+        now = datetime.fromisoformat("2026-10-14T04:05:30+00:00")
+        rows = [
+            {"timestamp": "2026-10-14T04:00:00+00:00", "close": 100.0},
+            {"timestamp": "2026-10-14T04:05:00+00:00", "close": 101.0},
+        ]
+        completed = api._completed_candle_rows(rows, timeframe_minutes=5, now=now)
+        self.assertEqual(len(completed), 1)
+        self.assertEqual(completed[0]["close"], 100.0)
+
+    def test_stale_signal_snapshot_clears_actionable_levels(self):
+        cached = {
+            "signals": {
+                "NIFTY": {
+                    "decision": "CALL BUY", "strike": 25000, "expiry": "2026-10-29",
+                    "entry": 100.0, "exit": 115.0, "stop_loss": 95.0, "target": 115.0,
+                    "option_type": "CALL", "option_side": "CE",
+                    "trade_plan": {
+                        "selection_grade": "A", "strike": 25000, "expiry": "2026-10-29",
+                        "entry": 100.0, "exit": 115.0, "stop_loss": 95.0, "target": 115.0,
+                    },
+                    "live_validation": {"verdict": "PASS", "blocks": []},
+                    "five_layer_engine": {"decision": "CALL BUY"},
+                    "quant_engine": {"decision": "CALL BUY"},
+                    "strategy_filter": {"pass": True, "state": "PASS"},
+                    "signal_stability": {"state": "CONFIRMED"},
+                }
+            },
+            "market": {"NIFTY": {"ltp": 25000.0, "live": True}},
+            "trade_plans": [{"index": "NIFTY"}],
+            "qualified_trade_count": 1,
+        }
+        stale = api._stale_signal_snapshot(cached, 75.0)
+        signal = stale["signals"]["NIFTY"]
+        self.assertEqual(signal["decision"], "WAIT")
+        self.assertEqual(signal["candidate_decision"], "CALL BUY")
+        self.assertFalse(signal["data_fresh"])
+        for key in ("strike", "expiry", "entry", "exit", "stop_loss", "target", "option_type", "option_side"):
+            self.assertIsNone(signal[key])
+        self.assertEqual(signal["trade_plan"]["selection_grade"], "WAIT")
+        self.assertEqual(signal["five_layer_engine"]["decision"], "WAIT")
+        self.assertEqual(signal["quant_engine"]["decision"], "WAIT")
+        self.assertFalse(signal["strategy_filter"]["pass"])
+        self.assertEqual(signal["signal_stability"]["state"], "BLOCKED_BY_STALE_DATA")
+        self.assertEqual(stale["trade_plans"], [])
+        self.assertEqual(stale["qualified_trade_count"], 0)
+        self.assertEqual(cached["signals"]["NIFTY"]["decision"], "CALL BUY")
+
     def test_cold_signal_request_returns_wait_while_refresh_runs_in_background(self):
         metrics = {"last_duration_ms": None, "build_count": 0, "in_flight": False, "last_error": None}
         with patch.object(api, "_signal_cache", None), \
@@ -697,6 +821,20 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(buy_orders, 2)
         self.assertEqual(sell_orders, 3)
         self.assertEqual(api._footprint_levels({}, step=5.0), ({}, 0, 0))
+
+    def test_option_chain_returns_short_cache_hit_without_broker_call(self):
+        payload = {
+            "index": "NIFTY", "contracts": [], "option_chain": [],
+            "observed_at": "2026-10-14T00:00:00+00:00", "signal_only": True,
+        }
+        cache_entry = (api.time.monotonic(), payload)
+        with patch.dict(api._option_chain_cache, {"NIFTY": cache_entry}, clear=False):
+            with patch.object(api, "OPTION_CHAIN_CACHE_TTL_SECONDS", 2.0):
+                with patch.object(api, "_require_adapter", side_effect=AssertionError("cache miss")):
+                    response = self.client.get("/v1/option-chain?index=NIFTY", headers=self.device_headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["cache"]["hit"])
+        self.assertLess(response.json()["request_elapsed_ms"], 100)
 
 if __name__ == "__main__":
     unittest.main()

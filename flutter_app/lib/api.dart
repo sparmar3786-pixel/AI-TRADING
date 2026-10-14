@@ -53,9 +53,14 @@ class FreshApi {
   static const Set<String> _signalRoutes = <String>{
     '/v1/system/diagnostics',
     '/v1/ai/status',
+    '/v1/ai/chat',
     '/v1/ai/nvidia-chat',
     '/v1/ai/review-signal',
+    '/v1/ai/kumo/status',
+    '/v1/ai/kumo/predict',
     '/v1/providers/ai/test',
+    '/v1/providers/search/status',
+    '/v1/providers/search/test',
     '/v1/metadata',
     '/v1/ai/validate',
     '/v1/angel/status',
@@ -82,8 +87,8 @@ class FreshApi {
   Uri _uri(String path) {
     final suffix = path.startsWith('/') ? path : '/' + path;
     final suffixUri = Uri.parse(suffix);
-    final useSignalBackend = suffixUri.path != '/v1/ai/chat' &&
-        (_signalRoutes.contains(suffixUri.path) || suffixUri.path.startsWith('/v1/paper/trades/'));
+    final useSignalBackend = _signalRoutes.contains(suffixUri.path) ||
+        suffixUri.path.startsWith('/v1/paper/trades/');
     final routeBase = useSignalBackend ? signalBackendUrl : baseUrl;
     var normalized = routeBase.trim();
     while (normalized.endsWith('/')) {
@@ -230,6 +235,19 @@ class FreshApi {
   Future<Map<String, dynamic>> metadata() => getJson('/v1/metadata');
   Future<Map<String, dynamic>> angelStatus() => getJson('/v1/angel/status');
   Future<Map<String, dynamic>> aiStatus() => getJson('/v1/ai/status');
+  Future<Map<String, dynamic>> kumoStatus() => getJson('/v1/ai/kumo/status');
+  Future<Map<String, dynamic>> kumoPredict(
+    Map<String, dynamic> request, {
+    String? index,
+  }) =>
+      postJson(
+        '/v1/ai/kumo/predict',
+        {
+          'request': request,
+          if (index != null && index.trim().isNotEmpty) 'index': index.trim().toUpperCase(),
+        },
+        timeout: const Duration(seconds: 35),
+      );
   Future<Map<String, dynamic>> testAIProviders() =>
       postJson('/v1/providers/ai/test', {});
   Future<Map<String, dynamic>> testSearchProviders() =>

@@ -30,15 +30,23 @@ class KumoPredictionRequest(BaseModel):
     request: dict[str, Any] | None = None
     data: list[dict[str, Any]] | None = Field(default=None, min_length=1, max_length=256)
     model: str | None = Field(default=None, max_length=128)
+    index: str | None = Field(default=None, max_length=32)
 
 
 def _self_hosted_base() -> str:
     return os.getenv("KUMO_NIM_BASE_URL", "").strip().rstrip("/")
 
 
+def _hosted_url_configured() -> bool:
+    # Users sometimes paste the hosted Catalog /predictions URL into the old
+    # NIM-base variable. Recognize it as hosted, not as a self-hosted health URL.
+    base = _self_hosted_base()
+    return base == NVIDIA_CATALOG_BASE or base == NVIDIA_CATALOG_BASE + "/predictions"
+
+
 def _hosted_key() -> str:
-    # Prefer the provider-specific variable; NVIDIA_API_KEY is supported as an alias.
-    return (os.getenv("KUMO_NVIDIA_API_KEY") or os.getenv("NVIDIA_API_KEY") or "").strip()
+    # Kumo has a dedicated credential; a chat credential must never configure it.
+    return os.getenv("KUMO_NVIDIA_API_KEY", "").strip()
 
 
 def _http_json(url: str, method: str = "GET", payload: dict[str, Any] | None = None,
@@ -96,6 +104,17 @@ def kumo_status(_: str = Depends(_device)) -> dict[str, Any]:
     # NVIDIA API Catalog is a hosted endpoint: it has a models endpoint, not the
     # self-hosted NIM /v1/health/ready endpoint.
     key = _hosted_key()
+    if _hosted_url_configured() and not key:
+        return {
+            "provider": "nvidia_kumo_tabular",
+            "mode": "hosted_api_catalog",
+            "status": "not_configured",
+            "configured": False,
+            "ready": False,
+            "capability": "structured_tabular_prediction",
+            "general_chat_supported": False,
+            "message": "Set KUMO_NVIDIA_API_KEY for the hosted NVIDIA Kumo API; NVIDIA_API_KEY is reserved for chat.",
+        }
     if key:
         try:
             code, data, elapsed = _http_json(NVIDIA_CATALOG_BASE + "/models", token=key)
@@ -160,7 +179,18 @@ def kumo_status(_: str = Depends(_device)) -> dict[str, Any]:
 @router.post("/v1/ai/kumo/predict")
 def kumo_predict(body: KumoPredictionRequest, _: str = Depends(_device)) -> dict[str, Any]:
     """Proxy real Kumo structured prediction; never places orders or fabricates fallback."""
+    signal_api = None
+    index = body.index.strip().upper() if body.index else None
+    if index:
+        try:
+            from app import main as signal_api
+        except ImportError:
+            from backend.app import main as signal_api
+        if index not in signal_api.INDEXES:
+            raise HTTPException(status_code=422, detail="Unsupported index for Kumo-to-Quant connection.")
     hosted_key = _hosted_key()
+    if _hosted_url_configured() and not hosted_key:
+        raise HTTPException(status_code=503, detail="Hosted Kumo URL is configured but KUMO_NVIDIA_API_KEY is missing.")
     if hosted_key:
         payload = body.request
         if not isinstance(payload, dict):
@@ -188,7 +218,7 @@ def kumo_predict(body: KumoPredictionRequest, _: str = Depends(_device)) -> dict
         mode = "self_hosted_nim"
     if not 200 <= code < 300:
         raise HTTPException(status_code=502, detail="Kumo prediction failed.")
-    return {
+    response: dict[str, Any] = {
         "status": "ok",
         "provider": "nvidia_kumo_tabular",
         "mode": mode,
@@ -199,3 +229,32 @@ def kumo_predict(body: KumoPredictionRequest, _: str = Depends(_device)) -> dict
         "order_placement_enabled": False,
         "note": "Model output is not a trade instruction; validate with deterministic quant, data-quality and risk gates.",
     }
+    # Optional, explicit bridge: attach the real Kumo inference to the current
+    # deterministic Quant snapshot. Kumo output is evidence only; it never
+    # changes the Quant decision or bypasses live-data/risk gates.
+    if index and signal_api is not None:
+        snapshot = signal_api._get_signals(force=False)
+        signal = dict((snapshot.get("signals") or {}).get(index) or {})
+        quant = dict(signal.get("quant_engine") or signal.get("five_layer_engine") or {})
+        validation = dict(signal.get("live_validation") or {})
+        quant["kumo_tabular_evidence"] = {
+            "status": "inference_received",
+            "provider": "nvidia_kumo_tabular",
+            "latency_ms": elapsed,
+            "prediction": result,
+            "deterministic_gate_verdict": str(validation.get("verdict") or "WAIT"),
+            "quant_decision_unchanged": str(quant.get("decision") or signal.get("decision") or "WAIT"),
+            "prediction_used_as_trade_authority": False,
+        }
+        response["quant_connection"] = {
+            "connected": True,
+            "index": index,
+            "signal_decision": str(signal.get("decision") or "WAIT"),
+            "quant_decision": str(quant.get("decision") or signal.get("decision") or "WAIT"),
+            "deterministic_gate_verdict": str(validation.get("verdict") or "WAIT"),
+            "quant_engine": quant,
+            "live_validation": validation,
+            "decision_changed_by_kumo": False,
+            "note": "Real Kumo inference is attached to Quant as external evidence; no trade direction is inferred from undocumented model output.",
+        }
+    return response
