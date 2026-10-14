@@ -1117,6 +1117,14 @@ def _apply_strategy_confluence_filter(
             blocks.append("QUANT_VALIDATION_BLOCKED" if not quant_gate_pass else "STRATEGY_CONFLUENCE_BLOCKED")
             validation["blocks"] = list(dict.fromkeys(blocks))
             validation["verdict"] = "BLOCKED"
+    elif not has_candidate:
+        # WAIT/no-candidate responses must not leak old levels from a prior setup.
+        for key in ("strike", "expiry", "entry", "exit", "stop_loss", "target", "option_type", "option_side"):
+            result[key] = None
+        plan.update({
+            "selection_grade": "WAIT", "strike": None, "expiry": None,
+            "entry": None, "exit": None, "stop_loss": None, "target": None,
+        })
     engine = result.get("five_layer_engine")
     if isinstance(engine, dict):
         engine["decision"] = result.get("decision", "WAIT")
