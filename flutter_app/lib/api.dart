@@ -236,8 +236,18 @@ class FreshApi {
   Future<Map<String, dynamic>> angelStatus() => getJson('/v1/angel/status');
   Future<Map<String, dynamic>> aiStatus() => getJson('/v1/ai/status');
   Future<Map<String, dynamic>> kumoStatus() => getJson('/v1/ai/kumo/status');
-  Future<Map<String, dynamic>> kumoPredict(Map<String, dynamic> request) =>
-      postJson('/v1/ai/kumo/predict', {'request': request}, timeout: const Duration(seconds: 35));
+  Future<Map<String, dynamic>> kumoPredict(
+    Map<String, dynamic> request, {
+    String? index,
+  }) =>
+      postJson(
+        '/v1/ai/kumo/predict',
+        {
+          'request': request,
+          if (index != null && index.trim().isNotEmpty) 'index': index.trim().toUpperCase(),
+        },
+        timeout: const Duration(seconds: 35),
+      );
   Future<Map<String, dynamic>> testAIProviders() =>
       postJson('/v1/providers/ai/test', {});
   Future<Map<String, dynamic>> testSearchProviders() =>
