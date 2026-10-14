@@ -213,21 +213,15 @@ void main() {
 
     expect(find.text('TRADE ENGINE'), findsOneWidget);
     expect(find.text('SIGNAL ENGINE'), findsOneWidget);
-    final engineScrollable = find.byType(Scrollable).last;
     final riskLayer = find.text('RISK & 10-MINUTE STABILITY');
-    await tester.scrollUntilVisible(riskLayer, 250, scrollable: engineScrollable);
     expect(riskLayer, findsOneWidget);
     final trendLayer = find.text('TREND & SENTIMENT');
-    await tester.scrollUntilVisible(trendLayer, 250, scrollable: engineScrollable);
     expect(trendLayer, findsOneWidget);
     final optionLayer = find.text('OPTION CHAIN & ORDER FLOW');
-    await tester.scrollUntilVisible(optionLayer, 250, scrollable: engineScrollable);
     expect(optionLayer, findsOneWidget);
     final monitorLayer = find.text('READ-ONLY BROKER MONITOR');
-    await tester.scrollUntilVisible(monitorLayer, 250, scrollable: engineScrollable);
     expect(monitorLayer, findsOneWidget);
     final orderBookButton = find.text('LOAD / REFRESH ANGEL ONE ORDER BOOK');
-    await tester.scrollUntilVisible(orderBookButton, 250, scrollable: engineScrollable);
     expect(orderBookButton, findsOneWidget);
   });
 
