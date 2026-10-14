@@ -53,7 +53,7 @@ class FreshApi {
   static const Set<String> _signalRoutes = <String>{
     '/v1/system/diagnostics',
     '/v1/ai/status',
-    '/v1/ai/gemini-chat',
+    '/v1/ai/nvidia-chat',
     '/v1/ai/review-signal',
     '/v1/providers/ai/test',
     '/v1/metadata',
@@ -338,8 +338,8 @@ class FreshApi {
         'notes': notes,
       });
 
-  /// Gemini-only cloud chat can take longer than a normal JSON call.
-  /// OpenRouter is the secondary provider; backend tries it after Gemini fails.
+  /// NVIDIA-only cloud chat can take longer than a normal JSON call.
+  /// OpenRouter is the secondary provider; backend tries it after NVIDIA fails.
   Future<Map<String, dynamic>> aiChat({
     required String index,
     required String question,
@@ -354,14 +354,14 @@ class FreshApi {
         timeout: const Duration(seconds: 40),
       );
 
-  /// Gemini-only review endpoint on the signal service. The legacy AI/chat
+  /// NVIDIA-only review endpoint on the signal service. The legacy AI/chat
   /// endpoint remains available for compatibility but is not used by this UI.
-  Future<Map<String, dynamic>> geminiChat({
+  Future<Map<String, dynamic>> nvidiaChat({
     required String index,
     required String question,
     List<Map<String, String>> history = const [],
   }) => postJson(
-        '/v1/ai/gemini-chat',
+        '/v1/ai/nvidia-chat',
         {
           'index': index,
           'question': question,
@@ -370,7 +370,7 @@ class FreshApi {
         timeout: const Duration(seconds: 40),
       );
 
-  Future<Map<String, dynamic>> reviewSignalWithGemini({
+  Future<Map<String, dynamic>> reviewSignalWithNVIDIA({
     required String index,
   }) => postJson(
         '/v1/ai/review-signal',
