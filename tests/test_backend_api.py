@@ -622,6 +622,10 @@ class BackendApiTests(unittest.TestCase):
                         "entry": 100.0, "exit": 115.0, "stop_loss": 95.0, "target": 115.0,
                     },
                     "live_validation": {"verdict": "PASS", "blocks": []},
+                    "five_layer_engine": {"decision": "CALL BUY"},
+                    "quant_engine": {"decision": "CALL BUY"},
+                    "strategy_filter": {"pass": True, "state": "PASS"},
+                    "signal_stability": {"state": "CONFIRMED"},
                 }
             },
             "market": {"NIFTY": {"ltp": 25000.0, "live": True}},
@@ -636,6 +640,10 @@ class BackendApiTests(unittest.TestCase):
         for key in ("strike", "expiry", "entry", "exit", "stop_loss", "target", "option_type", "option_side"):
             self.assertIsNone(signal[key])
         self.assertEqual(signal["trade_plan"]["selection_grade"], "WAIT")
+        self.assertEqual(signal["five_layer_engine"]["decision"], "WAIT")
+        self.assertEqual(signal["quant_engine"]["decision"], "WAIT")
+        self.assertFalse(signal["strategy_filter"]["pass"])
+        self.assertEqual(signal["signal_stability"]["state"], "BLOCKED_BY_STALE_DATA")
         self.assertEqual(stale["trade_plans"], [])
         self.assertEqual(stale["qualified_trade_count"], 0)
         self.assertEqual(cached["signals"]["NIFTY"]["decision"], "CALL BUY")
