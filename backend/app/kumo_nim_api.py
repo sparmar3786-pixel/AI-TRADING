@@ -30,6 +30,7 @@ class KumoPredictionRequest(BaseModel):
     request: dict[str, Any] | None = None
     data: list[dict[str, Any]] | None = Field(default=None, min_length=1, max_length=256)
     model: str | None = Field(default=None, max_length=128)
+    index: str | None = Field(default=None, max_length=32)
 
 
 def _self_hosted_base() -> str:
@@ -188,7 +189,7 @@ def kumo_predict(body: KumoPredictionRequest, _: str = Depends(_device)) -> dict
         mode = "self_hosted_nim"
     if not 200 <= code < 300:
         raise HTTPException(status_code=502, detail="Kumo prediction failed.")
-    return {
+    response: dict[str, Any] = {
         "status": "ok",
         "provider": "nvidia_kumo_tabular",
         "mode": mode,
@@ -199,3 +200,39 @@ def kumo_predict(body: KumoPredictionRequest, _: str = Depends(_device)) -> dict
         "order_placement_enabled": False,
         "note": "Model output is not a trade instruction; validate with deterministic quant, data-quality and risk gates.",
     }
+    # Optional, explicit bridge: attach the real Kumo inference to the current
+    # deterministic Quant snapshot. Kumo output is evidence only; it never
+    # changes the Quant decision or bypasses live-data/risk gates.
+    if body.index:
+        index = body.index.strip().upper()
+        try:
+            from app import main as signal_api
+        except ImportError:
+            from backend.app import main as signal_api
+        if index not in signal_api.INDEXES:
+            raise HTTPException(status_code=422, detail="Unsupported index for Kumo-to-Quant connection.")
+        snapshot = signal_api._get_signals(force=False)
+        signal = dict((snapshot.get("signals") or {}).get(index) or {})
+        quant = dict(signal.get("quant_engine") or signal.get("five_layer_engine") or {})
+        validation = dict(signal.get("live_validation") or {})
+        quant["kumo_tabular_evidence"] = {
+            "status": "inference_received",
+            "provider": "nvidia_kumo_tabular",
+            "latency_ms": elapsed,
+            "prediction": result,
+            "deterministic_gate_verdict": str(validation.get("verdict") or "WAIT"),
+            "quant_decision_unchanged": str(quant.get("decision") or signal.get("decision") or "WAIT"),
+            "prediction_used_as_trade_authority": False,
+        }
+        response["quant_connection"] = {
+            "connected": True,
+            "index": index,
+            "signal_decision": str(signal.get("decision") or "WAIT"),
+            "quant_decision": str(quant.get("decision") or signal.get("decision") or "WAIT"),
+            "deterministic_gate_verdict": str(validation.get("verdict") or "WAIT"),
+            "quant_engine": quant,
+            "live_validation": validation,
+            "decision_changed_by_kumo": False,
+            "note": "Real Kumo inference is attached to Quant as external evidence; no trade direction is inferred from undocumented model output.",
+        }
+    return response
