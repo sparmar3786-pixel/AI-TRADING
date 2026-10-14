@@ -2231,12 +2231,14 @@ class _AiAccessState extends State<AiAccessPage>{
   bool working=false,checking=false,searchWorking=false;
   String message='Cloud AI status has not been checked.';
   Map<String,Map<String,dynamic>> providers=const{};
+  Map<String,dynamic> kumoStatus=const{};
   @override void initState(){super.initState();refresh();}
   Future<void> refresh() async {
     if (checking) return;
     setState(() => checking = true);
     final api = FreshApi(widget.backendUrl.trim());
     final next = <String, Map<String, dynamic>>{};
+    Map<String, dynamic> nextKumo = const {};
     try {
       final result = await api.postJson('/v1/providers/search/status', {});
       final raw = result['providers'];
@@ -2285,7 +2287,15 @@ class _AiAccessState extends State<AiAccessPage>{
     } catch (error) {
       if (mounted) setState(() => message = 'AI provider status failed: ' + error.toString().replaceFirst('Exception: ', ''));
     }
-    if (mounted) setState(() { providers = next; checking = false; });
+    try {
+      nextKumo = await api.kumoStatus();
+    } catch (error) {
+      nextKumo = <String, dynamic>{
+        'status': 'unavailable', 'ready': false,
+        'message': error.toString().replaceFirst('Exception: ', ''),
+      };
+    }
+    if (mounted) setState(() { providers = next; kumoStatus = nextKumo; checking = false; });
   }
 
   Future<void> test() async {
@@ -2398,6 +2408,20 @@ class _AiAccessState extends State<AiAccessPage>{
     FilledButton.icon(onPressed: working ? null : test, icon: const Icon(Icons.psychology), label: Text(working ? 'TESTING NVIDIA + OPENROUTER…' : 'TEST NVIDIA + OPENROUTER')),
     const SizedBox(height: 10),
     Card(child: Padding(padding: const EdgeInsets.all(12), child: Text(message))),
+    const Section('NVIDIA KUMO TABULAR • STRUCTURED PREDICTION'),
+    Card(child: ListTile(
+      leading: Icon(
+        kumoStatus['ready'] == true ? Icons.cloud_done : Icons.cloud_off,
+        color: kumoStatus['ready'] == true ? Colors.lightBlueAccent : const Color(0xFFFF6577),
+        size: 26,
+      ),
+      title: const Text('NVIDIA Kumo Tabular API'),
+      subtitle: Text(
+        '${kumoStatus['status'] ?? 'not checked'} • latency ${kumoStatus['latency_ms'] ?? '—'} ms\n'
+        'Reachability check only; a real prediction and validated target/schema are still required before quant-engine use.\n'
+        '${kumoStatus['message'] ?? 'Hosted Kumo status not checked.'}',
+      ),
+    )),
     const Section('LLM PROVIDERS • NVIDIA + OPENROUTER'),
     provider('nvidia'), provider('openrouter'),
     OutlinedButton.icon(onPressed: checking ? null : refresh, icon: const Icon(Icons.refresh), label: Text(checking ? 'CHECKING…' : 'REFRESH LLM STATUS')),
@@ -2406,7 +2430,7 @@ class _AiAccessState extends State<AiAccessPage>{
     FilledButton.icon(onPressed: searchWorking ? null : testSearch, icon: const Icon(Icons.travel_explore), label: Text(searchWorking ? 'TESTING EXA + TAVILY…' : 'TEST EXA + TAVILY')),
     OutlinedButton.icon(onPressed: checking ? null : refresh, icon: const Icon(Icons.refresh), label: Text(checking ? 'CHECKING…' : 'REFRESH EXA / TAVILY STATUS')),
     const SizedBox(height: 8),
-    const Text('Provider keys remain on Railway. Green means a real provider test succeeded; configured-only or untested providers remain red until tested.', style: TextStyle(fontSize: 12, color: Colors.white60)),
+    const Text('Provider keys remain on Railway. NVIDIA chat/search indicators require real provider tests. Kumo status only confirms API reachability; it is not a prediction or a live signal until a validated target/schema is wired into the engine.', style: TextStyle(fontSize: 12, color: Colors.white60)),
   ]);
 }
 
