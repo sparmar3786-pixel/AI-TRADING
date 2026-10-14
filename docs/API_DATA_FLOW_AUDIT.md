@@ -50,3 +50,34 @@ This is an evidence-based audit, not a claim that all tabs are now end-to-end ve
 - **Verification:** Python unit tests passed after the credential and SMC test fixes. Railway's `ai-trading-signals-api` deployment for the environment-variable fix completed successfully and its `/health` startup check returned HTTP 200. Flutter analysis and widget/API tests passed; APK workflow run `38443313114` completed successfully and published artifact `ai-trading-apk-274` (39,304,610 bytes; expires 27 Oct 2026).
 - **Still requires runtime confirmation:** a new authenticated device request must confirm Angel One login, fresh exchange timestamps, option-chain quotes, WebSocket tick freshness, and real NVIDIA/OpenRouter inference. A successful health check alone does not prove those paths.
 
+
+
+## Full system / data-flow audit — 14 Oct 2026
+
+### Production evidence captured during audit
+- Railway production project `humble-optimism`: `ai-trading-signals-api` is deployed from `sparmar3786-pixel/AI-TRADING`, branch `main`; deployment for merge `7e9f2d491b3cf4c33f2922706d74d7faf98046e9` reported `SUCCESS`.
+- Last six hours at audit time: 2,148 HTTP requests, 2,144 2xx, 3 4xx, 1 5xx. The error-rate tool reported one 5xx and 3 client errors; interpret the returned percentage alongside bucket/window boundaries.
+- Response-time distribution showed p50 8 ms, p90 31 ms, p95 5,296 ms, p99 16,516 ms. Recent /v1/option-chain calls took about 5.4–7.3 seconds; cached /v1/signals requests commonly returned in 8–26 ms.
+- Recent logs contain repeated 200 responses for /health, /v1/signals, /v1/system/diagnostics, /v1/angel/status and /v1/ai/status. Client-closed WebSocket requests (499) also occur. HTTP 200 confirms route response, not fresh Angel One quotes or successful AI inference.
+- Railway variable names include `KUMO_NVIDIA_API_KEY`, `KUMO_NIM_BASE_URL` and legacy AI variables including `GEMINI_API_KEY`. Secret values were not read or reproduced. Current merged code no longer selects Gemini; remove the stale variable only after checking whether any other service still depends on it.
+
+### Confirmed structure / integration gaps
+1. Flutter routed `/v1/ai/chat` to `BACKEND_URL`, while NVIDIA chat/review/status used `SIGNAL_BACKEND_URL`. Different AI tabs could hit different deployments and environment variables.
+2. Exa/Tavily status/test and Kumo endpoints existed in Python but the Flutter API route allowlist did not consistently route them to AI-TRADING. Kumo had no Flutter client methods or AI Access status display.
+3. `/v1/ai/kumo/status` checks hosted `/models`: reachability/auth only, not successful prediction. `/v1/ai/kumo/predict` requires the full Universal TFM envelope (`model`, `task`, `schema`, `context`, `predict`, `output`) and target-labeled context rows. The repo does not yet define a validated historical target/features pipeline to safely feed Kumo into live quant signals. Do not guess target labels or promote its output to a trade.
+4. Chat and signal review use NVIDIA hosted chat completions with OpenRouter fallback. Kumo Tabular is a separate structured-prediction model, not a general chat replacement. The configured NVIDIA key must be entitled for the selected chat model; a Kumo-only key may work for Kumo but fail chat inference.
+5. Periodic refresh and Flow Monitor can create concurrent reads. Cached signal reads are usually fast in the captured window, but option-chain reads remain multi-second and WebSocket clients sometimes close early. Stage timings and load checks are needed before claiming end-to-end low latency.
+6. Strategy suite traces explicitly report `ai_consumed=false`, `research_engine_received=false`, and `trading_setup_received=false`. AI chat may receive a strategy summary in prompt context, but that does not prove semantic use or downstream propagation.
+
+### Changes in branch `audit/ai-dataflow-kumo-wiring`
+- Route AI chat/status/provider-test/search-test/Kumo endpoints through the AI-TRADING signal backend.
+- Add Flutter API methods for Kumo status and prediction; the prediction method accepts a caller-provided schema-complete envelope and does not fabricate training labels.
+- Add Kumo reachability visibility to AI Access and label it as reachability-only, not inference-ready.
+- Add API URI regression tests for unified AI/search/Kumo routing.
+
+### Verification gates before declaring fully working
+- CI: Python tests, Flutter analyze, widget/API URI tests, release and ARM64 APK jobs all green on the audit branch.
+- Runtime: authenticated device request to `/v1/ai/kumo/status`; one representative Kumo prediction using validated target/schema; real NVIDIA chat probe and OpenRouter fallback test.
+- Market data: Angel One authenticated session, fresh exchange timestamps, option quotes/Greeks, WebSocket tick age and option-chain freshness during NSE/MCX sessions.
+- Flow: measure /v1/signals and /v1/option-chain p50/p95/p99, WebSocket reconnects, client 499 frequency and concurrency behavior after route changes.
+- Safety: deterministic WAIT remains authoritative unless required data/quant/risk checks pass; AI/Kumo must never promote blocked signals or submit broker orders.
