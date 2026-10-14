@@ -10,11 +10,10 @@ const _smcUnderlyings = [..._smcIndexes, ..._smcCommodities];
 /// Multi-timeframe SMC/ICT chart tab. Consumes the same backend market and
 /// signal snapshots as the rest of the app; no synthetic candle fallback.
 class SmcChartPage extends StatefulWidget {
-  const SmcChartPage({required this.index, required this.market, required this.signal, required this.ai, required this.onIndexChanged, required this.onOpenAiChat, super.key});
+  const SmcChartPage({required this.index, required this.market, required this.signal, required this.ai, required this.onIndexChanged, super.key});
   final String index;
   final Map<String,dynamic> market, signal, ai;
   final ValueChanged<String> onIndexChanged;
-  final VoidCallback onOpenAiChat;
   @override State<SmcChartPage> createState()=>_SmcChartPageState();
 }
 class _SmcChartPageState extends State<SmcChartPage> {
@@ -190,13 +189,12 @@ class _SmcChartPageState extends State<SmcChartPage> {
         if(_engineError!=null) Text('Backend analysis error: $_engineError',style:const TextStyle(color:Colors.redAccent)),
         const Text('The server result is separate from the visual overlay. Missing timeframes, stale/missing candles or unconfirmed structure must remain NO TRADE.',style:TextStyle(fontSize:11,color:Colors.white60)),
       ]))),
-      Card(child:ListTile(leading:const Icon(Icons.psychology_alt),title:const Text('AI validation context'),subtitle:Text(aiText,maxLines:4,overflow:TextOverflow.ellipsis),trailing:const Icon(Icons.open_in_new),onTap:widget.onOpenAiChat)),
+      Card(child:ListTile(leading:const Icon(Icons.psychology_alt),title:const Text('AI validation context'),subtitle:Text(aiText,maxLines:4,overflow:TextOverflow.ellipsis),trailing:const Icon(Icons.verified_user_outlined))),
       if(showLiquidity) Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
         const Text('LIQUIDITY MAP',style:TextStyle(fontWeight:FontWeight.w900)),
         Text('BSL (equal highs): ${(a['bsl'] as List).map((v)=>(v as num).toStringAsFixed(2)).join(', ')}'),
         Text('SSL (equal lows): ${(a['ssl'] as List).map((v)=>(v as num).toStringAsFixed(2)).join(', ')}'),
       ]))),
-      FilledButton.icon(onPressed:widget.onOpenAiChat,icon:const Icon(Icons.psychology),label:const Text('Open AI Chat with current instrument selected')),
     ]);
   }
 }
