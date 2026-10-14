@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'api.dart';
 
 /// Displays the backend's 15-minute Exa/Tavily news refresh and NVIDIA summary.
@@ -84,7 +85,10 @@ class _MarketIntelligencePageState extends State<MarketIntelligencePage> {
         timeout: const Duration(seconds: 15),
       );
       if (!mounted) return;
-      setState(() => _state = result);
+      setState(() {
+        _state = result;
+        _loading = false;
+      });
       await _load(silent: true);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
@@ -285,17 +289,20 @@ class _MarketIntelligencePageState extends State<MarketIntelligencePage> {
   }
 
   Future<void> _openHeadline(String url) async {
-    // Keep the news list safe and avoid adding a new navigation dependency.
-    // The full URL remains visible/copyable in the evidence payload if no browser action is available.
-    await showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Source URL'),
-        content: SelectableText(url),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
-        ],
-      ),
-    );
+    final uri = Uri.tryParse(url);
+    if (uri == null || uri.scheme != 'https') return;
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened && mounted) {
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Source URL'),
+          content: SelectableText(url),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+          ],
+        ),
+      );
+    }
   }
 }
