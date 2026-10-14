@@ -59,6 +59,23 @@ class KumoQuantBridgeTests(unittest.TestCase):
         self.assertEqual(snapshot["signals"]["NIFTY"]["quant_engine"], {"decision": "WAIT", "passed_layers": 2})
         upstream.assert_called_once()
 
+    def test_hosted_catalog_url_requires_dedicated_kumo_key(self):
+        hosted_predictions_url = "https://ai.api.nvidia.com/v1/structured-data/nvidia/kumo-tabular/predictions"
+        with patch.dict(os.environ, {
+            "KUMO_NIM_BASE_URL": hosted_predictions_url,
+            "KUMO_NVIDIA_API_KEY": "",
+            "NVIDIA_API_KEY": "chat-only-key",
+        }, clear=False), \
+             patch.object(kumo_nim_api, "_http_json") as upstream:
+            response = self.client.get("/v1/ai/kumo/status", headers=self.headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["mode"], "hosted_api_catalog")
+        self.assertFalse(body["configured"])
+        self.assertFalse(body["ready"])
+        self.assertIn("KUMO_NVIDIA_API_KEY", body["message"])
+        upstream.assert_not_called()
+
     def test_kumo_quant_bridge_rejects_unsupported_index(self):
         envelope = {
             "model": "kumo-tabular",
