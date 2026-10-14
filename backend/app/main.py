@@ -419,7 +419,7 @@ def _refresh_market_intelligence_once() -> None:
         summary_model: str | None = None
         summary_error: str | None = None
         if api_key:
-            model = os.getenv("NVIDIA_CHAT_MODEL", "nvidia/llama-3.3-nemotron-super-49b-v1.5").strip()
+            model = os.getenv("NVIDIA_CHAT_MODEL", "z-ai/glm-5.3").strip()
             endpoint = os.getenv("NVIDIA_CHAT_BASE_URL", "https://integrate.api.nvidia.com/v1/chat/completions").strip()
             messages = [
                 {"role": "system", "content": (
@@ -3058,7 +3058,8 @@ def _provider_config_fingerprint(provider: str) -> str:
     if provider == "nvidia":
         values = (
             os.getenv("NVIDIA_API_KEY") or "",
-            os.getenv("NVIDIA_CHAT_MODEL", "nvidia/llama-3.3-nemotron-super-49b-v1.5"),
+            os.getenv("NVIDIA_CHAT_MODEL", "z-ai/glm-5.3"),
+            os.getenv("NVIDIA_CHAT_FALLBACK_MODEL", "qwen/qwen2.5-coder-32b-instruct"),
             os.getenv("NVIDIA_CHAT_BASE_URL", "https://integrate.api.nvidia.com/v1/chat/completions"),
         )
     elif provider == "openrouter":
@@ -3076,7 +3077,7 @@ def _provider_config_fingerprint(provider: str) -> str:
 def ai_status(_: str = Depends(_device)) -> dict[str, Any]:
     # NVIDIA is primary; OpenRouter is an optional fallback.
     providers = [
-        ("nvidia", ("NVIDIA_API_KEY",), os.getenv("NVIDIA_CHAT_MODEL", "nvidia/llama-3.3-nemotron-super-49b-v1.5")),
+        ("nvidia", ("NVIDIA_API_KEY",), os.getenv("NVIDIA_CHAT_MODEL", "z-ai/glm-5.3")),
         ("openrouter", ("OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY"), os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct")),
     ]
     selected = next((item for item in providers if _provider_key_present(*item[1])), None)
@@ -3237,7 +3238,7 @@ def test_ai_providers(_: str = Depends(_device)) -> dict[str, Any]:
     )
     checks: list[dict[str, Any]] = []
     nvidia_key = (os.getenv("NVIDIA_API_KEY") or "").strip()
-    nvidia_model = os.getenv("NVIDIA_CHAT_MODEL", "nvidia/llama-3.3-nemotron-super-49b-v1.5").strip()
+    nvidia_model = os.getenv("NVIDIA_CHAT_MODEL", "z-ai/glm-5.3").strip()
     if nvidia_key:
         try:
             probe = _run_openai_compatible_completion(
@@ -3306,7 +3307,7 @@ def review_signal_with_nvidia(payload: dict[str, Any], _: str = Depends(_device)
     providers: list[tuple[str, str, str]] = []
     nvidia_key = (os.getenv("NVIDIA_API_KEY") or "").strip()
     if nvidia_key:
-        providers.append(("nvidia", nvidia_key, os.getenv("NVIDIA_CHAT_MODEL", "nvidia/llama-3.3-nemotron-super-49b-v1.5").strip()))
+        providers.append(("nvidia", nvidia_key, os.getenv("NVIDIA_CHAT_MODEL", "z-ai/glm-5.3").strip()))
     openrouter_key = (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPEN_ROUTER_API_KEY") or "").strip()
     if openrouter_key:
         providers.append(("openrouter", openrouter_key, os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct").strip()))
@@ -3480,7 +3481,7 @@ def _provider_json_with_retry(request: urllib.request.Request, *, timeout: float
     raise RuntimeError(f"{provider}_request_failed")
 
 
-def _run_openai_compatible_completion(
+def _run_openai_compatible_completion_once(
     api_key: str, model: str, messages: list[dict[str, str]], *,
     provider: str, endpoint: str, referer: str | None = None,
 ) -> dict[str, Any]:
@@ -3520,6 +3521,36 @@ def _run_openai_compatible_completion(
         raise RuntimeError(f"{provider}_http_{exc.code}") from None
     except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
         raise RuntimeError(f"{provider}_{type(exc).__name__.lower()}") from None
+
+
+def _run_openai_compatible_completion(
+    api_key: str, model: str, messages: list[dict[str, str]], *,
+    provider: str, endpoint: str, referer: str | None = None,
+) -> dict[str, Any]:
+    """Try the primary NVIDIA model first, then a configured NVIDIA fallback."""
+    candidates = [model]
+    if provider == "nvidia":
+        fallback_model = os.getenv(
+            "NVIDIA_CHAT_FALLBACK_MODEL", "qwen/qwen2.5-coder-32b-instruct"
+        ).strip()
+        if fallback_model and fallback_model not in candidates:
+            candidates.append(fallback_model)
+    last_error: Exception | None = None
+    for candidate in candidates:
+        try:
+            result = _run_openai_compatible_completion_once(
+                api_key, candidate, messages, provider=provider,
+                endpoint=endpoint, referer=referer,
+            )
+            if candidate != model:
+                result["fallback_used"] = True
+                result["primary_model"] = model
+            return result
+        except Exception as exc:
+            last_error = exc
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError(f"{provider}_model_not_configured")
 
 
 @app.post("/v1/ai/chat")
@@ -3590,7 +3621,7 @@ def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
             try:
                 if provider == "nvidia":
                     result = _run_openai_compatible_completion(
-                        api_key, os.getenv("NVIDIA_CHAT_MODEL", "nvidia/llama-3.3-nemotron-super-49b-v1.5").strip(), messages,
+                        api_key, os.getenv("NVIDIA_CHAT_MODEL", "z-ai/glm-5.3").strip(), messages,
                         provider="nvidia",
                         endpoint=os.getenv("NVIDIA_CHAT_BASE_URL", "https://integrate.api.nvidia.com/v1/chat/completions").strip(),
                     )

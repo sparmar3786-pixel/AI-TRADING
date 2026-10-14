@@ -109,7 +109,7 @@ class BackendApiTests(unittest.TestCase):
                         "conflicting_direction": False,
                         "reason": "All checks agree.",
                     }),
-                    "model": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+                    "model": "z-ai/glm-5.3",
                     "latency_ms": 25.0,
                 },
             ),
@@ -132,7 +132,7 @@ class BackendApiTests(unittest.TestCase):
                         "conflicting_direction": True,
                         "reason": "Direction conflicts.",
                     }),
-                    "model": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+                    "model": "z-ai/glm-5.3",
                     "latency_ms": 25.0,
                 },
             ),
@@ -549,7 +549,7 @@ class BackendApiTests(unittest.TestCase):
                 return json.dumps({"choices": [{"message": {"content": "Snapshot reviewed; risk gate remains WAIT."}}]}).encode()
 
         with patch.object(api, "_get_signals", return_value=payload), \
-             patch.dict(os.environ, {"NVIDIA_API_KEY": "test-key", "NVIDIA_CHAT_MODEL": "nvidia/llama-3.3-nemotron-super-49b-v1.5", "KUMO_NVIDIA_API_KEY": "", "OPENAI_API_KEY": "openai-key-must-not-be-used", "OPENAI_MODEL": "gpt-4o-mini", "OPENROUTER_API_KEY": "router-key-must-not-be-used"}, clear=False), \
+             patch.dict(os.environ, {"NVIDIA_API_KEY": "test-key", "NVIDIA_CHAT_MODEL": "z-ai/glm-5.3", "KUMO_NVIDIA_API_KEY": "", "OPENAI_API_KEY": "openai-key-must-not-be-used", "OPENAI_MODEL": "gpt-4o-mini", "OPENROUTER_API_KEY": "router-key-must-not-be-used"}, clear=False), \
              patch.object(api.urllib.request, "urlopen", return_value=FakeResponse()):
             response = self.client.post(
                 "/v1/ai/chat", headers=self.device_headers,
