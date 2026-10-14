@@ -1124,6 +1124,34 @@ def _apply_strategy_confluence_filter(
     return result
 
 
+def _completed_candle_rows(
+    rows: list[dict[str, Any]],
+    timeframe_minutes: int = 5,
+    *,
+    now: datetime | None = None,
+) -> list[dict[str, Any]]:
+    """Drop candles whose start + timeframe has not elapsed yet."""
+    if timeframe_minutes < 1:
+        raise ValueError("timeframe_minutes must be positive")
+    current = now or _utc_now()
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    current = current.astimezone(timezone.utc)
+    completed: list[dict[str, Any]] = []
+    for row in rows:
+        stamp_text = row.get("timestamp")
+        try:
+            stamp = datetime.fromisoformat(str(stamp_text))
+        except (TypeError, ValueError):
+            continue
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        stamp = stamp.astimezone(timezone.utc)
+        if stamp + timedelta(minutes=timeframe_minutes) <= current:
+            completed.append(row)
+    return completed
+
+
 def _index_snapshot(
     adapter: AngelOneReadOnly,
     rows: list[dict[str, Any]],
@@ -1423,6 +1451,8 @@ def _index_snapshot(
             "open": opened, "high": high, "low": low, "close": closed,
             "volume": _number(candle[5]),
         })
+    # Do not feed an in-progress 5-minute candle to indicators or strategy votes.
+    chart_5m = _completed_candle_rows(chart_5m, timeframe_minutes=5)
     chart_5m = chart_5m[-250:]
     chart_1h = _aggregate_hourly_chart_rows(chart_5m)
     chart_1d: list[dict[str, Any]] = []
