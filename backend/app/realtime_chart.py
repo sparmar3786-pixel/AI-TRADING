@@ -15,7 +15,7 @@ from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 
-router = APIRouter(tags=["realtime-chart"])
+router = APIRouter(tags=["realtime-chart"])\n_async_redis_client = None\n_async_redis_lock = asyncio.Lock()
 MAX_CANDLES = max(100, min(int(os.getenv("CHART_MAX_CANDLES", "2000")), 5000))
 THROTTLE_SECONDS = max(0.1, min(float(os.getenv("CHART_DELTA_THROTTLE_MS", "200")) / 1000, 1.0))
 _memory: dict[str, deque[dict[str, Any]]] = defaultdict(lambda: deque(maxlen=MAX_CANDLES))
@@ -44,18 +44,40 @@ def _redis():
     except Exception:
         return None
 
+async def _async_redis():
+    """Return one shared async Redis client for snapshot and WebSocket traffic."""
+    global _async_redis_client
+    url = os.getenv("REDIS_URL", "").strip()
+    if not url:
+        return None
+    if _async_redis_client is not None:
+        return _async_redis_client
+    async with _async_redis_lock:
+        if _async_redis_client is not None:
+            return _async_redis_client
+        try:
+            from redis import asyncio as aioredis
+            _async_redis_client = aioredis.Redis.from_url(
+                url, decode_responses=True, socket_connect_timeout=1, socket_timeout=1
+            )
+        except Exception:
+            return None
+        return _async_redis_client
+
 
 @router.get("/snapshot")
 async def candle_snapshot(symbol: str = Query("BANKNIFTY", max_length=32),
                           tf: str = Query("1m", max_length=8),
                           limit: int = Query(1000, ge=1, le=5000)) -> dict[str, Any]:
     key = _key(symbol, tf)
-    redis_client = _redis()
+    redis_client = await _async_redis()
     if redis_client is not None:
         try:
-            rows = await asyncio.to_thread(redis_client.lrange, f"candles:{key}", -limit, -1)
-            cur = await asyncio.to_thread(redis_client.get, f"cur:{key}")
-            seq = await asyncio.to_thread(redis_client.get, f"seq:{key}")
+            pipe = redis_client.pipeline(transaction=False)
+            pipe.lrange(f"candles:{key}", -limit, -1)
+            pipe.get(f"cur:{key}")
+            pipe.get(f"seq:{key}")
+            rows, cur, seq = await pipe.execute()
             candles = [json.loads(row) for row in rows]
             current = json.loads(cur) if cur else None
             return {"symbol": symbol.upper(), "tf": tf, "candles": candles,
@@ -132,20 +154,19 @@ async def chart_delta_socket(websocket: WebSocket) -> None:
         return
     await websocket.accept()
     last_seq = int(websocket.query_params.get("lastSeq") or "0")
-    redis_client = _redis()
+    redis_client = await _async_redis()
     pubsub = None
-    if redis_client is not None:
-        try:
-            pubsub = redis_client.pubsub()
-            await asyncio.to_thread(pubsub.subscribe, f"chart.{symbol}.{tf}")
-        except Exception:
-            pubsub = None
     try:
+        if redis_client is not None:
+            pubsub = redis_client.pubsub()
+            await pubsub.subscribe(f"chart.{symbol}.{tf}")
         while True:
             sent = False
             if pubsub is not None:
                 try:
-                    message = await asyncio.to_thread(pubsub.get_message, True, 0.05)
+                    message = await asyncio.wait_for(
+                        pubsub.get_message(ignore_subscribe_messages=True, timeout=0.1), timeout=0.25
+                    )
                     if message and message.get("type") == "message":
                         data = json.loads(message["data"])
                         seq = int(data.get("seq") or 0)
@@ -155,7 +176,13 @@ async def chart_delta_socket(websocket: WebSocket) -> None:
                                                            "received": seq, "ts_server": time.time()})
                             await websocket.send_json(data)
                             last_seq, sent = seq, True
+                except asyncio.TimeoutError:
+                    pass
                 except Exception:
+                    try:
+                        await pubsub.aclose()
+                    except Exception:
+                        pass
                     pubsub = None
             if not sent:
                 async with _lock:
@@ -172,11 +199,11 @@ async def chart_delta_socket(websocket: WebSocket) -> None:
     finally:
         if pubsub is not None:
             try:
-                await asyncio.to_thread(pubsub.close)
+                await pubsub.aclose()
             except Exception:
                 pass
         if redis_client is not None:
             try:
-                await asyncio.to_thread(redis_client.close)
+                await redis_client.aclose()
             except Exception:
                 pass
