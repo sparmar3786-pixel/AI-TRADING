@@ -273,8 +273,9 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     Map<String, dynamic> latestSystemDiagnostics = const {};
     String? latestSystemDiagnosticsError;
     try {
-      // Keep the existing AI/chat backend separate. Market, Angel One, account
-      // and paper-ledger routes are dispatched by FreshApi to AI-TRADING.
+      // Keep a lightweight health check for the legacy BACKEND_URL separate.
+      // All AI provider/chat, market, Angel One, account and paper-ledger routes
+      // are dispatched to AI-TRADING through FreshApi's route map.
       final api = FreshApi(backendUrl);
       final signalApi = FreshApi(signalBackendUrl);
       // The AI/chat backend is optional and independent of the Angel One
@@ -295,9 +296,9 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       try { liveStatus = await signalApi.liveExecutionStatus(); } catch (_) {}
       Map<String,dynamic> providerStatus = const {};
       try {
-        // Cloud AI credentials/status belong to the AI/chat backend; market
-        // feed health remains owned by signalApi.
-        providerStatus = await api.aiStatus();
+        // AI provider status and market feed status are both served by the
+        // AI-TRADING backend; the legacy host is checked only for compatibility.
+        providerStatus = await signalApi.aiStatus();
         if (providerStatus['providers'] is! Map && providerStatus['provider_health'] is List) {
           final normalized = <String, dynamic>{};
           for (final item in (providerStatus['provider_health'] as List).whereType<Map>()) {
