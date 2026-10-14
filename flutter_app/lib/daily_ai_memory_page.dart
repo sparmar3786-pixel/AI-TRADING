@@ -65,7 +65,7 @@ class _DailyAiMemoryPageState extends State<DailyAiMemoryPage> {
             Card(child: ListTile(
               leading: const Icon(Icons.calendar_month),
               title: Text(_document['date']?.toString() ?? 'Today'),
-              subtitle: Text('${snapshots.length} saved market snapshot(s) • daily market JSON + separate AI chat journal'),
+              subtitle: Text('${snapshots.length} saved market snapshot(s) • daily market JSON + AI market notes'),
               trailing: _loading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.check_circle_outline),
             )),
             if (DailyAiMemory.lastWriteError != null)
