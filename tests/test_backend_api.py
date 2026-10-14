@@ -405,6 +405,29 @@ class BackendApiTests(unittest.TestCase):
         self.assertIn("25000.0", body["answer"])
         self.assertIn("missing option evidence", body["answer"])
 
+    def test_kumo_key_does_not_configure_nvidia_chat(self):
+        payload = {
+            "market": {"NIFTY": {"ltp": 25000.0, "age_seconds": 3, "live": True}},
+            "signals": {"NIFTY": {"decision": "WAIT", "reasons": ["risk gate wait"]}},
+        }
+        with patch.object(api, "_get_signals", return_value=payload), \\
+             patch.dict(os.environ, {
+                 "NVIDIA_API_KEY": "", "KUMO_NVIDIA_API_KEY": "kumo-only-key",
+                 "OPENROUTER_API_KEY": "", "OPEN_ROUTER_API_KEY": "",
+             }, clear=False), \\
+             patch.object(api, "_run_openai_compatible_completion") as completion:
+            status = self.client.get("/v1/ai/status", headers=self.device_headers)
+            response = self.client.post(
+                "/v1/ai/chat", headers=self.device_headers,
+                json={"index": "NIFTY", "question": "Explain the current signal", "history": []},
+            )
+        self.assertEqual(status.status_code, 200, status.text)
+        self.assertFalse(status.json()["providers"]["nvidia"]["configured"])
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["provider"], "deterministic_fallback")
+        self.assertFalse(response.json()["llm_used"])
+        completion.assert_not_called()
+
     def test_ai_chat_uses_openrouter_when_nvidia_is_unconfigured(self):
         payload = {"market": {"NIFTY": {
                        "ltp": 25000.0, "age_seconds": 3, "live": True,
