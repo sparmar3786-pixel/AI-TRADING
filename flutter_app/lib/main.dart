@@ -339,6 +339,9 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     _refreshing = true;
     Map<String, dynamic> latestSystemDiagnostics = const {};
     String? latestSystemDiagnosticsError;
+    // Track the signal backend health independently from the optional legacy
+    // chat backend. Do not mark the app online if this check fails.
+    var signalBackendHealthy = false;
     try {
       // Keep a lightweight health check for the legacy BACKEND_URL separate.
       // All AI provider/chat, market, Angel One, account and paper-ledger routes
@@ -391,6 +394,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       Map<String,dynamic> s;
       try {
         await signalApi.health();
+        signalBackendHealthy = true;
         s = await signalApi.signals(emaFast: emaFast, emaSlow: emaSlow);
         s = await _applyTenMinuteSignalGate(s);
         // API success is independent of local cache persistence. A full device,
@@ -454,7 +458,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       }
       if (!mounted) return;
       setState(() {
-        apiOnline = true;
+        apiOnline = signalBackendHealthy;
         systemDiagnostics = latestSystemDiagnostics;
         systemDiagnosticsError = latestSystemDiagnosticsError;
         angelOnline = a['authenticated'] == true;
