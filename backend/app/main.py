@@ -440,7 +440,7 @@ def _refresh_market_intelligence_once() -> None:
             summary_error = "NVIDIA_API_KEY_NOT_CONFIGURED"
 
         now = _utc_now()
-        next_refresh = (now + timedelta(seconds=MARKET_INTELLIGENCE_REFRESH_SECONDS)).isoformat()
+        next_refresh = (datetime.fromisoformat(observed_at) + timedelta(seconds=MARKET_INTELLIGENCE_REFRESH_SECONDS)).isoformat()
         status = "READY" if summary and unique_articles else (
             "NVIDIA_SUMMARY_WITHOUT_NEWS" if summary else
             "NEWS_READY_NVIDIA_UNAVAILABLE" if unique_articles else "REFRESH_FAILED"
