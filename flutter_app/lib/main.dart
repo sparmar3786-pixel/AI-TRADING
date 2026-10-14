@@ -302,7 +302,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           final normalized = <String, dynamic>{};
           for (final item in (providerStatus['provider_health'] as List).whereType<Map>()) {
             final name = (item['name'] ?? '').toString().toLowerCase();
-            if (!['gemini', 'openrouter'].contains(name)) continue;
+            if (!['nvidia', 'openrouter'].contains(name)) continue;
             normalized[name] = <String, dynamic>{
               'configured': true,
               'ok': false,
@@ -310,7 +310,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
               'model': item['model'] ?? item['model_name'] ?? 'not reported',
             };
           }
-          for (final name in ['gemini', 'openrouter']) {
+          for (final name in ['nvidia', 'openrouter']) {
             normalized.putIfAbsent(name, () => <String, dynamic>{
               'configured': false, 'ok': false, 'status': 'not_configured', 'model': '—',
             });
@@ -1408,8 +1408,8 @@ class TradingSetupPage extends StatelessWidget {
         final indicatorReady = signals.values.whereType<Map>().any((row) => row['indicators'] is Map);
         final validationReady = signals.values.whereType<Map>().any((row) => row['live_validation'] is Map);
         final providerMap = Map<String, dynamic>.from(aiProviders['providers'] as Map? ?? const {});
-        final geminiProvider = Map<String, dynamic>.from(providerMap['gemini'] as Map? ?? const {});
-        final geminiReady = geminiProvider['ok'] == true;
+        final nvidiaProvider = Map<String, dynamic>.from(providerMap['nvidia'] as Map? ?? const {});
+        final nvidiaReady = nvidiaProvider['ok'] == true;
         final aiReady = ai.values.whereType<Map>().any((row) => row['action'] != null);
         final checks = <(String, bool, String)>[
           ('1. Backend API', apiOnline, backendUrl),
@@ -1419,7 +1419,7 @@ class TradingSetupPage extends StatelessWidget {
           ('5. Option chain / OI', optionRows > 0, '$optionRows option quotes in latest snapshots'),
           ('6. Signal risk validation', validationReady, 'Backend supplies explicit fail-closed checks'),
           ('7. Historical backtest', angelOnline, 'Historical candle replay requires an authenticated Angel One session'),
-          ('8. Gemini provider connectivity', geminiReady, (geminiProvider['status'] ?? 'Real Gemini test required').toString()),
+          ('8. NVIDIA provider connectivity', nvidiaReady, (nvidiaProvider['status'] ?? 'Real NVIDIA test required').toString()),
           ('9. AI signal analysis', aiReady, 'Review is advisory; provider connectivity alone is not a signal decision'),
           ('10. Execution / order status', liveStatus.isNotEmpty, '${liveStatus['mode'] ?? 'Status not returned'} • live orders remain gated by risk and explicit approval'),
         ];
@@ -1446,7 +1446,7 @@ class TradingSetupPage extends StatelessWidget {
         ])));
       }),
       const SizedBox(height: 8),
-      GeminiSignalReview(backendUrl: backendUrl, selectedIndex: selectedIndex),
+      NvidiaSignalReview(backendUrl: backendUrl, selectedIndex: selectedIndex),
       const SizedBox(height: 8),
       const Text('Broker choice: Angel One SmartAPI. No Zerodha/Kite integration is required for this app.', style: TextStyle(color: Color(0xFF12D6FF), fontWeight: FontWeight.w700)),
       const SizedBox(height: 12),
@@ -1510,7 +1510,7 @@ class DashboardPage extends StatelessWidget {
     final s=Map<String,dynamic>.from(signals[index] as Map? ?? const{}),m=Map<String,dynamic>.from(market[index] as Map? ?? const{});
     final f=Map<String,dynamic>.from(s['order_flow'] as Map? ?? m['order_flow'] as Map? ?? const{}),i=Map<String,dynamic>.from(s['indicators'] as Map? ?? const{}),v=Map<String,dynamic>.from(s['live_validation'] as Map? ?? const{}),g=(s['guards'] as List? ?? const[]);
     final providers=Map<String,dynamic>.from(aiProviders['providers'] as Map? ?? const{});
-    final gemini=Map<String,dynamic>.from(providers['gemini'] as Map? ?? const{});
+    final nvidia=Map<String,dynamic>.from(providers['nvidia'] as Map? ?? const{});
     final openrouter=Map<String,dynamic>.from(providers['openrouter'] as Map? ?? const{});
     final d=(s['decision']??'WAIT').toString().toUpperCase(),fresh=s['data_fresh']==true&&connected,buy=_n(f['buy_volume']),sell=_n(f['sell_volume']),total=buy+sell;
     final layers=<List<dynamic>>[
@@ -1545,7 +1545,7 @@ class DashboardPage extends StatelessWidget {
       const SizedBox(height:10),_status('Market feed',fresh?'LIVE VERIFIED':'NOT VERIFIED',fresh),
       const Section('AI PROVIDERS • GEMINI + OPENROUTER'),
       Card(child: Column(children: [
-        ListTile(leading: Icon(Icons.circle, color: gemini['ok'] == true ? Colors.greenAccent : Colors.redAccent, size: 12), title: const Text('Gemini'), subtitle: Text((gemini['status'] ?? 'STATUS NOT CHECKED').toString()), trailing: Text((gemini['model'] ?? '—').toString(), style: const TextStyle(fontSize: 10))),
+        ListTile(leading: Icon(Icons.circle, color: nvidia['ok'] == true ? Colors.greenAccent : Colors.redAccent, size: 12), title: const Text('NVIDIA'), subtitle: Text((nvidia['status'] ?? 'STATUS NOT CHECKED').toString()), trailing: Text((nvidia['model'] ?? '—').toString(), style: const TextStyle(fontSize: 10))),
         ListTile(leading: Icon(Icons.circle, color: openrouter['ok'] == true ? Colors.greenAccent : Colors.redAccent, size: 12), title: const Text('OpenRouter'), subtitle: Text((openrouter['status'] ?? 'STATUS NOT CHECKED').toString()), trailing: Text((openrouter['model'] ?? '—').toString(), style: const TextStyle(fontSize: 10))),
       ])),
       const SizedBox(height:18),const Text('ORDER FLOW',style:TextStyle(fontSize:15,fontWeight:FontWeight.w900,letterSpacing:1)),
@@ -1885,7 +1885,7 @@ class SignalPage extends StatelessWidget {
     final researchChecks = Map<String, dynamic>.from(researchPack['checks'] as Map? ?? const {});
     final aiDecision = Map<String, dynamic>.from(ai[index] as Map? ?? const {});
     final providerMap = Map<String, dynamic>.from(aiProviders['providers'] as Map? ?? const {});
-    final geminiProvider = Map<String, dynamic>.from(providerMap['gemini'] as Map? ?? const {});
+    final nvidiaProvider = Map<String, dynamic>.from(providerMap['nvidia'] as Map? ?? const {});
     final openrouterProvider = Map<String, dynamic>.from(providerMap['openrouter'] as Map? ?? const {});
     final agentAnalysis = Map<String, dynamic>.from(aiDecision['agent_analysis'] as Map? ?? const {});
     final specialists = Map<String, dynamic>.from(agentAnalysis['specialists'] as Map? ?? const {});
@@ -1967,9 +1967,9 @@ class SignalPage extends StatelessWidget {
       Card(child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          InfoRow('AI mode', (agentAnalysis['mode'] ?? (geminiProvider['ok'] == true ? 'GEMINI CONNECTED • PRIMARY REVIEW' : openrouterProvider['ok'] == true ? 'OPENROUTER CONNECTED • FALLBACK REVIEW' : 'WAITING FOR GEMINI / OPENROUTER PROVIDER TEST')).toString()),
-          InfoRow('Gemini provider', (geminiProvider['status'] ?? 'STATUS NOT CHECKED').toString()),
-          InfoRow('Gemini model', (geminiProvider['model'] ?? '—').toString()),
+          InfoRow('AI mode', (agentAnalysis['mode'] ?? (nvidiaProvider['ok'] == true ? 'GEMINI CONNECTED • PRIMARY REVIEW' : openrouterProvider['ok'] == true ? 'OPENROUTER CONNECTED • FALLBACK REVIEW' : 'WAITING FOR GEMINI / OPENROUTER PROVIDER TEST')).toString()),
+          InfoRow('NVIDIA provider', (nvidiaProvider['status'] ?? 'STATUS NOT CHECKED').toString()),
+          InfoRow('NVIDIA model', (nvidiaProvider['model'] ?? '—').toString()),
           InfoRow('OpenRouter provider', (openrouterProvider['status'] ?? 'STATUS NOT CHECKED').toString()),
           InfoRow('OpenRouter model', (openrouterProvider['model'] ?? '—').toString()),
           InfoRow('Evidence supplied', (agentAnalysis['source_evidence_count'] ?? aiDecision['evidence_count'] ?? 0).toString()),
@@ -1994,8 +1994,8 @@ class SignalPage extends StatelessWidget {
           Text((agentAnalysis['safety_note'] ?? 'Specialist analysis appears after the cloud AI provider responds. Missing data must remain unavailable.').toString(), style: const TextStyle(fontSize: 11)),
         ]),
       )),
-      const Section('Gemini Signal Review'),
-      GeminiSignalReview(backendUrl: backendUrl, selectedIndex: index),
+      const Section('NVIDIA Signal Review'),
+      NvidiaSignalReview(backendUrl: backendUrl, selectedIndex: index),
             const Section('Live AI Validation'),
       Card(child:Padding(
         padding:const EdgeInsets.all(12),
@@ -2253,7 +2253,7 @@ class _AiAccessState extends State<AiAccessPage>{
       final result = await api.aiStatus();
       final raw = result['providers'];
       if (raw is Map) {
-        for (final name in ['gemini', 'openrouter']) {
+        for (final name in ['nvidia', 'openrouter']) {
           final value = raw[name];
           if (value is Map) next[name] = Map<String, dynamic>.from(value);
         }
@@ -2265,7 +2265,7 @@ class _AiAccessState extends State<AiAccessPage>{
         if (health is List) {
           for (final item in health.whereType<Map>()) {
             final name = (item['name'] ?? '').toString().toLowerCase();
-            if (!['gemini', 'openrouter'].contains(name)) continue;
+            if (!['nvidia', 'openrouter'].contains(name)) continue;
             next[name] = <String, dynamic>{
               'configured': true,
               'ok': false,
@@ -2276,7 +2276,7 @@ class _AiAccessState extends State<AiAccessPage>{
             };
           }
         }
-        for (final name in ['gemini', 'openrouter']) {
+        for (final name in ['nvidia', 'openrouter']) {
           next.putIfAbsent(name, () => <String, dynamic>{
             'configured': false, 'ok': false, 'working': false, 'status': 'not_configured',
           });
@@ -2296,7 +2296,7 @@ class _AiAccessState extends State<AiAccessPage>{
       final updated = <String, Map<String, dynamic>>{...providers};
       for (final item in checks.whereType<Map>()) {
         final name = (item['provider'] ?? '').toString();
-        if (name == 'gemini' || name == 'openrouter') {
+        if (name == 'nvidia' || name == 'openrouter') {
           final check = Map<String, dynamic>.from(item);
           check['configured'] = item['configured'] == true;
           check['status'] = check['ok'] == true ? 'ok' : (item['status'] ?? item['error'] ?? 'test_failed').toString();
@@ -2386,20 +2386,20 @@ class _AiAccessState extends State<AiAccessPage>{
     const Section('CLOUD AI • GEMINI CHAT + PROVIDER VALIDATION'),
     Card(child: ListTile(
       leading: Icon(
-        providers['gemini']?['ok'] == true ? Icons.cloud_done : Icons.cloud_off,
-        color: providers['gemini']?['ok'] == true ? const Color(0xFF35D39A) : const Color(0xFFFF6577),
+        providers['nvidia']?['ok'] == true ? Icons.cloud_done : Icons.cloud_off,
+        color: providers['nvidia']?['ok'] == true ? const Color(0xFF35D39A) : const Color(0xFFFF6577),
         size: 30,
       ),
-      title: const Text('Gemini Cloud Validation'),
+      title: const Text('NVIDIA Cloud Validation'),
       subtitle: Text(
-        '${providers['gemini']?['status'] ?? 'not tested'} • AI remains advisory; deterministic freshness and risk gates control trade eligibility.',
+        '${providers['nvidia']?['status'] ?? 'not tested'} • AI remains advisory; deterministic freshness and risk gates control trade eligibility.',
       ),
     )),
     FilledButton.icon(onPressed: working ? null : test, icon: const Icon(Icons.psychology), label: Text(working ? 'TESTING GEMINI + OPENROUTER…' : 'TEST GEMINI + OPENROUTER')),
     const SizedBox(height: 10),
     Card(child: Padding(padding: const EdgeInsets.all(12), child: Text(message))),
     const Section('LLM PROVIDERS • GEMINI + OPENROUTER'),
-    provider('gemini'), provider('openrouter'),
+    provider('nvidia'), provider('openrouter'),
     OutlinedButton.icon(onPressed: checking ? null : refresh, icon: const Icon(Icons.refresh), label: Text(checking ? 'CHECKING…' : 'REFRESH LLM STATUS')),
     const Section('SEARCH EVIDENCE • BACKEND CONFIGURED'),
     provider('exa'), provider('tavily'),
