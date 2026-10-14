@@ -2491,7 +2491,7 @@ def _provider_config_fingerprint(provider: str) -> str:
         )
     else:
         raise ValueError("Unsupported AI provider")
-    return hashlib.sha256("\\0".join(values).encode("utf-8")).hexdigest()
+    return hashlib.sha256(json.dumps(values, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 @app.get("/v1/ai/status")
