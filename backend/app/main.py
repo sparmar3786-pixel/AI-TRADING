@@ -14,7 +14,7 @@ import os
 import re
 import sys
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 import time
 import urllib.error
 import urllib.parse
@@ -104,6 +104,11 @@ _saved_meta: dict[str, Any] = {}
 _master_rows: list[dict[str, Any]] = []
 _master_loaded_at = 0.0
 _market_data_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="market-data")
+# A short cache absorbs aggressive mobile polling without masking market moves.
+# Signal gates independently enforce freshness and never treat cache age as a live tick.
+OPTION_CHAIN_CACHE_TTL_SECONDS = max(0.0, min(float(os.getenv("OPTION_CHAIN_CACHE_TTL_SECONDS", "2.0")), 5.0))
+OPTION_CHAIN_UPSTREAM_TIMEOUT_SECONDS = max(1.0, min(float(os.getenv("OPTION_CHAIN_UPSTREAM_TIMEOUT_SECONDS", "4.0")), 10.0))
+_option_chain_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
 _signal_cache: dict[str, Any] | None = None
 _signal_cache_at = 0.0
@@ -2060,6 +2065,18 @@ def market_ticks(_: str = Depends(_device)) -> dict[str, Any]:
 @app.get("/v1/option-chain")
 def option_chain(index: str = Query(default="NIFTY"), _: str = Depends(_device)) -> dict[str, Any]:
     index = index.strip().upper()
+    request_started = time.monotonic()
+    cached = _option_chain_cache.get(index)
+    if cached and OPTION_CHAIN_CACHE_TTL_SECONDS > 0:
+        cached_at, cached_payload = cached
+        cache_age = time.monotonic() - cached_at
+        if cache_age <= OPTION_CHAIN_CACHE_TTL_SECONDS:
+            return {
+                **cached_payload,
+                "cache": {"hit": True, "age_ms": round(cache_age * 1000, 1)},
+                "request_elapsed_ms": round((time.monotonic() - request_started) * 1000, 1),
+            }
+        _option_chain_cache.pop(index, None)
     adapter = _require_adapter()
     rows = _load_master()
     commodity = index in COMMODITY_NAMES
@@ -2082,14 +2099,32 @@ def option_chain(index: str = Query(default="NIFTY"), _: str = Depends(_device))
         future_expiries = sorted({_expiry_date(row.get("expiry")) for row in futures if _expiry_date(row.get("expiry"))})
         future = next((row for row in futures if _expiry_date(row.get("expiry")) == future_expiries[0]), futures[0])
         future_token = str(future.get("token", ""))
-        spot_quote = _quotes(adapter, "MCX", [future_token]).get(future_token)
+        spot_future = _market_data_executor.submit(_quotes, adapter, "MCX", [future_token])
+        try:
+            spot_quote = spot_future.result(timeout=OPTION_CHAIN_UPSTREAM_TIMEOUT_SECONDS).get(future_token)
+        except FutureTimeoutError:
+            spot_future.cancel()
+            raise HTTPException(status_code=504, detail={
+                "message": "Angel One underlying quote timed out; no cached or fabricated spot was used.",
+                "stage": "option_chain_underlying_quote", "timeout_seconds": OPTION_CHAIN_UPSTREAM_TIMEOUT_SECONDS,
+                "retryable": True,
+            })
         spot = _number(spot_quote.get("ltp")) if spot_quote else None
         segment = "MCX"
         option_instrument = "OPTFUT"
         option_name = index
     else:
         config = _find_index_contract(rows, index)
-        spot_quote = _quotes(adapter, config["exchange"], [config["token"]]).get(config["token"])
+        spot_future = _market_data_executor.submit(_quotes, adapter, config["exchange"], [config["token"]])
+        try:
+            spot_quote = spot_future.result(timeout=OPTION_CHAIN_UPSTREAM_TIMEOUT_SECONDS).get(config["token"])
+        except FutureTimeoutError:
+            spot_future.cancel()
+            raise HTTPException(status_code=504, detail={
+                "message": "Angel One underlying quote timed out; no cached or fabricated spot was used.",
+                "stage": "option_chain_underlying_quote", "timeout_seconds": OPTION_CHAIN_UPSTREAM_TIMEOUT_SECONDS,
+                "retryable": True,
+            })
         spot = _number(spot_quote.get("ltp")) if spot_quote else None
         segment = "BFO" if index in ("SENSEX", "BANKEX") else "NFO"
         option_instrument = "OPTIDX"
@@ -2123,11 +2158,21 @@ def option_chain(index: str = Query(default="NIFTY"), _: str = Depends(_device))
     greek_future = _market_data_executor.submit(
         _greeks_map, adapter, index, expiries[0].strftime("%d%b%Y").upper(),
     )
-    quote_map = quote_future.result()
-    # Request broker Greeks for MCX as well as index options. Some broker
-    # accounts/underlyings may not return MCX Greeks; _greeks_map fails closed
-    # to an empty map, so absent values remain null and cannot qualify a trade.
-    greek_map = greek_future.result()
+    timed_out: list[str] = []
+    try:
+        quote_map = quote_future.result(timeout=OPTION_CHAIN_UPSTREAM_TIMEOUT_SECONDS)
+    except FutureTimeoutError:
+        quote_future.cancel()
+        quote_map = {}
+        timed_out.append("quotes")
+    # Greeks are supplemental and may time out independently. Missing values
+    # remain null; never synthesize Greeks or use them to qualify a trade.
+    try:
+        greek_map = greek_future.result(timeout=OPTION_CHAIN_UPSTREAM_TIMEOUT_SECONDS)
+    except FutureTimeoutError:
+        greek_future.cancel()
+        greek_map = {}
+        timed_out.append("greeks")
     output = []
     for row in contracts:
         token = str(row.get("token", ""))
@@ -2150,7 +2195,31 @@ def option_chain(index: str = Query(default="NIFTY"), _: str = Depends(_device))
             "buy_depth": buy_depth, "sell_depth": sell_depth,
             "timestamp": _quote_timestamp(quote), "source_timestamp": _quote_timestamp(quote),
         })
-    return {"index": index, "spot": spot, "expiry": expiries[0].isoformat(), "contracts": output, "option_chain": _market_chain_rows(output), "source": "angelone_smartapi", "observed_at": _utc_now().isoformat(), "signal_only": True, "underlying_type": "MCX_FUTURE" if commodity else "INDEX"}
+    elapsed_ms = round((time.monotonic() - request_started) * 1000, 1)
+    payload = {
+        "index": index, "spot": spot, "expiry": expiries[0].isoformat(),
+        "contracts": output, "option_chain": _market_chain_rows(output),
+        "source": "angelone_smartapi", "observed_at": _utc_now().isoformat(),
+        "signal_only": True, "underlying_type": "MCX_FUTURE" if commodity else "INDEX",
+        "cache": {"hit": False, "ttl_seconds": OPTION_CHAIN_CACHE_TTL_SECONDS},
+        "upstream": {
+            "quotes": "timeout" if "quotes" in timed_out else "received",
+            "greeks": "timeout" if "greeks" in timed_out else "received",
+            "timed_out": timed_out,
+            "timeout_seconds": OPTION_CHAIN_UPSTREAM_TIMEOUT_SECONDS,
+        },
+        "request_elapsed_ms": elapsed_ms,
+    }
+    if timed_out:
+        payload["status"] = "WAIT"
+        payload["reason"] = "Upstream timeout; missing option-chain fields are unavailable and cannot qualify a trade."
+    elif not output:
+        payload["status"] = "WAIT"
+        payload["reason"] = "No complete live option quotes were received."
+    # Cache only complete quote responses; never cache timeout/partial data.
+    if not timed_out and output and OPTION_CHAIN_CACHE_TTL_SECONDS > 0:
+        _option_chain_cache[index] = (time.monotonic(), payload)
+    return payload
 
 
 @app.get("/v1/market/sentiment")
