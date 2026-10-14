@@ -14,14 +14,18 @@ void main() {
 
     await tester.pumpWidget(const MaterialApp(
       home: Scaffold(
-        body: RiskCalculator(selectedIndex: 'NIFTY', marketByIndex: market, commodities: commodities),
+        body: SingleChildScrollView(
+          child: RiskCalculator(selectedIndex: 'NIFTY', marketByIndex: market, commodities: commodities),
+        ),
       ),
     ));
     expect(find.text('NIFTY'), findsOneWidget);
 
     await tester.pumpWidget(const MaterialApp(
       home: Scaffold(
-        body: RiskCalculator(selectedIndex: 'CRUDEOIL', marketByIndex: market, commodities: commodities),
+        body: SingleChildScrollView(
+          child: RiskCalculator(selectedIndex: 'CRUDEOIL', marketByIndex: market, commodities: commodities),
+        ),
       ),
     ));
     await tester.pump();
