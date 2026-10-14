@@ -43,7 +43,7 @@ class StrategyQuantConfluenceGateTests(unittest.TestCase):
         filtered = _apply_strategy_confluence_filter(result, suite, "strategy-test")
         self.assertEqual(filtered["decision"], "WAIT")
         self.assertFalse(filtered["strategy_filter"]["pass"])
-        self.assertEqual(filtered["strategy_filter"]["state"], "BLOCKED")
+        self.assertEqual(filtered["strategy_filter"]["state"], "BLOCKED_BY_STRATEGY")
         self.assertIsNone(filtered["strike"])
         self.assertIsNone(filtered["entry"])
         self.assertIsNone(filtered["exit"])
