@@ -1,6 +1,6 @@
 import React from 'react';
 import { useTrading } from '../context/TradingContext';
-import { Cpu, Server, Radio, Database, CheckCircle, RefreshCw } from 'lucide-react';
+import { Cpu, Server, Radio, Database, RefreshCw, BrainCircuit } from 'lucide-react';
 
 export const DataHealthPage: React.FC = () => {
   const { diagnostics, isLive, marketStatus, refresh, isRefreshing } = useTrading();
@@ -117,6 +117,30 @@ export const DataHealthPage: React.FC = () => {
               <div className="font-bold text-emerald-400 mt-0.5">{data?.fresh_snapshot_count ?? '—'}</div>
             </div>
           </div>
+        </div>
+
+        {/* AI Provider status is intentionally separate from model inference success. */}
+        <div className="card-base p-4 border border-[#1C2740] bg-[#101726] space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <div className="flex items-center space-x-2 text-white font-bold">
+              <BrainCircuit className="w-4 h-4 text-cyan-400" />
+              <span>NVIDIA AI Provider</span>
+            </div>
+            <span className="px-2 py-0.5 rounded text-[10px] bg-slate-500/20 text-slate-300 font-bold">
+              {aiStatus}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-xs pt-1">
+            <div className="p-2 rounded-lg bg-[#070B12]">
+              <div className="text-[9px] text-slate-500">PROVIDER STATUS</div>
+              <div className="font-bold text-white mt-0.5">{ai?.nvidia_status ?? 'UNKNOWN / NOT TESTED'}</div>
+            </div>
+            <div className="p-2 rounded-lg bg-[#070B12]">
+              <div className="text-[9px] text-slate-500">MODEL</div>
+              <div className="font-bold text-white mt-0.5 break-all">{ai?.model ?? 'Not verified'}</div>
+            </div>
+          </div>
+          <div className="text-[10px] text-slate-400">Provider reachability/configuration does not prove that a real model inference succeeded.</div>
         </div>
       </div>
     </div>
