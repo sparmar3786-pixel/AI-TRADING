@@ -1105,7 +1105,7 @@ def _apply_strategy_confluence_filter(
         })
         stability = result.get("signal_stability")
         if isinstance(stability, dict):
-            stability["state"] = "BLOCKED_BY_STRATEGY"
+            stability["state"] = "BLOCKED_BY_QUANT_VALIDATION" if not quant_gate_pass else "BLOCKED_BY_STRATEGY"
         reasons = list(result.get("reasons") or [])
         reasons.append(("QUANT_VALIDATION_BLOCKED: " if not quant_gate_pass else "STRATEGY_CONFLUENCE_BLOCKED: ") + gate["reason"])
         result["reasons"] = list(dict.fromkeys(reasons))
