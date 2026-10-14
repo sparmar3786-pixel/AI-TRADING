@@ -41,6 +41,8 @@ jobs:
           retention-days: 3
       - name: Install frontend dependencies
         run: npm ci
+      - name: TypeScript validation
+        run: npm run lint
       - name: Build production frontend
         run: npm run build
 
