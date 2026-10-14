@@ -191,6 +191,19 @@ class BackendApiTests(unittest.TestCase):
         self.assertFalse(provider['ok'])
         self.assertEqual(provider['status'], 'configured_not_tested')
         self.assertNotIn('_config_fingerprint', provider)
+    def test_kumo_nvidia_key_can_fallback_for_chat_when_chat_key_is_unset(self):
+        with patch.dict(os.environ, {
+            "NVIDIA_API_KEY": "", "KUMO_NVIDIA_API_KEY": "catalog-key",
+            "NVIDIA_CHAT_MODEL": "test-model",
+            "OPENROUTER_API_KEY": "", "OPEN_ROUTER_API_KEY": "",
+        }, clear=False):
+            response = self.client.get("/v1/ai/status", headers=self.device_headers)
+        self.assertEqual(response.status_code, 200)
+        provider = response.json()["providers"]["nvidia"]
+        self.assertTrue(provider["configured"])
+        self.assertFalse(provider["ok"])
+        self.assertEqual(provider["status"], "configured_not_tested")
+
     def test_openai_environment_key_is_ignored_by_ai_status(self):
         with patch.dict(os.environ, {
             "NVIDIA_API_KEY": "", "KUMO_NVIDIA_API_KEY": "",
