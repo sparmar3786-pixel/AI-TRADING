@@ -1,7 +1,7 @@
 name: Python tests
 on:
   push:
-    branches: [main, integrate-trading-research-v2-20261010]
+    branches: [main, integrate-trading-research-v2-20261010, fix/restore-and-deploy-ai-trading-backend]
   pull_request:
     branches: [main]
   workflow_dispatch:
