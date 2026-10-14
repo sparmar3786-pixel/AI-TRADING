@@ -98,5 +98,22 @@ class AngelOneReadOnlyTests(unittest.TestCase):
             AngelOneReadOnly().market_data("FULL", {"NFO": [str(i) for i in range(51)]})
 
 
+    def test_six_digit_current_totp_is_passed_directly_to_smartapi(self):
+        client, modules = self._mock_sdk()
+        # A six-digit OTP is a generated code, not a Base32 TOTP secret.
+        modules["pyotp"].TOTP.side_effect = ValueError("Non-base32 digit found")
+        credentials = {
+            "angel_api_key": "test-api-key",
+            "angel_client_code": "demo-client",
+            "angel_pin": "test-pin",
+            "angel_totp_secret": "123456",
+        }
+        with patch.dict(os.environ, {}, clear=True), patch.dict(sys.modules, modules):
+            adapter = AngelOneReadOnly(credentials)
+            result = adapter.profile()
+        self.assertEqual(result["client_code"], "demo-client")
+        client.generateSession.assert_called_once_with("demo-client", "test-pin", "123456")
+
+
 if __name__ == "__main__":
     unittest.main()
