@@ -172,6 +172,25 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(data["providers"]["openrouter"]["status"], "not_configured")
         self.assertEqual(data["deterministic_decision"], "WAIT")
 
+    def test_ai_status_invalidates_cached_test_after_provider_configuration_changes(self):
+        stale_cache = {
+            'nvidia': {
+                'provider': 'nvidia', 'configured': True, 'ok': True, 'status': 'ok',
+                'model': 'old-model', '_config_fingerprint': 'old-key-fingerprint',
+            },
+        }
+        with patch.dict(os.environ, {
+            'NVIDIA_API_KEY': 'rotated-key', 'KUMO_NVIDIA_API_KEY': '',
+            'NVIDIA_CHAT_MODEL': 'test-model',
+            'NVIDIA_CHAT_BASE_URL': 'https://integrate.api.nvidia.com/v1/chat/completions',
+            'OPENROUTER_API_KEY': '', 'OPEN_ROUTER_API_KEY': '',
+        }, clear=False), patch.object(api, '_ai_provider_test_cache', stale_cache):
+            response = self.client.get('/v1/ai/status', headers=self.device_headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        provider = response.json()['providers']['nvidia']
+        self.assertFalse(provider['ok'])
+        self.assertEqual(provider['status'], 'configured_not_tested')
+        self.assertNotIn('_config_fingerprint', provider)
     def test_openai_environment_key_is_ignored_by_ai_status(self):
         with patch.dict(os.environ, {
             "NVIDIA_API_KEY": "", "KUMO_NVIDIA_API_KEY": "",
