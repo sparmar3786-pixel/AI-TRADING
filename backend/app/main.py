@@ -1061,6 +1061,12 @@ def _apply_strategy_confluence_filter(
         plan = {}
         result["trade_plan"] = plan
     plan["strategy_filter"] = gate
+    # A signal's exit field is the target-price reference, not an order or a
+    # promise of execution. Keep the meaning explicit for every consumer page.
+    result["exit"] = result.get("target")
+    result["exit_semantics"] = "target price reference; signal-only, no order placement"
+    plan["exit"] = result.get("exit")
+    plan["exit_semantics"] = result["exit_semantics"]
     if has_candidate and not passed:
         result["candidate_setup"] = {
             "decision": candidate,
@@ -1069,16 +1075,17 @@ def _apply_strategy_confluence_filter(
             "strike": result.get("strike"),
             "expiry": result.get("expiry"),
             "entry": result.get("entry"),
+            "exit": result.get("exit"),
             "stop_loss": result.get("stop_loss"),
             "target": result.get("target"),
             "status": "BLOCKED_NOT_ACTIONABLE",
         }
         result["decision"] = "WAIT"
-        for key in ("strike", "expiry", "entry", "stop_loss", "target", "option_type", "option_side"):
+        for key in ("strike", "expiry", "entry", "exit", "stop_loss", "target", "option_type", "option_side"):
             result[key] = None
         plan.update({
             "selection_grade": "WAIT", "strike": None, "expiry": None,
-            "entry": None, "stop_loss": None, "target": None,
+            "entry": None, "exit": None, "stop_loss": None, "target": None,
         })
         stability = result.get("signal_stability")
         if isinstance(stability, dict):
