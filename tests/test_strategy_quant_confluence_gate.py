@@ -88,6 +88,12 @@ class StrategyQuantConfluenceGateTests(unittest.TestCase):
         self.assertEqual(filtered["decision"], "WAIT")
         self.assertEqual(filtered["strategy_filter"]["state"], "NO_QUANT_CANDIDATE")
         self.assertNotIn("candidate_setup", filtered)
+        self.assertIsNone(filtered["strike"])
+        self.assertIsNone(filtered["entry"])
+        self.assertIsNone(filtered["exit"])
+        self.assertIsNone(filtered["stop_loss"])
+        self.assertIsNone(filtered["target"])
+        self.assertEqual(filtered["trade_plan"]["selection_grade"], "WAIT")
 
 
 if __name__ == "__main__":
