@@ -600,6 +600,36 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(result["signals"]["NIFTY"]["decision"], "WAIT")
         self.assertIn("insufficient candle history", result["market"]["NIFTY"]["signal_error"])
 
+    def test_stale_signal_snapshot_clears_actionable_levels(self):
+        cached = {
+            "signals": {
+                "NIFTY": {
+                    "decision": "CALL BUY", "strike": 25000, "expiry": "2026-10-29",
+                    "entry": 100.0, "exit": 115.0, "stop_loss": 95.0, "target": 115.0,
+                    "option_type": "CALL", "option_side": "CE",
+                    "trade_plan": {
+                        "selection_grade": "A", "strike": 25000, "expiry": "2026-10-29",
+                        "entry": 100.0, "exit": 115.0, "stop_loss": 95.0, "target": 115.0,
+                    },
+                    "live_validation": {"verdict": "PASS", "blocks": []},
+                }
+            },
+            "market": {"NIFTY": {"ltp": 25000.0, "live": True}},
+            "trade_plans": [{"index": "NIFTY"}],
+            "qualified_trade_count": 1,
+        }
+        stale = api._stale_signal_snapshot(cached, 75.0)
+        signal = stale["signals"]["NIFTY"]
+        self.assertEqual(signal["decision"], "WAIT")
+        self.assertEqual(signal["candidate_decision"], "CALL BUY")
+        self.assertFalse(signal["data_fresh"])
+        for key in ("strike", "expiry", "entry", "exit", "stop_loss", "target", "option_type", "option_side"):
+            self.assertIsNone(signal[key])
+        self.assertEqual(signal["trade_plan"]["selection_grade"], "WAIT")
+        self.assertEqual(stale["trade_plans"], [])
+        self.assertEqual(stale["qualified_trade_count"], 0)
+        self.assertEqual(cached["signals"]["NIFTY"]["decision"], "CALL BUY")
+
     def test_cold_signal_request_returns_wait_while_refresh_runs_in_background(self):
         metrics = {"last_duration_ms": None, "build_count": 0, "in_flight": False, "last_error": None}
         with patch.object(api, "_signal_cache", None), \
