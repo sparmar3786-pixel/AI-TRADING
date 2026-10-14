@@ -500,6 +500,13 @@ def _ensure_market_intelligence_scheduler() -> None:
     thread.start()
 
 
+@app.on_event("startup")
+def _start_market_intelligence_scheduler_on_startup() -> None:
+    enabled = os.getenv("MARKET_INTELLIGENCE_AUTO_REFRESH", "true").strip().lower()
+    if enabled not in {"0", "false", "no", "off"}:
+        _ensure_market_intelligence_scheduler()
+
+
 @app.get("/v1/market-intelligence")
 def market_intelligence(_: str = Depends(_device)) -> dict[str, Any]:
     """Return the latest Exa/Tavily evidence and NVIDIA's scheduled market summary."""
