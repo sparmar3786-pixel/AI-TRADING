@@ -184,15 +184,27 @@ def evaluate_five_layer_signal(
     flow = snapshot.get("order_flow")
     flow = flow if isinstance(flow, dict) else {}
     bid, ask, flow_ltp = map(_number, (flow.get("bid"), flow.get("ask"), flow.get("ltp")))
+    # SmartAPI FULL-depth values are resting bid/ask book depth, not classified
+    # executed buy/sell trade volume. Keep the two measures explicitly distinct.
+    bid_depth, ask_depth = map(_number, (flow.get("bid_depth"), flow.get("ask_depth")))
     buy_vol, sell_vol = map(_number, (flow.get("buy_volume"), flow.get("sell_volume")))
+    uses_book_depth = bid_depth is not None or ask_depth is not None
+    if uses_book_depth:
+        flow_left, flow_right = bid_depth, ask_depth
+        flow_measure = "BOOK_DEPTH_IMBALANCE"
+        flow_semantics = "bid_ask_depth_not_classified_trade_volume"
+    else:
+        flow_left, flow_right = buy_vol, sell_vol
+        flow_measure = "TRADE_VOLUME_IMBALANCE"
+        flow_semantics = "classified_executed_trade_volume"
     flow_valid = (
         bid is not None and ask is not None and flow_ltp is not None
         and 0 < bid <= flow_ltp <= ask
-        and buy_vol is not None and sell_vol is not None
-        and buy_vol >= 0 and sell_vol >= 0 and buy_vol + sell_vol > 0
+        and flow_left is not None and flow_right is not None
+        and flow_left >= 0 and flow_right >= 0 and flow_left + flow_right > 0
     )
     spread_pct = ((ask - bid) / ((ask + bid) / 2) * 100) if flow_valid else None
-    imbalance = ((buy_vol - sell_vol) / (buy_vol + sell_vol)) if flow_valid else None
+    imbalance = ((flow_left - flow_right) / (flow_left + flow_right)) if flow_valid else None
     flow_direction = (
         "BULLISH" if imbalance is not None and imbalance >= 0.15 else
         "BEARISH" if imbalance is not None and imbalance <= -0.15 else
@@ -202,7 +214,7 @@ def evaluate_five_layer_signal(
     layers["order_flow"] = {
         "pass": bool(layer3_ok), "spread_pct": round(spread_pct, 3) if spread_pct is not None else None,
         "imbalance": round(imbalance, 3) if imbalance is not None else None,
-        "direction": flow_direction,
+        "direction": flow_direction, "measure": flow_measure, "semantics": flow_semantics,
     }
     if not layer3_ok:
         reasons.append("Order-flow quote is missing/invalid or spread exceeds 2%")
