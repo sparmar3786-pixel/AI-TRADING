@@ -1582,7 +1582,7 @@ def _index_snapshot(
         "sentiment_score": sentiment,
         "timeframe_closes": timeframe_closes,
         "indicators": indicators,
-        "order_flow": {"bid": bid, "ask": ask, "ltp": spot, "buy_volume": buy_volume, "sell_volume": sell_volume},
+        "order_flow": {"bid": bid, "ask": ask, "ltp": spot, "bid_depth": buy_volume, "ask_depth": sell_volume, "semantics": "bid_ask_depth_not_classified_trade_volume"},
         # Feed the exact contract whose ATR was fetched into the risk gate.
         # Do not let the engine silently choose a different contract with no ATR.
         "option_chain": [
