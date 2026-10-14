@@ -1030,16 +1030,30 @@ def _apply_strategy_confluence_filter(
     expected_votes = long_votes if expected_side == "LONG" else short_votes
     opposing_votes = short_votes if expected_side == "LONG" else long_votes
     has_candidate = expected_side is not None
-    passed = bool(
+    quant_gate_pass = (
+        isinstance(result.get("live_validation"), dict)
+        and result["live_validation"].get("verdict") == "PASS"
+        and str(result.get("decision") or "").strip().upper() == candidate
+        and isinstance(result.get("five_layer_engine"), dict)
+        and str(result["five_layer_engine"].get("decision") or "").strip().upper() == candidate
+    )
+    strategy_pass = bool(
         has_candidate
         and strategy_suite.get("status") == "ok"
         and strategy_side == expected_side
         and expected_votes >= 3
         and expected_votes > opposing_votes
     )
+    passed = bool(quant_gate_pass and strategy_pass)
+    gate_state = (
+        "PASS" if passed else
+        "NO_QUANT_CANDIDATE" if not has_candidate else
+        "BLOCKED_BY_QUANT_VALIDATION" if not quant_gate_pass else
+        "BLOCKED_BY_STRATEGY"
+    )
     gate = {
         "pass": passed,
-        "state": "PASS" if passed else "BLOCKED" if has_candidate else "NO_QUANT_CANDIDATE",
+        "state": gate_state,
         "quant_candidate": candidate,
         "expected_strategy_side": expected_side,
         "strategy_signal": strategy_side,
@@ -1091,14 +1105,14 @@ def _apply_strategy_confluence_filter(
         if isinstance(stability, dict):
             stability["state"] = "BLOCKED_BY_STRATEGY"
         reasons = list(result.get("reasons") or [])
-        reasons.append("STRATEGY_CONFLUENCE_BLOCKED: " + gate["reason"])
+        reasons.append(("QUANT_VALIDATION_BLOCKED: " if not quant_gate_pass else "STRATEGY_CONFLUENCE_BLOCKED: ") + gate["reason"])
         result["reasons"] = list(dict.fromkeys(reasons))
         result["reason"] = list(result["reasons"])
         result["guards"] = list(result["reasons"])
         validation = result.get("live_validation")
         if isinstance(validation, dict):
             blocks = list(validation.get("blocks") or [])
-            blocks.append("STRATEGY_CONFLUENCE_BLOCKED")
+            blocks.append("QUANT_VALIDATION_BLOCKED" if not quant_gate_pass else "STRATEGY_CONFLUENCE_BLOCKED")
             validation["blocks"] = list(dict.fromkeys(blocks))
             validation["verdict"] = "BLOCKED"
     engine = result.get("five_layer_engine")
@@ -2160,6 +2174,16 @@ def _stale_signal_snapshot(cached: dict[str, Any], age_seconds: float | None) ->
                 row["candidate_decision"] = decision
             row["decision"] = "WAIT"
             row["data_fresh"] = False
+            # Stale snapshots may show market context, but never actionable levels.
+            for key in ("strike", "expiry", "entry", "exit", "stop_loss", "target", "option_type", "option_side"):
+                row[key] = None
+            trade_plan = dict(row.get("trade_plan") or {})
+            trade_plan.update({
+                "selection_grade": "WAIT", "strike": None, "expiry": None,
+                "entry": None, "exit": None, "stop_loss": None, "target": None,
+                "signal_only": True,
+            })
+            row["trade_plan"] = trade_plan
             validation = dict(row.get("live_validation") or {})
             validation["decision"] = "WAIT"
             validation["verdict"] = "WARN"
