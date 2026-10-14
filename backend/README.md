@@ -49,7 +49,8 @@ In a local shell, configure the four ANGEL_* environment variables before attemp
 ## Cloud AI provider (NVIDIA primary)
 
 - Set `NVIDIA_API_KEY` in Railway for NVIDIA hosted chat inference. For an existing NVIDIA key used by Kumo, `KUMO_NVIDIA_API_KEY` is accepted as a fallback, provided that key has access to the selected chat model.
-- Optional: set `NVIDIA_CHAT_MODEL=nvidia/llama-3.3-nemotron-super-49b-v1.5` and `NVIDIA_CHAT_BASE_URL=https://integrate.api.nvidia.com/v1/chat/completions`.
+- Primary model defaults to `NVIDIA_CHAT_MODEL=z-ai/glm-5.3`; the default secondary model is `NVIDIA_CHAT_FALLBACK_MODEL=qwen/qwen2.5-coder-32b-instruct`. The backend tries GLM first and tries Qwen only if the primary inference fails. Both models must be enabled for the same NVIDIA API key. Override either variable if needed.
+- `NVIDIA_CHAT_BASE_URL` defaults to `https://integrate.api.nvidia.com/v1/chat/completions`.
 - Optional fallback: configure `OPENROUTER_API_KEY`; default fallback model is `meta-llama/llama-3.3-70b-instruct`.
 - Run **Test AI Providers** in the app after deployment. A key being present only means configured; green status requires a real authenticated inference response.
 - NVIDIA chat handles natural-language Q&A and signal review. Kumo Tabular remains a separate structured-prediction service. Neither AI provider can override deterministic WAIT/risk gates, and the service does not place orders.
