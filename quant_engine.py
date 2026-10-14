@@ -7,6 +7,7 @@ Scores are evidence alignment, never a probability of profit.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from math import isfinite
 from typing import Any
 
@@ -234,7 +235,21 @@ def evaluate_five_layer_signal(
         strike = _number(option.get("strike"))
         obid, oask, ltp = map(_number, (option.get("bid"), option.get("ask"), option.get("ltp")))
         volume, oi, delta = map(_number, (option.get("volume"), option.get("oi"), option.get("delta")))
-        expiry = _timestamp(str(option.get("expiry", "")) + "T23:59:00+00:00") if option.get("expiry") else None
+        expiry_raw = str(option.get("expiry", "")).strip()
+        expiry = None
+        if expiry_raw:
+            # Broker option-chain expiry is an exchange-local calendar date.
+            # For NSE index options, treat that date as expiring at 15:30 IST,
+            # not 23:59 UTC (which incorrectly keeps expired contracts eligible).
+            try:
+                expiry_date = datetime.strptime(expiry_raw, "%Y-%m-%d").date()
+                expiry = datetime.combine(
+                    expiry_date,
+                    datetime.min.time().replace(hour=15, minute=30),
+                    ZoneInfo("Asia/Kolkata"),
+                ).astimezone(timezone.utc)
+            except ValueError:
+                expiry = _timestamp(expiry_raw)
         option_stamp = next((option.get(key) for key in ("timestamp", "source_timestamp", "exchange_timestamp", "time", "t") if option.get(key) is not None), None)
         option_time = _timestamp(option_stamp) if option_stamp is not None else observed
         option_age = _age_seconds(now_utc, option_time)
