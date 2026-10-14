@@ -15,7 +15,7 @@ from typing import Any
 
 _client = None
 _client_lock = threading.Lock()
-_volume_by_token: dict[str, float] = {}
+_volume_by_token: dict[str, float] = {}\n_state_lock = threading.RLock()\n_current_by_key: dict[str, dict[str, Any]] = {}\n_sequence_by_key: dict[str, int] = {}\n_loaded_keys: set[str] = set()
 _volume_lock = threading.Lock()
 _tick_queue: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=4096)
 _worker_lock = threading.Lock()
@@ -56,7 +56,7 @@ def _symbols() -> dict[str, str]:
 
 
 def _process_tick(tick: dict[str, Any]) -> None:
-    """Turn one normalized Angel One tick into Redis OHLCV updates."""
+    """Update candles in memory and batch Redis writes once per incoming tick."""
     client = _redis()
     if client is None:
         return
@@ -73,6 +73,7 @@ def _process_tick(tick: dict[str, Any]) -> None:
         dt = dt.astimezone(timezone.utc)
     except (TypeError, ValueError):
         dt = datetime.now(timezone.utc)
+
     cumulative = tick.get("tradeVolume")
     with _volume_lock:
         prior_volume = _volume_by_token.get(token)
@@ -87,42 +88,57 @@ def _process_tick(tick: dict[str, Any]) -> None:
             _volume_by_token[token] = cumulative_num
 
     now_epoch = int(dt.timestamp())
+    # The chart bridge has one worker in this process. Load each candle and
+    # sequence once, then avoid Redis GET/INCR round-trips on every market tick.
     pipe = client.pipeline(transaction=True)
-    updates = []
+    writes = 0
     for tf, seconds in TIMEFRAMES.items():
         key = f"{symbol}:{tf}"
         bucket = now_epoch - (now_epoch % seconds)
         current_key = f"cur:{key}"
-        raw = client.get(current_key)
-        try:
-            current = json.loads(raw) if raw else None
-        except (TypeError, ValueError):
-            current = None
-        if not isinstance(current, dict) or int(current.get("t", -1)) != bucket:
-            if isinstance(current, dict) and current.get("t") is not None:
-                closed = {**current, "type": "closed"}
-                encoded_closed = json.dumps(closed, separators=(",", ":"))
-                pipe.rpush(f"candles:{key}", encoded_closed)
-                pipe.ltrim(f"candles:{key}", -max(100, min(int(os.getenv("CHART_MAX_CANDLES", "2000")), 5000)), -1)
-                # Dedicated durable/engine worker consumes closed candles only.
-                pipe.xadd("chart:candle_closed", {"payload": encoded_closed,
-                    "event_id": f"{symbol}:{tf}:{current.get('t')}"}, maxlen=50000, approximate=True)
-            current = {"t": bucket, "o": float(price), "h": float(price),
-                       "l": float(price), "c": float(price), "v": delta_volume,
-                       "type": "new", "symbol": symbol, "tf": tf}
-        else:
-            current = {**current, "h": max(float(current.get("h", price)), float(price)),
-                       "l": min(float(current.get("l", price)), float(price)),
-                       "c": float(price), "v": float(current.get("v", 0)) + delta_volume,
-                       "type": "cur", "symbol": symbol, "tf": tf}
-        seq = int(client.incr(f"seq:{key}"))
-        current["seq"] = seq
-        current["ts_server"] = datetime.now(timezone.utc).timestamp()
-        pipe.set(current_key, json.dumps(current, separators=(",", ":")))
-        pipe.publish(f"chart.{symbol}.{tf}", json.dumps(current, separators=(",", ":")))
-        updates.append((key, current))
-    pipe.execute()
-
+        with _state_lock:
+            current = _current_by_key.get(key)
+            if key not in _loaded_keys:
+                raw, raw_seq = client.mget(current_key, f"seq:{key}")
+                try:
+                    restored = json.loads(raw) if raw else None
+                except (TypeError, ValueError):
+                    restored = None
+                current = restored if isinstance(restored, dict) else None
+                try:
+                    _sequence_by_key[key] = int(raw_seq or (current or {}).get("seq") or 0)
+                except (TypeError, ValueError):
+                    _sequence_by_key[key] = int((current or {}).get("seq") or 0)
+                _loaded_keys.add(key)
+                if current is not None:
+                    _current_by_key[key] = current
+            if not isinstance(current, dict) or int(current.get("t", -1)) != bucket:
+                if isinstance(current, dict) and current.get("t") is not None:
+                    closed = {**current, "type": "closed"}
+                    encoded_closed = json.dumps(closed, separators=(",", ":"))
+                    pipe.rpush(f"candles:{key}", encoded_closed)
+                    pipe.ltrim(f"candles:{key}", -max(100, min(int(os.getenv("CHART_MAX_CANDLES", "2000")), 5000)), -1)
+                    pipe.xadd("chart:candle_closed", {"payload": encoded_closed,
+                        "event_id": f"{symbol}:{tf}:{current.get('t')}"}, maxlen=50000, approximate=True)
+                current = {"t": bucket, "o": float(price), "h": float(price),
+                           "l": float(price), "c": float(price), "v": delta_volume,
+                           "type": "new", "symbol": symbol, "tf": tf}
+            else:
+                current = {**current, "h": max(float(current.get("h", price)), float(price)),
+                           "l": min(float(current.get("l", price)), float(price)),
+                           "c": float(price), "v": float(current.get("v", 0)) + delta_volume,
+                           "type": "cur", "symbol": symbol, "tf": tf}
+            _sequence_by_key[key] = _sequence_by_key.get(key, 0) + 1
+            current["seq"] = _sequence_by_key[key]
+            current["ts_server"] = datetime.now(timezone.utc).timestamp()
+            _current_by_key[key] = current
+            encoded = json.dumps(current, separators=(",", ":"))
+        pipe.set(current_key, encoded)
+        pipe.set(f"seq:{key}", current["seq"])
+        pipe.publish(f"chart.{symbol}.{tf}", encoded)
+        writes += 1
+    if writes:
+        pipe.execute()
 
 def _worker() -> None:
     while True:
