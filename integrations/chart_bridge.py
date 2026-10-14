@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import threading
 from datetime import datetime, timezone
 from typing import Any
@@ -16,6 +17,9 @@ _client = None
 _client_lock = threading.Lock()
 _volume_by_token: dict[str, float] = {}
 _volume_lock = threading.Lock()
+_tick_queue: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=4096)
+_worker_lock = threading.Lock()
+_worker_started = False
 TIMEFRAMES = {"1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "1d": 86400}
 
 
@@ -51,7 +55,7 @@ def _symbols() -> dict[str, str]:
         return {}
 
 
-def publish_angelone_tick(tick: dict[str, Any]) -> None:
+def _process_tick(tick: dict[str, Any]) -> None:
     """Turn one normalized Angel One tick into Redis OHLCV updates."""
     client = _redis()
     if client is None:
@@ -113,3 +117,39 @@ def publish_angelone_tick(tick: dict[str, Any]) -> None:
         pipe.publish(f"chart.{symbol}.{tf}", json.dumps(current, separators=(",", ":")))
         updates.append((key, current))
     pipe.execute()
+
+
+def _worker() -> None:
+    while True:
+        tick = _tick_queue.get()
+        try:
+            _process_tick(tick)
+        except Exception:
+            # Chart analytics are best-effort and must not terminate the worker.
+            pass
+        finally:
+            _tick_queue.task_done()
+
+
+def publish_angelone_tick(tick: dict[str, Any]) -> None:
+    """Queue chart processing so Redis/network work never blocks SmartAPI callbacks."""
+    global _worker_started
+    if not os.getenv("REDIS_URL", "").strip():
+        return
+    with _worker_lock:
+        if not _worker_started:
+            threading.Thread(target=_worker, name="angelone-chart-bridge", daemon=True).start()
+            _worker_started = True
+    try:
+        _tick_queue.put_nowait(dict(tick))
+    except queue.Full:
+        # Drop the oldest queued tick to preserve freshness over stale backlog.
+        try:
+            _tick_queue.get_nowait()
+            _tick_queue.task_done()
+        except queue.Empty:
+            pass
+        try:
+            _tick_queue.put_nowait(dict(tick))
+        except queue.Full:
+            pass
