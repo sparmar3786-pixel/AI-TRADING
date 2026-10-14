@@ -32,6 +32,14 @@ jobs:
         working-directory: flutter_app
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Ensure flutter_app directory exists
+        run: |
+          if [ ! -d "flutter_app" ]; then
+            echo "flutter_app missing on current branch, fetching from feat/ai-trading-signal-apk..."
+            git checkout origin/feat/ai-trading-signal-apk -- flutter_app || true
+          fi
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -45,6 +53,10 @@ jobs:
       - name: Verify Android SDK tools
         run: |
           set -euo pipefail
+          ANDROID_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          export PATH="$ANDROID_ROOT/cmdline-tools/latest/bin:$ANDROID_ROOT/platform-tools:$PATH"
+          echo "$ANDROID_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_ROOT/platform-tools" >> "$GITHUB_PATH"
           echo "ANDROID_HOME=${ANDROID_HOME:-}"
           echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-}"
           command -v sdkmanager

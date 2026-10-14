@@ -11,6 +11,8 @@ import {
   Layers,
   ArrowRight,
   Wallet,
+  Settings,
+  Key,
 } from 'lucide-react';
 import { useTrading } from '../context/TradingContext';
 import { INDEX_CONFIG } from '../services/api';
@@ -62,6 +64,31 @@ export const DashboardPage: React.FC = () => {
 
   return (
     <div className="p-3 pb-8 space-y-3.5 select-none max-w-2xl mx-auto">
+      {/* Settings & Auto Keys Quick-Access Bar */}
+      <div
+        onClick={() => setActiveTab('Settings')}
+        className="p-2.5 rounded-xl bg-gradient-to-r from-cyan-950/60 to-[#121A2D] border border-cyan-500/30 flex items-center justify-between cursor-pointer hover:border-cyan-400 active:scale-98 transition-all shadow-md"
+      >
+        <div className="flex items-center space-x-2">
+          <div className="p-1.5 rounded-lg bg-cyan-500/20 text-cyan-400">
+            <Settings className="w-4 h-4 animate-spin-slow" />
+          </div>
+          <div>
+            <div className="text-xs font-bold text-white flex items-center space-x-1.5">
+              <span>Settings & 1-Click Keys (सेटिंग्स)</span>
+              <span className="px-1.5 py-0.2 bg-emerald-500/20 text-emerald-400 text-[9px] font-mono rounded">Active</span>
+            </div>
+            <div className="text-[10px] text-slate-400">
+              API Keys, Firebase, Stop-Loss व Trading Settings प्रबंधित करें
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center space-x-1 text-cyan-400 text-xs font-bold font-mono pl-2">
+          <span>OPEN</span>
+          <ArrowRight className="w-3.5 h-3.5" />
+        </div>
+      </div>
+
       {/* 1. Main Spot Price Card */}
       <div className="card-base p-4 border border-[#1C2740] bg-gradient-to-b from-[#121A2D] to-[#0E1524] relative overflow-hidden shadow-lg">
         <div className="flex items-center justify-between">

@@ -1,9 +1,9 @@
 import React from 'react';
-import { Menu, RefreshCw, Zap } from 'lucide-react';
+import { Menu, RefreshCw, Zap, Settings } from 'lucide-react';
 import { useTrading } from '../context/TradingContext';
 
 export const TopAppBar: React.FC = () => {
-  const { isLive, isRefreshing, refresh, toggleDrawer, marketStatus, activeTab } = useTrading();
+  const { isLive, isRefreshing, refresh, toggleDrawer, marketStatus, activeTab, setActiveTab } = useTrading();
 
   const getStatusBadge = () => {
     if (!isLive) {
@@ -66,6 +66,19 @@ export const TopAppBar: React.FC = () => {
           aria-label="Refresh"
         >
           <RefreshCw className="w-4 h-4" />
+        </button>
+
+        <button
+          onClick={() => setActiveTab('Settings')}
+          className={`p-2 rounded-xl transition-all active:scale-90 flex items-center justify-center ${
+            activeTab === 'Settings'
+              ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40 shadow-sm shadow-cyan-500/20'
+              : 'text-slate-400 hover:text-cyan-400 hover:bg-[#17223B]'
+          }`}
+          title="Settings & API Keys (सेटिंग्स)"
+          aria-label="Settings"
+        >
+          <Settings className="w-4 h-4" />
         </button>
       </div>
     </header>

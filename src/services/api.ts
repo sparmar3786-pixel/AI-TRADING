@@ -47,8 +47,12 @@ class ApiService {
 
   private getOrCreateDeviceId(): string {
     let id = localStorage.getItem('fresh_device_id');
-    if (!id || id.length < 32) {
-      id = 'dev_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
+    // Railway backend requires 43–128 URL-safe characters
+    if (!id || id.length < 43 || id.length > 128) {
+      const part1 = Math.random().toString(36).substring(2).padEnd(12, '0');
+      const part2 = Math.random().toString(36).substring(2).padEnd(12, '0');
+      const part3 = Date.now().toString(36).padEnd(10, '0');
+      id = `fresh_android_device_${part1}_${part2}_${part3}`; // ~50 chars, url-safe
       localStorage.setItem('fresh_device_id', id);
     }
     return id;

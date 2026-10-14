@@ -21,6 +21,7 @@ import { BacktestingPage } from './pages/BacktestingPage';
 import { MarketIntelligencePage } from './pages/MarketIntelligencePage';
 import { DataHealthPage } from './pages/DataHealthPage';
 import { ApiSettingsPage } from './pages/ApiSettingsPage';
+import { SettingsPage } from './pages/SettingsPage';
 
 const MainContent: React.FC = () => {
   const { activeTab } = useTrading();
@@ -55,8 +56,9 @@ const MainContent: React.FC = () => {
         return <MarketIntelligencePage />;
       case 'Data Health':
         return <DataHealthPage />;
+      case 'Settings':
       case 'API Settings':
-        return <ApiSettingsPage />;
+        return <SettingsPage />;
       default:
         return <DashboardPage />;
     }

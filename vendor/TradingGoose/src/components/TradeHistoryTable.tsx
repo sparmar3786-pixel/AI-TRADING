@@ -8,10 +8,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ArrowUpRight, ArrowDownRight, Clock, CheckCircle, XCircle, TrendingUp, RefreshCw, Loader2, ExternalLink, FileText, BarChart3, Calendar as CalendarIcon, Package, ChevronLeft, ChevronRight } from "lucide-react";
 import { useAuth, hasAlpacaCredentials } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
+import { getTradesFromFirestore } from "@/lib/firebase";
 import { getCachedSession } from "@/lib/cachedAuth";
 import { useToast } from "@/hooks/use-toast";
 import AnalysisDetailModal from "@/components/AnalysisDetailModal";
 import RebalanceDetailModal from "@/components/RebalanceDetailModal";
+import DateRangePicker from "@/components/DateRangePicker";
+import { DateRange } from "react-day-picker";
+import { subDays, format } from "date-fns";
 
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || '';
 
@@ -89,63 +93,23 @@ export default function TradeHistoryTable() {
   const hasAlpacaConfig = useMemo(() => hasAlpacaCredentials(apiSettings), [apiSettings]);
   const { toast } = useToast();
 
-  // Date filter states - default to today (using local date to avoid timezone issues)
+  // Date filter state using DateRangePicker for specific time intervals (defaults to last 30 days)
   const today = new Date();
-  const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-  const [selectedDate, setSelectedDate] = useState<string>(todayString);
-  const isViewingToday = selectedDate === todayString;
+  const [dateRange, setDateRange] = useState<DateRange | undefined>({
+    from: subDays(today, 29),
+    to: today,
+  });
 
   // Track if initial data has been loaded
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
 
   // Helper to format date display
   const getDateDisplay = () => {
-    const today = new Date();
-    const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayString = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
-
-    if (selectedDate === todayString) return "Today";
-    if (selectedDate === yesterdayString) return "Yesterday";
-
-    // Parse the date parts to avoid timezone issues
-    const [year, month, day] = selectedDate.split('-').map(Number);
-    const date = new Date(year, month - 1, day);
-
-    return date.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
-    });
-  };
-
-  // Navigate date helper functions
-  const navigateDate = (direction: 'prev' | 'next') => {
-    const [year, month, day] = selectedDate.split('-').map(Number);
-    const currentDate = new Date(year, month - 1, day);
-    const targetDate = new Date(currentDate);
-
-    if (direction === 'prev') {
-      targetDate.setDate(targetDate.getDate() - 1);
-    } else {
-      targetDate.setDate(targetDate.getDate() + 1);
-      const today = new Date();
-      const todayWithoutTime = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-      if (targetDate > todayWithoutTime) {
-        return;
-      }
+    if (!dateRange?.from) return "All Time";
+    if (!dateRange.to || dateRange.from.getTime() === dateRange.to.getTime()) {
+      return format(dateRange.from, 'MMM dd, yyyy');
     }
-
-    const newDateString = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
-    setSelectedDate(newDateString);
-  };
-
-  const jumpToToday = () => {
-    const today = new Date();
-    const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    setSelectedDate(todayString);
+    return `${format(dateRange.from, 'MMM dd')} - ${format(dateRange.to, 'MMM dd, yyyy')}`;
   };
 
   // Manual refresh handler
@@ -158,60 +122,86 @@ export default function TradeHistoryTable() {
     setRefreshing(false);
   };
 
-  // Fetch all trades from trading_actions table
+  // Fetch all trades from Firestore or Supabase table within the selected date interval
   const fetchAllTrades = async (isInitialLoad = false) => {
-    if (!user?.id) return;
-
     // Only show loading state on initial load or when explicitly requested
     if (isInitialLoad) {
       setLoading(true);
     }
     try {
-      // Build date range for the selected date using local date parsing
-      const [year, month, day] = selectedDate.split('-').map(Number);
-      const startOfDay = new Date(year, month - 1, day, 0, 0, 0, 0);
-      const endOfDay = new Date(year, month - 1, day, 23, 59, 59, 999);
+      // Determine date bounds
+      const fromDate = dateRange?.from ? new Date(dateRange.from) : subDays(new Date(), 365);
+      fromDate.setHours(0, 0, 0, 0);
+      const toDate = dateRange?.to ? new Date(dateRange.to) : new Date();
+      toDate.setHours(23, 59, 59, 999);
 
-      // Get trading actions for this user within the selected date
-      const { data, error } = await supabase
-        .from('trading_actions')
-        .select('*')
-        .eq('user_id', user.id)
-        .gte('created_at', startOfDay.toISOString())
-        .lte('created_at', endOfDay.toISOString())
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-
-      if (data && data.length > 0) {
-        console.log('Raw trade data from database:', data);
-        const trades: TradeDecision[] = data.map(item => ({
-          id: item.id,
-          symbol: item.ticker,
-          action: item.action as 'BUY' | 'SELL',
-          quantity: Number(item.shares),
-          dollarAmount: item.dollar_amount ? Number(item.dollar_amount) : undefined,
-          price: Number(item.price),
-          agent: item.agent || 'Trading Agent',
-          timestamp: formatTimestamp(item.created_at),
-          reasoning: item.reasoning || 'AI recommendation based on market analysis',
-          totalValue: item.dollar_amount ? Number(item.dollar_amount) : Number(item.shares) * Number(item.price),
+      // 1. Try querying Firebase Firestore
+      const fbTrades = await getTradesFromFirestore(user?.id, fromDate, toDate);
+      if (fbTrades && fbTrades.length > 0) {
+        const trades: TradeDecision[] = fbTrades.map(item => ({
+          id: item.id || Math.random().toString(),
+          symbol: item.symbol,
+          action: item.action,
+          quantity: item.shares,
+          dollarAmount: item.totalValue,
+          price: item.price,
+          agent: item.agent,
+          timestamp: formatTimestamp(item.createdAt),
+          reasoning: item.reasoning,
+          totalValue: item.totalValue,
           status: item.status,
-          executedAt: item.executed_at ? formatTimestamp(item.executed_at) : null,
-          sourceType: item.source_type == 'rebalance' ? item.source_type : 'analysis',
-          analysisId: item.analysis_id,
-          rebalanceRequestId: item.rebalance_request_id,
-          alpacaOrderId: item.metadata?.alpaca_order?.id,
-          alpacaOrderStatus: item.metadata?.alpaca_order?.status,
-          alpacaFilledQty: item.metadata?.alpaca_order?.filled_qty ? Number(item.metadata.alpaca_order.filled_qty) : undefined,
-          alpacaFilledPrice: item.metadata?.alpaca_order?.filled_avg_price ? Number(item.metadata.alpaca_order.filled_avg_price) : undefined,
-          createdAt: item.created_at
+          executedAt: item.executedAt ? formatTimestamp(item.executedAt) : null,
+          sourceType: item.sourceType,
+          alpacaOrderId: item.orderId,
+          createdAt: item.createdAt
         }));
-
         setAllTrades(trades);
-      } else {
-        setAllTrades([]);
+        return;
       }
+
+      // 2. Query Supabase if user exists
+      if (user?.id) {
+        const { data, error } = await supabase
+          .from('trading_actions')
+          .select('*')
+          .eq('user_id', user.id)
+          .gte('created_at', fromDate.toISOString())
+          .lte('created_at', toDate.toISOString())
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          console.warn('Supabase query error (handled):', error);
+        } else if (data && data.length > 0) {
+          console.log('Raw trade data from database:', data);
+          const trades: TradeDecision[] = data.map(item => ({
+            id: item.id,
+            symbol: item.ticker,
+            action: item.action as 'BUY' | 'SELL',
+            quantity: Number(item.shares),
+            dollarAmount: item.dollar_amount ? Number(item.dollar_amount) : undefined,
+            price: Number(item.price),
+            agent: item.agent || 'Trading Agent',
+            timestamp: formatTimestamp(item.created_at),
+            reasoning: item.reasoning || 'AI recommendation based on market analysis',
+            totalValue: item.dollar_amount ? Number(item.dollar_amount) : Number(item.shares) * Number(item.price),
+            status: item.status,
+            executedAt: item.executed_at ? formatTimestamp(item.executed_at) : null,
+            sourceType: item.source_type == 'rebalance' ? item.source_type : 'analysis',
+            analysisId: item.analysis_id,
+            rebalanceRequestId: item.rebalance_request_id,
+            alpacaOrderId: item.metadata?.alpaca_order?.id,
+            alpacaOrderStatus: item.metadata?.alpaca_order?.status,
+            alpacaFilledQty: item.metadata?.alpaca_order?.filled_qty ? Number(item.metadata.alpaca_order.filled_qty) : undefined,
+            alpacaFilledPrice: item.metadata?.alpaca_order?.filled_avg_price ? Number(item.metadata.alpaca_order.filled_avg_price) : undefined,
+            createdAt: item.created_at
+          }));
+
+          setAllTrades(trades);
+          return;
+        }
+      }
+
+      setAllTrades([]);
     } catch (error) {
       console.error('Error fetching trades:', error);
       toast({
@@ -375,6 +365,19 @@ export default function TradeHistoryTable() {
     }
   };
 
+  const isViewingToday = useMemo(() => {
+    if (!dateRange?.from || !dateRange?.to) return false;
+    const now = new Date();
+    return (
+      dateRange.from.getFullYear() === now.getFullYear() &&
+      dateRange.from.getMonth() === now.getMonth() &&
+      dateRange.from.getDate() === now.getDate() &&
+      dateRange.to.getFullYear() === now.getFullYear() &&
+      dateRange.to.getMonth() === now.getMonth() &&
+      dateRange.to.getDate() === now.getDate()
+    );
+  }, [dateRange]);
+
   useEffect(() => {
     if (!user?.id) {
       setAllTrades([]);
@@ -384,7 +387,7 @@ export default function TradeHistoryTable() {
 
     // Pass true for isInitialLoad only when we haven't loaded data yet
     fetchAllTrades(!initialLoadComplete);
-  }, [user?.id, selectedDate]);
+  }, [user?.id, dateRange]);
 
   useEffect(() => {
     if (!user?.id || !hasAlpacaConfig || !isViewingToday) {
@@ -906,94 +909,11 @@ export default function TradeHistoryTable() {
             
             <div className="w-px h-6 bg-border" />
             
-            <div className="flex items-center gap-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => navigateDate('prev')}
-                className="h-8 w-8 p-0 hover:bg-[#fc0]/10 hover:text-[#fc0]"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="px-3 min-w-[140px] hover:border-[#fc0] hover:bg-[#fc0]/10 hover:text-[#fc0] transition-all duration-200"
-                  >
-                    <CalendarIcon className="h-4 w-4 mr-2" />
-                    {getDateDisplay()}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent
-                  className="w-auto p-0 bg-background border-border"
-                  align="center"
-                >
-                  <div className="space-y-2 p-3">
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="flex-1 text-xs hover:bg-[#fc0]/10 hover:border-[#fc0]/50 hover:text-[#fc0]"
-                        onClick={() => {
-                          const yesterday = new Date();
-                          yesterday.setDate(yesterday.getDate() - 1);
-                          const year = yesterday.getFullYear();
-                          const month = String(yesterday.getMonth() + 1).padStart(2, '0');
-                          const day = String(yesterday.getDate()).padStart(2, '0');
-                          setSelectedDate(`${year}-${month}-${day}`);
-                        }}
-                      >
-                        Yesterday
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="flex-1 text-xs hover:bg-[#fc0]/10 hover:border-[#fc0]/50 hover:text-[#fc0]"
-                        onClick={jumpToToday}
-                      >
-                        Today
-                      </Button>
-                    </div>
-                  </div>
-                  <DatePicker
-                    mode="single"
-                    selected={(() => {
-                      const [year, month, day] = selectedDate.split('-').map(Number);
-                      return new Date(year, month - 1, day);
-                    })()}
-                    onSelect={(date) => {
-                      if (date) {
-                        const year = date.getFullYear();
-                        const month = String(date.getMonth() + 1).padStart(2, '0');
-                        const day = String(date.getDate()).padStart(2, '0');
-                        setSelectedDate(`${year}-${month}-${day}`);
-                      }
-                    }}
-                    disabled={(date) => {
-                      const today = new Date();
-                      today.setHours(23, 59, 59, 999);
-                      return date > today;
-                    }}
-                    showOutsideDays={false}
-                    initialFocus
-                    className="rounded-b-lg"
-                  />
-                </PopoverContent>
-              </Popover>
-
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => navigateDate('next')}
-                disabled={selectedDate === todayString}
-                className="h-8 w-8 p-0 hover:bg-[#fc0]/10 hover:text-[#fc0] disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
+            <DateRangePicker
+              dateRange={dateRange}
+              onDateRangeChange={(range) => setDateRange(range)}
+              align="end"
+            />
           </div>
         </div>
       </CardHeader>

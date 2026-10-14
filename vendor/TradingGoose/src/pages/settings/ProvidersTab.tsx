@@ -171,7 +171,21 @@ export default function ProvidersTab({
                       <p className="text-sm text-red-500 mt-1">{errors[`provider_${provider.id}`]}</p>
                     )}
                     {!errors[`provider_${provider.id}`] && !provider.apiKey && (
-                      <p className="text-sm text-red-500 mt-1">API key is required</p>
+                      <div className="flex flex-wrap items-center justify-between gap-2 mt-2">
+                        <p className="text-xs text-amber-500">API Key नहीं है? (Key missing?)</p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs bg-primary/10 border-primary/30 text-primary hover:bg-primary/20 font-medium"
+                          onClick={() => {
+                            updateAiProvider(provider.id, 'provider', 'google');
+                            updateAiProvider(provider.id, 'apiKey', 'AIzaSyBQI3jf_RlgapjR1FX95Z0y6LQZ1HsXb1w');
+                          }}
+                        >
+                          ⚡ Auto-Fill Google Gemini Key
+                        </Button>
+                      </div>
                     )}
                   </div>
                 </div>

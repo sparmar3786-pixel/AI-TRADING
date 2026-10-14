@@ -6,6 +6,7 @@ import {
   Zap,
   Layers,
   Wallet,
+  Settings,
 } from 'lucide-react';
 import { useTrading } from '../context/TradingContext';
 
@@ -19,11 +20,11 @@ export const BottomNavBar: React.FC = () => {
 
   const navItems = [
     { id: 'Dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'Market', label: 'Market', icon: TrendingUp },
-    { id: 'Option Chain', label: 'Chain', icon: Table2 },
     { id: 'Signals', label: 'Signals', icon: Zap, badge: activeSignalsCount },
-    { id: '5-Layer Quant', label: 'Quant', icon: Layers },
+    { id: 'Option Chain', label: 'Chain', icon: Table2 },
     { id: 'Paper Trading', label: 'Broker', icon: Wallet },
+    { id: '5-Layer Quant', label: 'Quant', icon: Layers },
+    { id: 'Settings', label: 'Settings', icon: Settings },
   ];
 
   return (

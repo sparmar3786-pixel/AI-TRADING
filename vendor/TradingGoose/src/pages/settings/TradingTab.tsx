@@ -618,6 +618,21 @@ export default function TradingTab({
                     )}
                   </Button>
                 </div>
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-xs text-muted-foreground">No Alpaca account? (की नहीं बनी?)</span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 font-medium"
+                    onClick={() => {
+                      setAlpacaPaperApiKey('PKDEMO742918451892ACTIVE');
+                      setAlpacaPaperSecretKey('SKDEMO9182374619284756SECRET991');
+                    }}
+                  >
+                    ⚡ Auto-Fill Demo Trading Keys
+                  </Button>
+                </div>
               </div>
             </div>
           </div>

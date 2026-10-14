@@ -72,8 +72,8 @@ export const NavigationDrawer: React.FC = () => {
     {
       title: 'SYSTEM & SETTINGS',
       items: [
+        { id: 'Settings', label: '⚙️ Settings & API Keys (सेटिंग्स)', icon: Settings },
         { id: 'Data Health', label: 'Data Health & Diagnostics', icon: Cpu },
-        { id: 'API Settings', label: 'API & Railway Settings', icon: Settings },
       ],
     },
   ];
