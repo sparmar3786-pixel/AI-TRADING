@@ -54,6 +54,8 @@ class FreshApi {
     '/v1/system/diagnostics',
     '/v1/ai/status',
     '/v1/ai/chat',
+    '/v1/market-intelligence',
+    '/v1/market-intelligence/refresh',
     '/v1/ai/nvidia-chat',
     '/v1/ai/review-signal',
     '/v1/ai/kumo/status',

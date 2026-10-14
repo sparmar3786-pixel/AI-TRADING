@@ -8,7 +8,6 @@ import 'api.dart';
 import 'config.dart';
 import 'trade_engine_page.dart';
 import 'broker_home_prototype_page.dart';
-import 'ai_chat_page.dart';
 import 'quant_engine_lab_page.dart';
 import 'order_flow_page.dart';
 import 'strategy_library_page.dart';
@@ -19,8 +18,9 @@ import 'background_monitor.dart';
 import 'daily_ai_memory.dart';
 import 'daily_ai_memory_page.dart';
 import 'smc_chart_page.dart';
+import 'market_intelligence_page.dart';
 
-const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Market Diagnostics','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','AI Chat','Order Flow','Quant Engine Lab','Strategy Library','Flow Monitor','AI Memory','SMC Pro Chart'];
+const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Market Diagnostics','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','Market Intelligence','Order Flow','Quant Engine Lab','Strategy Library','Flow Monitor','AI Memory','SMC Pro Chart'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
 const commodityOptionUnderlyings = ['CRUDEOIL','CRUDEOILM','NATURALGAS','NATGASMINI','GOLD','GOLDM','SILVER','SILVERM','COPPER','ZINC','ALUMINIUM','LEAD','NICKEL'];
 const optionUnderlyings = [...indexes, ...commodityOptionUnderlyings];
@@ -729,7 +729,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           status: status,
           onIndexSelected: (value) => setState(() => selectedIndex = value),
         ),
-        AiChatPage(backendUrl: backendUrl, selectedIndex: selectedIndex),
+        MarketIntelligencePage(backendUrl: backendUrl, signalBackendUrl: signalBackendUrl),
         OrderFlowPage(signalBackendUrl: signalBackendUrl),
         Builder(
           builder: (tabContext) => QuantEngineLabPage(
@@ -743,7 +743,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         StrategyLibraryPage(market: market, signals: signals, selectedIndex: selectedIndex),
         FlowMonitorPage(signalBackendUrl: signalBackendUrl),
         const DailyAiMemoryPage(),
-        Builder(builder: (tabContext) => SmcChartPage(index: selectedIndex, market: _market(selectedIndex), signal: _signal(selectedIndex), ai: ai, onIndexChanged: (value) => setState(() => selectedIndex = value), onOpenAiChat: () => DefaultTabController.of(tabContext).animateTo(tabs.indexOf('AI Chat')))),
+        SmcChartPage(index: selectedIndex, market: _market(selectedIndex), signal: _signal(selectedIndex), ai: ai, onIndexChanged: (value) => setState(() => selectedIndex = value)), 
       ]),
     ),
   );
@@ -768,8 +768,8 @@ IconData _tabIcon(int index) => switch (index) {
   15 => Icons.auto_awesome_outlined,
   16 => Icons.layers_outlined,
   17 => Icons.account_balance_wallet_outlined,
-  18 => Icons.picture_as_pdf_outlined,
-  19 => Icons.chat_bubble_outline,
+  18 => Icons.newspaper_outlined,
+  19 => Icons.swap_vert_circle_outlined,
   20 => Icons.show_chart,
   21 => Icons.library_books_outlined,
   22 => Icons.layers_outlined,
@@ -813,7 +813,7 @@ class DataHealthPage extends StatelessWidget {
         _healthRow('Backend / Railway API', apiOnline),
         _healthRow('Signals API response', signalsOnline),
         _healthRow('Angel One authenticated session', angelOnline),
-        ListTile(leading: const Icon(Icons.link), title: const Text('AI / chat backend'), subtitle: SelectableText(backendUrl)),
+        ListTile(leading: const Icon(Icons.link), title: const Text('AI market intelligence backend'), subtitle: SelectableText(backendUrl)),
         ListTile(leading: const Icon(Icons.show_chart), title: const Text('Live signals backend'), subtitle: SelectableText(signalBackendUrl)),
         ListTile(leading: const Icon(Icons.info_outline), title: const Text('Current service status'), subtitle: Text(status)),
         ListTile(leading: const Icon(Icons.history), title: const Text('Last market snapshot'), subtitle: Text(lastFetch ?? 'No successful market fetch recorded')),

@@ -836,5 +836,64 @@ class BackendApiTests(unittest.TestCase):
         self.assertTrue(response.json()["cache"]["hit"])
         self.assertLess(response.json()["request_elapsed_ms"], 100)
 
+    def test_market_intelligence_refresh_uses_exa_tavily_and_nvidia(self):
+        previous_state = dict(api._market_intel_state)
+
+        def fake_news(index, exa_api_key=None, tavily_api_key=None, force=False):
+            self.assertTrue(force)
+            return {
+                "status": "ok",
+                "label": "MIXED",
+                "score": 0.1,
+                "article_count": 1,
+                "sources": ["exa", "tavily"],
+                "observed_at": "2026-10-14T10:00:00+00:00",
+                "provider_checks": {
+                    "exa": {"configured": True, "ok": True, "result_count": 1, "status": "ok"},
+                    "tavily": {"configured": True, "ok": True, "result_count": 1, "status": "ok"},
+                },
+                "articles": [{
+                    "title": f"{index} source-backed market headline",
+                    "url": f"https://example.com/{index.lower()}",
+                    "published_at": "2026-10-14T09:55:00+00:00",
+                    "source": "exa",
+                    "content": "A test headline with no actionable trade claim.",
+                }],
+            }
+
+        try:
+            with patch.dict(os.environ, {
+                "EXA_API_KEY": "exa-test",
+                "TAVILY_API_KEY": "tavily-test",
+                "NVIDIA_API_KEY": "nvidia-test",
+                "NVIDIA_CHAT_MODEL": "test-nvidia-model",
+            }, clear=False), \
+                 patch.object(api, "fetch_market_news_sentiment", side_effect=fake_news) as fetch, \
+                 patch.object(api, "_run_openai_compatible_completion", return_value={
+                     "answer": "Source-backed test market brief.",
+                     "provider": "nvidia",
+                     "model": "test-nvidia-model",
+                     "llm_used": True,
+                     "ok": True,
+                     "status": "connected",
+                     "latency_ms": 12.0,
+                 }) as inference:
+                api._refresh_market_intelligence_once()
+                state = dict(api._market_intel_state)
+
+            self.assertEqual(fetch.call_count, len(api.INDEXES) + 1)  # six indexes plus MCX
+            self.assertTrue(all(call.kwargs.get("force") is True for call in fetch.call_args_list))
+            self.assertEqual(state["status"], "READY")
+            self.assertEqual(state["summary"], "Source-backed test market brief.")
+            self.assertEqual(state["summary_provider"], "nvidia")
+            self.assertEqual(state["refresh_interval_seconds"], 900)
+            self.assertGreaterEqual(len(state["articles"]), len(api.INDEXES))
+            self.assertEqual(inference.call_count, 1)
+            self.assertFalse(state["order_placement_enabled"])
+        finally:
+            with api._market_intel_lock:
+                api._market_intel_state = previous_state
+                api._market_intel_refreshing = False
+
 if __name__ == "__main__":
     unittest.main()

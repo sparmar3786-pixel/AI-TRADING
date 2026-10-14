@@ -86,6 +86,19 @@ void main() {
     expect(requestedUri!.path, '/v1/ai/chat');
   });
 
+  test('Market intelligence uses the AI-TRADING signal service', () async {
+    Uri? requestedUri;
+    final client = MockClient((request) async {
+      requestedUri = request.url;
+      return http.Response(jsonEncode({'status': 'PENDING'}), 200);
+    });
+    addTearDown(client.close);
+    final api = FreshApi('https://legacy.example.test', client, 'https://signals.example.test');
+    await api.getJson('/v1/market-intelligence');
+    expect(requestedUri!.origin, 'https://signals.example.test');
+    expect(requestedUri!.path, '/v1/market-intelligence');
+  });
+
   test('NVIDIA-only review uses the dedicated signal-service route', () async {
     Uri? requestedUri;
     final client = MockClient((request) async {

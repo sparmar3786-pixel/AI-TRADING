@@ -301,6 +301,237 @@ def _schedule_news_refresh(indexes: list[str]) -> None:
         threading.Thread(target=_refresh_news_worker, args=(key,), name=f"news-{key.lower()}", daemon=True).start()
 
 
+# Market intelligence is refreshed by the backend, not by opening the chat page.
+MARKET_INTELLIGENCE_REFRESH_SECONDS = 900
+_market_intel_lock = threading.Lock()
+_market_intel_thread: threading.Thread | None = None
+_market_intel_refreshing = False
+_market_intel_state: dict[str, Any] = {
+    "status": "PENDING",
+    "summary": None,
+    "articles": [],
+    "market_context": {},
+    "provider_checks": {},
+    "updated_at": None,
+    "next_refresh_at": None,
+    "refresh_interval_seconds": MARKET_INTELLIGENCE_REFRESH_SECONDS,
+    "summary_provider": None,
+    "summary_model": None,
+    "error": None,
+}
+
+
+def _refresh_market_intelligence_once() -> None:
+    global _market_intel_refreshing, _market_intel_state
+    with _market_intel_lock:
+        if _market_intel_refreshing:
+            return
+        _market_intel_refreshing = True
+        _market_intel_state = {**_market_intel_state, "status": "REFRESHING", "error": None}
+    observed_at = _utc_now().isoformat()
+    try:
+        all_articles: list[dict[str, Any]] = []
+        provider_checks: dict[str, Any] = {}
+        index_news: dict[str, Any] = {}
+        news_symbols = [*INDEXES.keys(), "MCX"]
+        for index in news_symbols:
+            evidence = fetch_market_news_sentiment(
+                index,
+                exa_api_key=os.getenv("EXA_API_KEY"),
+                tavily_api_key=os.getenv("TAVILY_API_KEY"),
+                force=True,
+            )
+            index_news[index] = {
+                "status": evidence.get("status"),
+                "label": evidence.get("label"),
+                "score": evidence.get("score"),
+                "article_count": evidence.get("article_count", 0),
+                "sources": evidence.get("sources", []),
+                "observed_at": evidence.get("observed_at"),
+            }
+            for provider, check in (evidence.get("provider_checks") or {}).items():
+                provider_checks.setdefault(provider, {"configured": False, "ok": True, "result_count": 0, "indexes_checked": 0})
+                current = provider_checks[provider]
+                configured_for_index = check.get("configured") is True
+                current["configured"] = current["configured"] or configured_for_index
+                current["ok"] = current["ok"] and configured_for_index and check.get("ok") is True
+                current["result_count"] += int(check.get("result_count") or 0)
+                current["indexes_checked"] += 1
+                if check.get("status") not in (None, "ok", "not_configured"):
+                    current["last_error_status"] = check.get("status")
+            for article in (evidence.get("articles") or [])[:2]:
+                if isinstance(article, dict):
+                    all_articles.append({
+                        "index": index,
+                        "title": str(article.get("title") or "")[:400],
+                        "url": article.get("url"),
+                        "published_at": article.get("published_at"),
+                        "source": article.get("source"),
+                        "content": str(article.get("content") or "")[:450],
+                    })
+
+        # Add market data only as explicitly timestamped context; stale quotes
+        # are labeled stale and must never be presented as current prices.
+        market_context: dict[str, Any] = {}
+        try:
+            with _lock:
+                snapshot = dict(_signal_cache or {})
+                snapshot_age = time.monotonic() - _signal_cache_at if _signal_cache is not None else None
+            snapshot_is_fresh = snapshot_age is not None and snapshot_age < SIGNAL_CACHE_SECONDS
+            for index in INDEXES:
+                row = dict((snapshot.get("market") or {}).get(index) or {})
+                quote_is_live = snapshot_is_fresh and row.get("live") is True
+                market_context[index] = {
+                    "ltp": row.get("ltp") if quote_is_live else None,
+                    "live": quote_is_live,
+                    "source_timestamp": row.get("source_timestamp") or row.get("timestamp"),
+                    "age_seconds": row.get("age_seconds"),
+                    "snapshot_age_seconds": round(snapshot_age, 1) if snapshot_age is not None else None,
+                    "day_move_pct": row.get("day_move_pct") if quote_is_live else None,
+                    "sentiment_label": row.get("sentiment_label") if quote_is_live else None,
+                    "pcr": row.get("pcr") if quote_is_live else None,
+                    "data_status": "LIVE" if quote_is_live else "STALE_OR_UNAVAILABLE",
+                }
+        except Exception:
+            market_context = {index: {"data_status": "UNAVAILABLE", "ltp": None, "live": False} for index in INDEXES}
+
+        unique_articles: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for article in all_articles:
+            key = str(article.get("url") or article.get("title") or "").strip().lower()
+            if key and key not in seen:
+                seen.add(key)
+                unique_articles.append(article)
+        unique_articles = unique_articles[:18]
+
+        api_key = (os.getenv("NVIDIA_API_KEY") or "").strip()
+        summary: str | None = None
+        summary_provider: str | None = None
+        summary_model: str | None = None
+        summary_error: str | None = None
+        if api_key:
+            model = os.getenv("NVIDIA_CHAT_MODEL", "nvidia/llama-3.3-nemotron-super-49b-v1.5").strip()
+            endpoint = os.getenv("NVIDIA_CHAT_BASE_URL", "https://integrate.api.nvidia.com/v1/chat/completions").strip()
+            messages = [
+                {"role": "system", "content": (
+                    "You are NVIDIA-powered market intelligence for Indian markets. Summarize what is happening "
+                    "across NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY, SENSEX and BANKEX from the supplied fresh news "
+                    "and explicitly timestamped market context. Report key themes, bullish/bearish/mixed impact, "
+                    "affected sectors/indexes, important risks and what evidence is missing. Cite supplied headline "
+                    "titles and source names. Never invent facts, prices, timestamps, OI or events. If quotes are "
+                    "stale/unavailable, say so. This is research, not a buy/sell recommendation; never override "
+                    "deterministic risk gates or claim an order should be placed."
+                )},
+                {"role": "user", "content": "Refresh interval: 15 minutes. Snapshot UTC: " + observed_at +
+                 "\nMarket context and source-backed headlines JSON:\n" +
+                 json.dumps({"market_context": market_context, "index_news": index_news, "articles": unique_articles}, separators=(",", ":"), default=str)[:14000]},
+            ]
+            try:
+                result = _run_openai_compatible_completion(
+                    api_key, model, messages, provider="nvidia", endpoint=endpoint,
+                )
+                summary = str(result.get("answer") or "").strip() or None
+                summary_provider = "nvidia" if summary else None
+                summary_model = result.get("model") if summary else None
+                if not summary:
+                    summary_error = "nvidia_empty_response"
+            except Exception as exc:
+                summary_error = str(exc)[:100] or "nvidia_inference_failed"
+        else:
+            summary_error = "NVIDIA_API_KEY_NOT_CONFIGURED"
+
+        now = _utc_now()
+        next_refresh = (datetime.fromisoformat(observed_at) + timedelta(seconds=MARKET_INTELLIGENCE_REFRESH_SECONDS)).isoformat()
+        status = "READY" if summary and unique_articles else (
+            "NVIDIA_SUMMARY_WITHOUT_NEWS" if summary else
+            "NEWS_READY_NVIDIA_UNAVAILABLE" if unique_articles else "REFRESH_FAILED"
+        )
+        new_state = {
+            "status": status,
+            "summary": summary,
+            "articles": unique_articles,
+            "market_context": market_context,
+            "index_news": index_news,
+            "provider_checks": provider_checks,
+            "updated_at": now.isoformat(),
+            "next_refresh_at": next_refresh,
+            "refresh_interval_seconds": MARKET_INTELLIGENCE_REFRESH_SECONDS,
+            "summary_provider": summary_provider,
+            "summary_model": summary_model,
+            "summary_error": summary_error,
+            "error": None if unique_articles else "No source-backed news returned by Exa/Tavily.",
+            "signal_only": True,
+            "order_placement_enabled": False,
+        }
+        with _market_intel_lock:
+            _market_intel_state = new_state
+    except Exception as exc:
+        with _market_intel_lock:
+            _market_intel_state = {
+                **_market_intel_state,
+                "status": "REFRESH_FAILED",
+                "updated_at": _utc_now().isoformat(),
+                "next_refresh_at": (_utc_now() + timedelta(seconds=MARKET_INTELLIGENCE_REFRESH_SECONDS)).isoformat(),
+                "error": f"refresh_failed:{type(exc).__name__}",
+            }
+    finally:
+        with _market_intel_lock:
+            _market_intel_refreshing = False
+
+
+def _market_intelligence_scheduler() -> None:
+    while True:
+        cycle_started = time.monotonic()
+        _refresh_market_intelligence_once()
+        remaining = MARKET_INTELLIGENCE_REFRESH_SECONDS - (time.monotonic() - cycle_started)
+        time.sleep(max(1.0, remaining))
+
+
+def _ensure_market_intelligence_scheduler() -> None:
+    global _market_intel_thread
+    with _market_intel_lock:
+        if _market_intel_thread is not None and _market_intel_thread.is_alive():
+            return
+        _market_intel_thread = threading.Thread(
+            target=_market_intelligence_scheduler,
+            name="market-intelligence-15m",
+            daemon=True,
+        )
+        thread = _market_intel_thread
+    thread.start()
+
+
+@app.on_event("startup")
+def _start_market_intelligence_scheduler_on_startup() -> None:
+    enabled = os.getenv("MARKET_INTELLIGENCE_AUTO_REFRESH", "true").strip().lower()
+    if enabled not in {"0", "false", "no", "off"}:
+        _ensure_market_intelligence_scheduler()
+
+
+@app.get("/v1/market-intelligence")
+def market_intelligence(_: str = Depends(_device)) -> dict[str, Any]:
+    """Return the latest Exa/Tavily evidence and NVIDIA's scheduled market summary."""
+    _ensure_market_intelligence_scheduler()
+    with _market_intel_lock:
+        return {**_market_intel_state, "refreshing": _market_intel_refreshing}
+
+
+@app.post("/v1/market-intelligence/refresh")
+def refresh_market_intelligence(_: str = Depends(_device)) -> dict[str, Any]:
+    """Trigger a best-effort refresh; return immediately while the worker runs."""
+    _ensure_market_intelligence_scheduler()
+    with _market_intel_lock:
+        is_refreshing = _market_intel_refreshing
+        current = {**_market_intel_state, "refreshing": _market_intel_refreshing}
+    if not is_refreshing:
+        threading.Thread(
+            target=_refresh_market_intelligence_once,
+            name="market-intelligence-manual-refresh",
+            daemon=True,
+        ).start()
+    return {**current, "refreshing": True}
+
+
 def _credential_path() -> Path:
     return Path(os.getenv("ANGEL_CREDENTIALS_FILE", "/data/angel_credentials.enc"))
 
