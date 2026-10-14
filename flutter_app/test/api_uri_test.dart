@@ -107,12 +107,16 @@ void main() {
     });
     addTearDown(client.close);
     final api = FreshApi('https://legacy.example.test', client, 'https://signals.example.test');
+    await api.aiStatus();
+    await api.testAIProviders();
     await api.postJson('/v1/providers/search/status', {});
     await api.postJson('/v1/providers/search/test', {});
     await api.kumoStatus();
     await api.kumoPredict({'model': 'kumo-tabular'});
     expect(requested.map((request) => request.url.origin), everyElement('https://signals.example.test'));
     expect(requested.map((request) => request.url.path), [
+      '/v1/ai/status',
+      '/v1/providers/ai/test',
       '/v1/providers/search/status',
       '/v1/providers/search/test',
       '/v1/ai/kumo/status',
