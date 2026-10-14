@@ -209,33 +209,83 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     return result;
   }
 
-  /// Cached quotes are display-only; cached BUY/SELL recommendations are never actionable.
+  /// Cached market snapshots are display-only. No cached trade levels may remain actionable.
   Map<String, dynamic> _makeCachedSignalsNonActionable(Map<String, dynamic> cached) {
-    final result = Map<String, dynamic>.from(cached);
-    final rawSignals = Map<String, dynamic>.from(result['signals'] as Map? ?? const {});
-    for (final entry in rawSignals.entries) {
-      final row = Map<String, dynamic>.from(entry.value as Map? ?? const {});
-      final decision = (row['decision'] ?? '').toString().toUpperCase();
-      if (decision == 'CALL BUY' || decision == 'PUT BUY') {
-        row['candidate_decision'] = decision;
+    const actionableKeys = <String>{
+      'strike', 'expiry', 'entry', 'entry_price', 'entry_price_ltp',
+      'stop_loss', 'stop_loss_price', 'sl', 'target', 'target_price',
+      'take_profit', 'trigger_price', 'limit_price', 'order_type',
+      'quantity', 'qty', 'lots', 'lot_size', 'contract_token',
+    };
+    const activeDecisions = <String>{
+      'CALL BUY', 'PUT BUY', 'BUY', 'SELL', 'CE BUY', 'PE BUY',
+      'BUY CE', 'BUY PE', 'BUY CALL', 'BUY PUT', 'LONG', 'SHORT',
+    };
+
+    dynamic sanitize(dynamic value, {bool forceWait = false}) {
+      if (value is List) {
+        return value.map((item) => sanitize(item, forceWait: forceWait)).toList();
+      }
+      if (value is! Map) return value;
+      final row = Map<String, dynamic>.from(value);
+      for (final key in row.keys.toList()) {
+        final normalizedKey = key.toString().toLowerCase();
+        if (actionableKeys.contains(normalizedKey)) {
+          row[key] = null;
+          continue;
+        }
+        final child = row[key];
+        if (child is Map || child is List) {
+          row[key] = sanitize(child, forceWait: forceWait);
+        }
+      }
+      final decision = (row['decision'] ?? '').toString().trim().toUpperCase();
+      if (forceWait || activeDecisions.contains(decision)) {
+        if (decision.isNotEmpty && decision != 'WAIT' && decision != 'HOLD' &&
+            decision != 'NEUTRAL' && decision != 'NO TRADE') {
+          row['candidate_decision'] = row['candidate_decision'] ?? decision;
+        }
         row['decision'] = 'WAIT';
-        final validation = Map<String, dynamic>.from(row['live_validation'] as Map? ?? const {});
+      }
+      if (row.containsKey('live_validation') && row['live_validation'] is Map) {
+        final validation = Map<String, dynamic>.from(row['live_validation'] as Map);
         validation['decision'] = 'WAIT';
         validation['verdict'] = 'WARN';
         final blocks = List<dynamic>.from(validation['blocks'] as List? ?? const []);
-        blocks.add('Backend offline: cached signal is not actionable');
+        if (!blocks.any((item) => item.toString().contains('cached snapshot is not actionable'))) {
+          blocks.add('Backend offline: cached snapshot is not actionable');
+        }
         validation['blocks'] = blocks;
         row['live_validation'] = validation;
-        row['signal_stability'] = <String, dynamic>{'state': 'STALE_OFFLINE', 'required_minutes': 10};
-        rawSignals[entry.key] = row;
       }
+      if (row.containsKey('five_layer_engine') && row['five_layer_engine'] is Map) {
+        final engine = Map<String, dynamic>.from(row['five_layer_engine'] as Map);
+        engine['decision'] = 'WAIT';
+        row['five_layer_engine'] = engine;
+      }
+      if (row.containsKey('quant_engine') && row['quant_engine'] is Map) {
+        final engine = Map<String, dynamic>.from(row['quant_engine'] as Map);
+        engine['decision'] = 'WAIT';
+        row['quant_engine'] = engine;
+      }
+      return row;
+    }
+
+    final result = Map<String, dynamic>.from(cached);
+    final rawSignals = Map<String, dynamic>.from(result['signals'] as Map? ?? const {});
+    for (final entry in rawSignals.entries) {
+      final row = Map<String, dynamic>.from(sanitize(entry.value, forceWait: true) as Map);
+      row['signal_stability'] = <String, dynamic>{
+        'state': 'STALE_OFFLINE',
+        'required_minutes': 10,
+      };
+      rawSignals[entry.key] = row;
     }
     result['signals'] = rawSignals;
-    // Cached snapshots can be shown for continuity, but their old server-side
-    // "live" flags must never survive an offline refresh.
+
     final cachedMarket = Map<String, dynamic>.from(result['market'] as Map? ?? const {});
     for (final entry in cachedMarket.entries) {
-      final row = Map<String, dynamic>.from(entry.value as Map? ?? const {});
+      final row = Map<String, dynamic>.from(sanitize(entry.value) as Map);
       row['live'] = false;
       row['feed_mode'] = 'CACHED_OFFLINE';
       row['cached'] = true;
@@ -243,13 +293,30 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       row['option_chain'] = chain.whereType<Map>().map((raw) {
         final option = Map<String, dynamic>.from(raw);
         option['live'] = false;
+        option['cached'] = true;
+        option['freshness'] = 'STALE_OFFLINE';
         return option;
       }).toList();
       cachedMarket[entry.key] = row;
     }
     result['market'] = cachedMarket;
+
+    final cachedCommodities = (result['commodities'] as List?) ?? const <dynamic>[];
+    result['commodities'] = cachedCommodities.whereType<Map>().map((raw) {
+      final row = Map<String, dynamic>.from(sanitize(raw, forceWait: true) as Map);
+      row['live'] = false;
+      row['cached'] = true;
+      row['feed_mode'] = 'CACHED_OFFLINE';
+      row['signal_stability'] = <String, dynamic>{'state': 'STALE_OFFLINE'};
+      return row;
+    }).toList();
+
     result['live'] = false;
-    result['feed'] = <String, dynamic>{...(result['feed'] as Map? ?? const {}), 'connected': false, 'mode': 'CACHED_OFFLINE'};
+    result['feed'] = <String, dynamic>{
+      ...(result['feed'] as Map? ?? const {}),
+      'connected': false,
+      'mode': 'CACHED_OFFLINE',
+    };
     result['trade_plans'] = <dynamic>[];
     result['qualified_trade_count'] = 0;
     return result;
