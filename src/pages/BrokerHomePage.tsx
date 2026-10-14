@@ -192,9 +192,10 @@ export const BrokerHomePage: React.FC = () => {
                 <div className="pt-1 flex justify-end">
                   <button
                     onClick={() => closePaperTrade(trade.id)}
-                    className="py-1 px-3 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 font-bold text-xs font-mono border border-rose-500/40 active:scale-95 transition-all"
+                    disabled={!markVerified}
+                    className="py-1 px-3 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 font-bold text-xs font-mono border border-rose-500/40 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    SQUARE OFF POSITION
+                    {markVerified ? 'SQUARE OFF POSITION' : 'WAIT FOR VERIFIED LTP'}
                   </button>
                 </div>
               </div>
