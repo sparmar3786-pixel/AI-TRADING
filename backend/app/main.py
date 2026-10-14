@@ -476,8 +476,10 @@ def _refresh_market_intelligence_once() -> None:
 
 def _market_intelligence_scheduler() -> None:
     while True:
+        cycle_started = time.monotonic()
         _refresh_market_intelligence_once()
-        time.sleep(MARKET_INTELLIGENCE_REFRESH_SECONDS)
+        remaining = MARKET_INTELLIGENCE_REFRESH_SECONDS - (time.monotonic() - cycle_started)
+        time.sleep(max(1.0, remaining))
 
 
 def _ensure_market_intelligence_scheduler() -> None:
@@ -507,7 +509,15 @@ def refresh_market_intelligence(_: str = Depends(_device)) -> dict[str, Any]:
     """Trigger a best-effort refresh; return immediately while the worker runs."""
     _ensure_market_intelligence_scheduler()
     with _market_intel_lock:
-        return {**_market_intel_state, "refreshing": _market_intel_refreshing}
+        is_refreshing = _market_intel_refreshing
+        current = {**_market_intel_state, "refreshing": _market_intel_refreshing}
+    if not is_refreshing:
+        threading.Thread(
+            target=_refresh_market_intelligence_once,
+            name="market-intelligence-manual-refresh",
+            daemon=True,
+        ).start()
+    return {**current, "refreshing": True}
 
 
 def _credential_path() -> Path:
