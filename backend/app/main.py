@@ -333,7 +333,8 @@ def _refresh_market_intelligence_once() -> None:
         all_articles: list[dict[str, Any]] = []
         provider_checks: dict[str, Any] = {}
         index_news: dict[str, Any] = {}
-        for index in INDEXES:
+        news_symbols = [*INDEXES.keys(), "MCX"]
+        for index in news_symbols:
             evidence = fetch_market_news_sentiment(
                 index,
                 exa_api_key=os.getenv("EXA_API_KEY"),
