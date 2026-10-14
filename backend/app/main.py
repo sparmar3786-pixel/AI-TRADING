@@ -1062,10 +1062,12 @@ def _apply_strategy_confluence_filter(
         "strategy_execution_id": execution_id,
         "source": "same_completed_5m_angelone_candles",
         "reason": (
-            "Strategy consensus agrees with the Quant candidate."
+            "Quant validation and strategy consensus agree with the candidate."
             if passed else
             "No actionable Quant candidate exists; final decision remains WAIT."
             if not has_candidate else
+            "The Five-Layer Quant or live-data validation gate did not pass."
+            if not quant_gate_pass else
             "Strategy consensus is missing, below three votes, or conflicts with the Quant candidate."
         ),
     }
