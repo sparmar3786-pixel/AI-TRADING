@@ -5,7 +5,7 @@ import json
 import threading
 import time
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
 
 EXCHANGE_TYPES = {"NSE": 1, "NFO": 2, "BSE": 3, "BFO": 4, "MCX": 5}
@@ -61,8 +61,9 @@ def _timestamp(value: Any) -> str | None:
 class AngelOneStream:
     """Owns one WebSocket client and caches normalized latest ticks by token."""
 
-    def __init__(self, adapter: Any) -> None:
+    def __init__(self, adapter: Any, on_tick: Callable[[dict[str, Any]], None] | None = None) -> None:
         self._adapter = adapter
+        self._on_tick_callback = on_tick
         self._lock = threading.RLock()
         self._client: Any = None
         self._thread: threading.Thread | None = None
@@ -189,6 +190,13 @@ class AngelOneStream:
             self._ticks[token] = tick
             self._last_tick_at = time.monotonic()
             self._tick_count += 1
+        callback = self._on_tick_callback
+        if callback is not None:
+            try:
+                callback(dict(tick))
+            except Exception:
+                # Chart telemetry must never break the broker feed callback.
+                pass
 
     def _on_error(self, *_args: Any) -> None:
         with self._lock:
