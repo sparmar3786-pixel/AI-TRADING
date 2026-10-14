@@ -349,10 +349,11 @@ def _refresh_market_intelligence_once() -> None:
                 "observed_at": evidence.get("observed_at"),
             }
             for provider, check in (evidence.get("provider_checks") or {}).items():
-                provider_checks.setdefault(provider, {"configured": False, "ok": False, "result_count": 0, "indexes_checked": 0})
+                provider_checks.setdefault(provider, {"configured": False, "ok": True, "result_count": 0, "indexes_checked": 0})
                 current = provider_checks[provider]
-                current["configured"] = current["configured"] or check.get("configured") is True
-                current["ok"] = current["ok"] or check.get("ok") is True
+                configured_for_index = check.get("configured") is True
+                current["configured"] = current["configured"] or configured_for_index
+                current["ok"] = current["ok"] and configured_for_index and check.get("ok") is True
                 current["result_count"] += int(check.get("result_count") or 0)
                 current["indexes_checked"] += 1
                 if check.get("status") not in (None, "ok", "not_configured"):
@@ -440,7 +441,10 @@ def _refresh_market_intelligence_once() -> None:
 
         now = _utc_now()
         next_refresh = (now + timedelta(seconds=MARKET_INTELLIGENCE_REFRESH_SECONDS)).isoformat()
-        status = "READY" if summary else ("NEWS_READY_NVIDIA_UNAVAILABLE" if unique_articles else "REFRESH_FAILED")
+        status = "READY" if summary and unique_articles else (
+            "NVIDIA_SUMMARY_WITHOUT_NEWS" if summary else
+            "NEWS_READY_NVIDIA_UNAVAILABLE" if unique_articles else "REFRESH_FAILED"
+        )
         new_state = {
             "status": status,
             "summary": summary,
