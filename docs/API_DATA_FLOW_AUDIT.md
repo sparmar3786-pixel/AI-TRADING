@@ -68,12 +68,14 @@ This is an evidence-based audit, not a claim that all tabs are now end-to-end ve
 4. Chat and signal review use NVIDIA hosted chat completions with OpenRouter fallback. Kumo Tabular is a separate structured-prediction model, not a general chat replacement. The configured NVIDIA key must be entitled for the selected chat model; a Kumo-only key may work for Kumo but fail chat inference.
 5. Periodic refresh and Flow Monitor can create concurrent reads. Cached signal reads are usually fast in the captured window, but option-chain reads remain multi-second and WebSocket clients sometimes close early. Stage timings and load checks are needed before claiming end-to-end low latency.
 6. Strategy suite traces explicitly report `ai_consumed=false`, `research_engine_received=false`, and `trading_setup_received=false`. AI chat may receive a strategy summary in prompt context, but that does not prove semantic use or downstream propagation.
+7. AI provider status reused cached probe results whenever the key remained merely configured. Rotating one non-empty key to another could leave a stale green result. The audit branch now fingerprints key/model/endpoint configuration without exposing secrets and invalidates cached results when those values change.
 
 ### Changes in branch `audit/ai-dataflow-kumo-wiring`
 - Route AI chat/status/provider-test/search-test/Kumo endpoints through the AI-TRADING signal backend.
 - Add Flutter API methods for Kumo status and prediction; the prediction method accepts a caller-provided schema-complete envelope and does not fabricate training labels.
 - Add Kumo reachability visibility to AI Access and label it as reachability-only, not inference-ready.
 - Add API URI regression tests for unified AI/search/Kumo routing.
+- Invalidate cached NVIDIA/OpenRouter probe status after key/model/endpoint changes and cover key rotation with a backend regression test.
 
 ### Verification gates before declaring fully working
 - CI: Python tests, Flutter analyze, widget/API URI tests, release and ARM64 APK jobs all green on the audit branch.
