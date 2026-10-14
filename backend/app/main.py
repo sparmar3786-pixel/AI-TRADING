@@ -2875,64 +2875,6 @@ def _provider_json_with_retry(request: urllib.request.Request, *, timeout: float
     raise RuntimeError(f"{provider}_request_failed")
 
 
-def _run_gemini_completion(api_key: str, model: str, messages: list[dict[str, str]]) -> dict[str, Any]:
-    """Call Gemini's native generateContent API; never expose the key or raw provider body."""
-    started = time.perf_counter()
-    safe_model = re.sub(r"[^A-Za-z0-9._-]", "", model or "") or "gemini-2.5-flash"
-    system_text = "\n".join(
-        str(item.get("content") or "") for item in messages if item.get("role") == "system"
-    ).strip()
-    contents = []
-    for item in messages:
-        role = str(item.get("role") or "")
-        if role == "system":
-            continue
-        content = str(item.get("content") or "").strip()
-        if not content:
-            continue
-        contents.append({
-            "role": "model" if role == "assistant" else "user",
-            "parts": [{"text": content[:12000]}],
-        })
-    if not contents:
-        raise RuntimeError("gemini_empty_prompt")
-    payload: dict[str, Any] = {
-        "contents": contents,
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 700},
-    }
-    if system_text:
-        payload["systemInstruction"] = {"parts": [{"text": system_text[:6000]}]}
-    endpoint = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        + urllib.parse.quote(safe_model, safe="-_.")
-        + ":generateContent?key=" + urllib.parse.quote(api_key, safe="")
-    )
-    request = urllib.request.Request(
-        endpoint, data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"}, method="POST",
-    )
-    try:
-        data = _provider_json_with_retry(request, timeout=18, provider="gemini")
-        candidates = data.get("candidates") or []
-        parts = ((candidates[0].get("content") or {}).get("parts") or []) if candidates else []
-        answer = "\n".join(str(part.get("text") or "") for part in parts if isinstance(part, dict)).strip()
-        if not answer:
-            raise RuntimeError("gemini_empty_response")
-        return {
-            "answer": answer, "provider": "gemini", "model": safe_model,
-            "llm_used": True, "status": "connected",
-            "latency_ms": round((time.perf_counter() - started) * 1000, 1),
-        }
-    except urllib.error.HTTPError as exc:
-        if exc.code == 429:
-            raise RuntimeError("gemini_rate_limited") from None
-        if exc.code in (401, 403):
-            raise RuntimeError("gemini_authentication_failed") from None
-        raise RuntimeError(f"gemini_http_{exc.code}") from None
-    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
-        raise RuntimeError(f"gemini_{type(exc).__name__.lower()}") from None
-
-
 def _run_openai_compatible_completion(
     api_key: str, model: str, messages: list[dict[str, str]], *,
     provider: str, endpoint: str, referer: str | None = None,
@@ -2977,7 +2919,6 @@ def _run_openai_compatible_completion(
 
 @app.post("/v1/ai/chat")
 @app.post("/v1/ai/nvidia-chat")
-@app.post("/v1/ai/gemini-chat")
 def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
     """Use a real cloud provider when configured; disclose fallback if every provider fails."""
     index = str(body.get("index") or "NIFTY").strip().upper()
