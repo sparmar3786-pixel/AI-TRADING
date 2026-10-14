@@ -46,3 +46,11 @@ Environment-variable-only setup is also supported with ANGEL_API_KEY, ANGEL_CLIE
     uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8080
 
 In a local shell, configure the four ANGEL_* environment variables before attempting broker login. Never paste them into a public issue or commit.
+## Cloud AI provider (NVIDIA primary)
+
+- Set `NVIDIA_API_KEY` in Railway for NVIDIA hosted chat inference. For an existing NVIDIA key used by Kumo, `KUMO_NVIDIA_API_KEY` is accepted as a fallback, provided that key has access to the selected chat model.
+- Optional: set `NVIDIA_CHAT_MODEL=nvidia/llama-3.3-nemotron-super-49b-v1.5` and `NVIDIA_CHAT_BASE_URL=https://integrate.api.nvidia.com/v1/chat/completions`.
+- Optional fallback: configure `OPENROUTER_API_KEY`; default fallback model is `meta-llama/llama-3.3-70b-instruct`.
+- Run **Test AI Providers** in the app after deployment. A key being present only means configured; green status requires a real authenticated inference response.
+- NVIDIA chat handles natural-language Q&A and signal review. Kumo Tabular remains a separate structured-prediction service. Neither AI provider can override deterministic WAIT/risk gates, and the service does not place orders.
+- Keep all API keys in Railway variables or a local untracked environment file. Never commit secrets or put them in Flutter build arguments.
