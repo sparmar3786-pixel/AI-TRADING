@@ -59,6 +59,11 @@ except ModuleNotFoundError:
 app = FastAPI(title="AI-TRADING Read-only Signals API", version="1.0.0")
 app.include_router(smc_router)
 app.include_router(kumo_router)
+try:
+    from app.realtime_chart import router as realtime_chart_router
+except ModuleNotFoundError:
+    from backend.app.realtime_chart import router as realtime_chart_router
+app.include_router(realtime_chart_router)
 logger = logging.getLogger("ai_trading.angel")
 # SmartAPI/logzero SDK error logs can include full request headers (API key/JWT)
 # and payloads. Silence SDK transport logs before the first broker call; only
