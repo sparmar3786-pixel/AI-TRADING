@@ -32,6 +32,8 @@ class StrategyQuantConfluenceGateTests(unittest.TestCase):
         self.assertEqual(filtered["decision"], "CALL BUY")
         self.assertTrue(filtered["strategy_filter"]["pass"])
         self.assertEqual(filtered["entry"], 101.0)
+        self.assertEqual(filtered["exit"], 111.0)
+        self.assertEqual(filtered["exit_semantics"], "target price reference; signal-only, no order placement")
         self.assertEqual(filtered["trade_plan"]["target"], 111.0)
         self.assertEqual(filtered["five_layer_engine"]["decision"], "CALL BUY")
 
@@ -44,6 +46,7 @@ class StrategyQuantConfluenceGateTests(unittest.TestCase):
         self.assertEqual(filtered["strategy_filter"]["state"], "BLOCKED")
         self.assertIsNone(filtered["strike"])
         self.assertIsNone(filtered["entry"])
+        self.assertIsNone(filtered["exit"])
         self.assertIsNone(filtered["stop_loss"])
         self.assertIsNone(filtered["target"])
         self.assertEqual(filtered["candidate_setup"]["status"], "BLOCKED_NOT_ACTIONABLE")
