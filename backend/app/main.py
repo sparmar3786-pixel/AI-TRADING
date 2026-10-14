@@ -59,6 +59,15 @@ except ModuleNotFoundError:
 app = FastAPI(title="AI-TRADING Read-only Signals API", version="1.0.0")
 app.include_router(smc_router)
 app.include_router(kumo_router)
+try:
+    from app.realtime_chart import router as realtime_chart_router
+except ModuleNotFoundError:
+    from backend.app.realtime_chart import router as realtime_chart_router
+app.include_router(realtime_chart_router)
+try:
+    from integrations.chart_bridge import publish_angelone_tick
+except ImportError:
+    publish_angelone_tick = None
 logger = logging.getLogger("ai_trading.angel")
 # SmartAPI/logzero SDK error logs can include full request headers (API key/JWT)
 # and payloads. Silence SDK transport logs before the first broker call; only
@@ -701,7 +710,7 @@ def _start_stream(adapter: AngelOneReadOnly, rows: list[dict[str, Any]] | None =
         if _stream is None or _stream_adapter is not adapter:
             if _stream is not None:
                 _stream.stop()
-            _stream = AngelOneStream(adapter)
+            _stream = AngelOneStream(adapter, on_tick=publish_angelone_tick)
             _stream_adapter = adapter
         try:
             status = _stream.start(subscriptions)

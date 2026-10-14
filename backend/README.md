@@ -54,3 +54,17 @@ In a local shell, configure the four ANGEL_* environment variables before attemp
 - Run **Test AI Providers** in the app after deployment. A key being present only means configured; green status requires a real authenticated inference response.
 - NVIDIA chat handles natural-language Q&A and signal review. Kumo Tabular remains a separate structured-prediction service. Neither AI provider can override deterministic WAIT/risk gates, and the service does not place orders.
 - Keep all API keys in Railway variables or a local untracked environment file. Never commit secrets or put them in Flutter build arguments.
+
+
+## Realtime chart performance rollout
+
+The optional realtime chart router is mounted at:
+- `GET /snapshot?symbol=BANKNIFTY&tf=1m&limit=1000` — initial candle snapshot with `seq` and `ts_server`.
+- `WS /ws/chart?symbol=BANKNIFTY&tf=1m&lastSeq=0` — current-candle deltas and sequence-gap notifications.
+- `POST /internal/chart/tick` — internal normalized candle/tick ingest; requires `Authorization: Bearer <MARKET_INGEST_TOKEN>`.
+
+Set `REDIS_URL` to a Railway Redis connection string and set a strong random `MARKET_INGEST_TOKEN` before enabling the ingest route. Without Redis, endpoints use a process-local memory cache for development only; it is not durable and does not synchronize replicas. Redis keys use `candles:{SYMBOL}:{TF}`, `cur:{SYMBOL}:{TF}`, and `seq:{SYMBOL}:{TF}`. WebSocket topics use `chart.{SYMBOL}.{TF}`.
+
+**Current integration status:** the existing SmartWebSocketV2 callback now passes normalized ticks to a bounded background queue, so Redis work does not block the broker callback. The worker builds OHLCV candles for supported timeframes and publishes Redis deltas. Set `CHART_TOKEN_SYMBOL_MAP` to a JSON object mapping exact Angel One instrument tokens to canonical app symbols (for example, `{"99926000":"NIFTY"}`); unmapped tokens are ignored. Configure `REDIS_URL` or the bridge deliberately does not publish chart data. The legacy `/internal/chart/tick` route remains token-protected for external/internal adapters.
+
+**Still pending before production cutover:** APK snapshot/delta client, reconnect + gap resync, candle-close persistence to Postgres, dedicated engine worker, order-service isolation/idempotency, Android background decode/visible-candle rendering, and measured latency comparison. Verify symbol-token mappings against the current Angel One instrument master. Do not route live orders through the chart service.
