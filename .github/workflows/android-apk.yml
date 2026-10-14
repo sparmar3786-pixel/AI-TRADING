@@ -43,7 +43,7 @@ jobs:
         with:
           packages: 'cmdline-tools;latest platform-tools'
       - name: Verify Android SDK tools
-        run: |
+        run: |.
           set -euo pipefail
           echo "ANDROID_HOME=${ANDROID_HOME:-}"
           echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-}"
