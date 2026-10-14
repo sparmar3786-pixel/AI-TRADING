@@ -2475,6 +2475,25 @@ def _provider_key_present(*names: str) -> bool:
     return any(os.getenv(name, "").strip() for name in names)
 
 
+def _provider_config_fingerprint(provider: str) -> str:
+    """Fingerprint key/model/endpoint configuration without exposing secrets."""
+    if provider == "nvidia":
+        values = (
+            os.getenv("NVIDIA_API_KEY") or os.getenv("KUMO_NVIDIA_API_KEY") or "",
+            os.getenv("NVIDIA_CHAT_MODEL", "nvidia/llama-3.3-nemotron-super-49b-v1.5"),
+            os.getenv("NVIDIA_CHAT_BASE_URL", "https://integrate.api.nvidia.com/v1/chat/completions"),
+        )
+    elif provider == "openrouter":
+        values = (
+            os.getenv("OPENROUTER_API_KEY") or os.getenv("OPEN_ROUTER_API_KEY") or "",
+            os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct"),
+            os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1/chat/completions"),
+        )
+    else:
+        raise ValueError("Unsupported AI provider")
+    return hashlib.sha256("\\0".join(values).encode("utf-8")).hexdigest()
+
+
 @app.get("/v1/ai/status")
 def ai_status(_: str = Depends(_device)) -> dict[str, Any]:
     # NVIDIA is primary; OpenRouter is an optional fallback.
@@ -2495,8 +2514,14 @@ def ai_status(_: str = Depends(_device)) -> dict[str, Any]:
     with _lock:
         for name in ("nvidia", "openrouter"):
             cached = _ai_provider_test_cache.get(name)
-            if cached and cached.get("configured") == provider_status[name]["configured"]:
-                provider_status[name] = dict(cached)
+            if (
+                cached
+                and cached.get("configured") == provider_status[name]["configured"]
+                and cached.get("_config_fingerprint") == _provider_config_fingerprint(name)
+            ):
+                provider_status[name] = {
+                    key: value for key, value in cached.items() if key != "_config_fingerprint"
+                }
     return {
         "provider": selected[0] if selected else "deterministic_fallback",
         "model": selected[2] if selected else "five-layer-quant-context",
@@ -2664,7 +2689,9 @@ def test_ai_providers(_: str = Depends(_device)) -> dict[str, Any]:
     tested = [item for item in checks if item.get("provider") in ("nvidia", "openrouter")]
     with _lock:
         for item in tested:
-            _ai_provider_test_cache[item["provider"]] = dict(item)
+            cached_item = dict(item)
+            cached_item["_config_fingerprint"] = _provider_config_fingerprint(str(item["provider"]))
+            _ai_provider_test_cache[item["provider"]] = cached_item
     succeeded = [item for item in tested if item.get("ok") is True]
     return {
         "status": "ok" if succeeded else ("not_configured" if not any(item.get("configured") for item in tested) else "failed"),
