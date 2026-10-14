@@ -1537,13 +1537,16 @@ def _index_snapshot(
             "order_placement_enabled": False,
         })
     strategy_suite["execution_id"] = strategy_execution_id
-    # This trace is truthful: the suite is now consumed by the live Quant gate
-    # and by the shared trade-plan contract, not just displayed in the UI.
-    strategy_trace["research_engine_received"] = True
-    strategy_trace["trading_setup_received"] = True
+    # Do not claim downstream delivery merely because the suite was computed.
+    # The shared signal payload exposes the result; separate page-level receipt
+    # must be instrumented by the actual consumers before these flags turn true.
+    strategy_trace["shared_signal_payload_available"] = True
+    strategy_trace["research_engine_received"] = False
+    strategy_trace["trading_setup_received"] = False
     for trace_row in strategy_trace_rows:
-        trace_row["research_engine_received"] = True
-        trace_row["trading_setup_received"] = True
+        trace_row["shared_signal_payload_available"] = True
+        trace_row["research_engine_received"] = False
+        trace_row["trading_setup_received"] = False
     strategy_suite["trace"] = strategy_trace
     strategy_suite["strategy_trace"] = strategy_trace_rows
     result = _apply_strategy_confluence_filter(result, strategy_suite, strategy_execution_id)
