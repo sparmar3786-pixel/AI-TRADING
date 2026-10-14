@@ -358,7 +358,7 @@ def _refresh_market_intelligence_once() -> None:
                 current["indexes_checked"] += 1
                 if check.get("status") not in (None, "ok", "not_configured"):
                     current["last_error_status"] = check.get("status")
-            for article in (evidence.get("articles") or [])[:8]:
+            for article in (evidence.get("articles") or [])[:3]:
                 if isinstance(article, dict):
                     all_articles.append({
                         "index": index,
@@ -366,7 +366,7 @@ def _refresh_market_intelligence_once() -> None:
                         "url": article.get("url"),
                         "published_at": article.get("published_at"),
                         "source": article.get("source"),
-                        "content": str(article.get("content") or "")[:1000],
+                        "content": str(article.get("content") or "")[:450],
                     })
 
         # Add market data only as explicitly timestamped context; stale quotes
@@ -401,7 +401,7 @@ def _refresh_market_intelligence_once() -> None:
             if key and key not in seen:
                 seen.add(key)
                 unique_articles.append(article)
-        unique_articles = unique_articles[:30]
+        unique_articles = unique_articles[:18]
 
         api_key = (os.getenv("NVIDIA_API_KEY") or "").strip()
         summary: str | None = None
