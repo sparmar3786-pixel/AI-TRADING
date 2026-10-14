@@ -161,6 +161,15 @@ def kumo_status(_: str = Depends(_device)) -> dict[str, Any]:
 @router.post("/v1/ai/kumo/predict")
 def kumo_predict(body: KumoPredictionRequest, _: str = Depends(_device)) -> dict[str, Any]:
     """Proxy real Kumo structured prediction; never places orders or fabricates fallback."""
+    signal_api = None
+    index = body.index.strip().upper() if body.index else None
+    if index:
+        try:
+            from app import main as signal_api
+        except ImportError:
+            from backend.app import main as signal_api
+        if index not in signal_api.INDEXES:
+            raise HTTPException(status_code=422, detail="Unsupported index for Kumo-to-Quant connection.")
     hosted_key = _hosted_key()
     if hosted_key:
         payload = body.request
@@ -203,14 +212,7 @@ def kumo_predict(body: KumoPredictionRequest, _: str = Depends(_device)) -> dict
     # Optional, explicit bridge: attach the real Kumo inference to the current
     # deterministic Quant snapshot. Kumo output is evidence only; it never
     # changes the Quant decision or bypasses live-data/risk gates.
-    if body.index:
-        index = body.index.strip().upper()
-        try:
-            from app import main as signal_api
-        except ImportError:
-            from backend.app import main as signal_api
-        if index not in signal_api.INDEXES:
-            raise HTTPException(status_code=422, detail="Unsupported index for Kumo-to-Quant connection.")
+    if index and signal_api is not None:
         snapshot = signal_api._get_signals(force=False)
         signal = dict((snapshot.get("signals") or {}).get(index) or {})
         quant = dict(signal.get("quant_engine") or signal.get("five_layer_engine") or {})
