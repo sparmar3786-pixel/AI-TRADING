@@ -37,8 +37,8 @@ class KumoQuantBridgeTests(unittest.TestCase):
             "output": {"fields": ["prediction", "probabilities"]},
         }
         prediction = {"predictions": [{"prediction": "UP", "probabilities": {"UP": 0.61, "DOWN": 0.39}}]}
-        with patch.dict(os.environ, {"KUMO_NVIDIA_API_KEY": "kumo-test-key"}, clear=False), \\
-             patch.object(kumo_nim_api, "_http_json", return_value=(200, prediction, 17.5)) as upstream, \\
+        with patch.dict(os.environ, {"KUMO_NVIDIA_API_KEY": "kumo-test-key"}, clear=False), \
+             patch.object(kumo_nim_api, "_http_json", return_value=(200, prediction, 17.5)) as upstream, \
              patch.object(api, "_get_signals", return_value=snapshot):
             response = self.client.post(
                 "/v1/ai/kumo/predict",
@@ -65,7 +65,7 @@ class KumoQuantBridgeTests(unittest.TestCase):
             "task": {}, "schema": {}, "context": {}, "predict": {},
             "output": {"fields": ["prediction"]},
         }
-        with patch.dict(os.environ, {"KUMO_NVIDIA_API_KEY": "kumo-test-key"}, clear=False), \\
+        with patch.dict(os.environ, {"KUMO_NVIDIA_API_KEY": "kumo-test-key"}, clear=False), \
              patch.object(kumo_nim_api, "_http_json", return_value=(200, {"predictions": []}, 1.0)):
             response = self.client.post(
                 "/v1/ai/kumo/predict",
