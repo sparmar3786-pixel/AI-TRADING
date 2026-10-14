@@ -88,7 +88,7 @@ export const TradingProvider: React.FC<{ children: ReactNode }> = ({ children })
   // Save paper trading to localStorage
   useEffect(() => {
     localStorage.setItem('fresh_paper_balance', paperBalance.toString());
-  }, [paperBalance]);
+  }, [paperBalance, market]);
 
   useEffect(() => {
     localStorage.setItem('fresh_paper_trades', JSON.stringify(paperTrades));
@@ -175,9 +175,39 @@ export const TradingProvider: React.FC<{ children: ReactNode }> = ({ children })
       alert('Entry price and lot quantity must be valid positive values.');
       return;
     }
+    const currentMkt = market[trade.symbol as IndexSymbol];
+    const timestampMs = currentMkt?.timestamp ? Date.parse(currentMkt.timestamp) : Number.NaN;
+    const ageMs = Date.now() - timestampMs;
+    if (
+      !currentMkt ||
+      currentMkt.live !== true ||
+      !Number.isFinite(timestampMs) ||
+      ageMs < 0 ||
+      ageMs > 120000
+    ) {
+      alert('Paper order blocked: no fresh live market snapshot is available.');
+      return;
+    }
+    const strikeMatch = trade.option_name.match(/(\\d+(?:\\.\\d+)?)(?=\\s*(?:CE|PE)\\b)/i);
+    if (!strikeMatch) {
+      alert('Paper order blocked: option strike could not be matched to a broker quote.');
+      return;
+    }
+    const strike = Number(strikeMatch[1]);
+    const quote = currentMkt.option_chain?.find(row => Math.abs(row.strike - strike) < 0.01);
+    const actualPrice = trade.side === 'CE' ? quote?.ce_ltp : quote?.pe_ltp;
+    if (typeof actualPrice !== 'number' || !Number.isFinite(actualPrice) || actualPrice <= 0) {
+      alert('Paper order blocked: no verified option LTP is available for this strike.');
+      return;
+    }
+    if (Math.abs(actualPrice - trade.entry_price) > Math.max(1, actualPrice * 0.02)) {
+      alert('Option price changed by more than 2%. Refresh the option chain and place the paper order again.');
+      return;
+    }
     const lotSize = INDEX_CONFIG[trade.symbol as IndexSymbol]?.lotSize || 50;
     const quantity = trade.lots * lotSize;
-    const requiredMargin = trade.entry_price * quantity;
+    const entryPrice = actualPrice;
+    const requiredMargin = entryPrice * quantity;
 
     if (requiredMargin > paperBalance) {
       alert(`Insufficient margin! Required ₹${requiredMargin.toLocaleString('en-IN')} but available is ₹${paperBalance.toLocaleString('en-IN')}`);
@@ -193,14 +223,15 @@ export const TradingProvider: React.FC<{ children: ReactNode }> = ({ children })
       action: trade.action,
       lots: trade.lots,
       quantity,
-      entry_price: trade.entry_price,
-      current_price: trade.entry_price,
+      entry_price: entryPrice,
+      current_price: entryPrice,
       stop_loss: trade.stop_loss,
       target: trade.target,
       pnl: 0,
       pnl_percent: 0,
       status: 'OPEN',
-      mark_status: 'WAITING_FOR_LIVE_OPTION_QUOTE',
+      mark_status: 'LIVE_OPTION_QUOTE',
+      mark_timestamp: currentMkt.timestamp,
     };
 
     setPaperBalance(prev => prev - requiredMargin);
