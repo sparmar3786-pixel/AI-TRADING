@@ -359,7 +359,7 @@ def _refresh_market_intelligence_once() -> None:
                 current["indexes_checked"] += 1
                 if check.get("status") not in (None, "ok", "not_configured"):
                     current["last_error_status"] = check.get("status")
-            for article in (evidence.get("articles") or [])[:3]:
+            for article in (evidence.get("articles") or [])[:2]:
                 if isinstance(article, dict):
                     all_articles.append({
                         "index": index,
