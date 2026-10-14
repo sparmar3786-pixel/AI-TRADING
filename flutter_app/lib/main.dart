@@ -2853,3 +2853,90 @@ class TradePlanCard extends StatelessWidget {
 }
 
 String _val(dynamic v){if(v==null)return '—';if(v is num)return v.toStringAsFixed(v.abs()>=100?2:3);return v.toString();}
+
+/// Lightweight painter for the realtime OHLC chart. It accepts only real,
+/// numeric OHLC bars and deliberately does not fabricate missing candles.
+class ProCandlePainter extends CustomPainter {
+  ProCandlePainter(this.bars);
+  final List<Map<String, dynamic>> bars;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final valid = bars.where((bar) =>
+      ['open', 'high', 'low', 'close'].every((key) => bar[key] is num)
+    ).toList(growable: false);
+    if (valid.length < 2 || size.width <= 48 || size.height <= 24) return;
+
+    final shown = valid.length > 55 ? valid.sublist(valid.length - 55) : valid;
+    final prices = <double>[];
+    for (final bar in shown) {
+      prices.add((bar['high'] as num).toDouble());
+      prices.add((bar['low'] as num).toDouble());
+    }
+    var minPrice = prices.reduce((a, b) => a < b ? a : b);
+    var maxPrice = prices.reduce((a, b) => a > b ? a : b);
+    if ((maxPrice - minPrice).abs() < 0.000001) {
+      minPrice -= 1;
+      maxPrice += 1;
+    }
+
+    const topPad = 12.0;
+    const bottomPad = 12.0;
+    const rightAxisWidth = 44.0;
+    final plotHeight = size.height - topPad - bottomPad;
+    final plotWidth = size.width - rightAxisWidth;
+    double y(double price) =>
+      topPad + (maxPrice - price) / (maxPrice - minPrice) * plotHeight;
+
+    final gridPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.08)
+      ..strokeWidth = 1;
+    final labelStyle = TextStyle(
+      color: Colors.white.withValues(alpha: 0.55), fontSize: 9,
+    );
+    for (var i = 0; i < 5; i++) {
+      final yy = topPad + i * plotHeight / 4;
+      canvas.drawLine(Offset(0, yy), Offset(plotWidth, yy), gridPaint);
+      final price = maxPrice - i * (maxPrice - minPrice) / 4;
+      final painter = TextPainter(
+        text: TextSpan(text: price.toStringAsFixed(1), style: labelStyle),
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: rightAxisWidth - 2);
+      painter.paint(canvas, Offset(plotWidth + 2, yy - 5));
+    }
+
+    final step = plotWidth / shown.length;
+    final bodyWidth = (step * 0.58).clamp(2.0, 10.0).toDouble();
+    for (var i = 0; i < shown.length; i++) {
+      final bar = shown[i];
+      final open = (bar['open'] as num).toDouble();
+      final high = (bar['high'] as num).toDouble();
+      final low = (bar['low'] as num).toDouble();
+      final close = (bar['close'] as num).toDouble();
+      final x = i * step + step / 2;
+      final color = close >= open ? Colors.greenAccent : Colors.redAccent;
+      final wickPaint = Paint()..color = color..strokeWidth = 1.2;
+      canvas.drawLine(Offset(x, y(high)), Offset(x, y(low)), wickPaint);
+      final candleTop = y(open < close ? close : open);
+      final candleBottom = y(open > close ? open : close);
+      final bodyBottom = (candleBottom - candleTop).abs() < 2
+          ? candleTop + 2 : candleBottom;
+      canvas.drawRect(
+        Rect.fromLTRB(x - bodyWidth / 2, candleTop,
+          x + bodyWidth / 2, bodyBottom),
+        Paint()..color = color,
+      );
+    }
+
+    final lastClose = (shown.last['close'] as num).toDouble();
+    final lastLine = Paint()
+      ..color = Colors.cyanAccent.withValues(alpha: 0.8)
+      ..strokeWidth = 1;
+    canvas.drawLine(Offset(0, y(lastClose)),
+      Offset(plotWidth, y(lastClose)), lastLine);
+  }
+
+  @override
+  bool shouldRepaint(covariant ProCandlePainter oldDelegate) =>
+      oldDelegate.bars != bars;
+}
