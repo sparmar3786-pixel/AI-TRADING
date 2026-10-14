@@ -14,7 +14,6 @@ dependencies:
   http: ^1.2.2
   shared_preferences: ^2.5.3
   url_launcher: ^6.3.2
-  stream_chat_flutter_ai: ^0.1.0
   webview_flutter: ^4.10.0
   path_provider: ^2.1.5
 
