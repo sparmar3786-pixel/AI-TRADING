@@ -99,7 +99,7 @@ class _FlowMonitorPageState extends State<FlowMonitorPage> {
       final result = await api.testAIProviders().timeout(const Duration(seconds: 24));
       if (!mounted) return;
       final checks = (result['checks'] as List? ?? const []).whereType<Map>().toList();
-      final messages = checks.where((c) => c['provider'] == 'gemini' || c['provider'] == 'openrouter').map((c) {
+      final messages = checks.where((c) => c['provider'] == 'nvidia' || c['provider'] == 'openrouter').map((c) {
         final name = (c['provider'] ?? 'AI').toString().toUpperCase();
         final verdict = (c['verdict'] ?? 'WAIT').toString().toUpperCase();
         final status = (c['status'] ?? 'unknown').toString();
@@ -145,7 +145,7 @@ class _FlowMonitorPageState extends State<FlowMonitorPage> {
     final signalBuild = Map<String, dynamic>.from(diagnostics['signal_build'] as Map? ?? const {});
     final serverRoutes = Map<String, dynamic>.from(diagnostics['api_performance'] as Map? ?? const {});
     final clientRoutes = FreshApi.requestMetrics;
-    final aiChecks = (providerResult['checks'] as List? ?? const []).whereType<Map>().where((c) => c['provider'] == 'gemini' || c['provider'] == 'openrouter').toList();
+    final aiChecks = (providerResult['checks'] as List? ?? const []).whereType<Map>().where((c) => c['provider'] == 'nvidia' || c['provider'] == 'openrouter').toList();
     return RefreshIndicator(
       onRefresh: refresh,
       child: ListView(
@@ -221,9 +221,9 @@ class _FlowMonitorPageState extends State<FlowMonitorPage> {
               ));
             }),
           const SizedBox(height: 8),
-          const Text('GEMINI + OPENROUTER DATA VALIDATION', style: TextStyle(fontWeight: FontWeight.w900)),
+          const Text('NVIDIA + OPENROUTER DATA VALIDATION', style: TextStyle(fontWeight: FontWeight.w900)),
           const SizedBox(height: 4),
-          FilledButton.icon(onPressed: testing ? null : testProviders, icon: testing ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.verified_outlined), label: Text(testing ? 'TESTING PROVIDERS…' : 'TEST GEMINI + OPENROUTER')),
+          FilledButton.icon(onPressed: testing ? null : testProviders, icon: testing ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.verified_outlined), label: Text(testing ? 'TESTING PROVIDERS…' : 'TEST NVIDIA + OPENROUTER')),
           if (providerResult.isNotEmpty) Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('Overall status: ${providerResult['status'] ?? 'unknown'}', style: const TextStyle(fontWeight: FontWeight.w900)),
             Text((providerResult['message'] ?? '').toString(), style: const TextStyle(fontSize: 11, color: Colors.white70)),

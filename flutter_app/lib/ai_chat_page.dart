@@ -85,7 +85,7 @@ class _AiChatPageState extends State<AiChatPage> {
     _scrollToBottom();
 
     try {
-      final response = await FreshApi(widget.backendUrl).geminiChat(
+      final response = await FreshApi(widget.backendUrl).nvidiaChat(
         index: _selectedIndex,
         question: question,
         history: history,
@@ -130,7 +130,7 @@ class _AiChatPageState extends State<AiChatPage> {
       }
       final providerName = (response['provider'] ?? '').toString().toLowerCase();
       final actualCloudResponse = response['llm_used'] == true ||
-          (response['ok'] == true && const {'gemini', 'openrouter'}.contains(providerName));
+          (response['ok'] == true && const {'nvidia', 'openrouter'}.contains(providerName));
       unawaited(DailyAiMemory.saveChatTurn(
         question: question,
         answer: displayAnswer,
@@ -211,10 +211,10 @@ class _AiChatPageState extends State<AiChatPage> {
                 const SizedBox(height: 12),
                 const Text('Ask Fresh AI', textAlign: TextAlign.center, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
                 const SizedBox(height: 6),
-                const Text('GEMINI CLOUD CHAT • MARKET Q&A', textAlign: TextAlign.center, style: TextStyle(color: Color(0xFF32D583), fontWeight: FontWeight.w700, fontSize: 12)),
+                const Text('NVIDIA CLOUD CHAT • MARKET Q&A', textAlign: TextAlign.center, style: TextStyle(color: Color(0xFF32D583), fontWeight: FontWeight.w700, fontSize: 12)),
                 const SizedBox(height: 8),
                 const Text(
-                  'This chat tries Gemini first and OpenRouter as fallback. Missing or stale market evidence remains unavailable.',
+                  'This chat tries NVIDIA first and OpenRouter as fallback. Missing or stale market evidence remains unavailable.',
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 20),

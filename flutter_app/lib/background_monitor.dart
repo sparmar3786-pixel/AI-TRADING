@@ -152,7 +152,7 @@ Future<void> _pollQualifiedSetups(FlutterLocalNotificationsPlugin notifications)
     final key = '${entry.key}|$decision|$strike|$entryPrice|$stamp';
     if (seen.contains(key)) continue;
 
-    // Ask Gemini only for a new, deterministic PASS candidate, and throttle
+    // Ask NVIDIA only for a new, deterministic PASS candidate, and throttle
     // repeated review attempts for the same setup to avoid request storms.
     final nowMs = DateTime.now().millisecondsSinceEpoch;
     Map<String, int> cooldowns = <String, int>{};
