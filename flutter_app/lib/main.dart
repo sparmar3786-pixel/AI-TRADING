@@ -2025,7 +2025,7 @@ class _AiAccessState extends State<AiAccessPage> {
     if (searchChecking) return;
     setState(() => searchChecking = true);
     try {
-      final result = await FreshApi(widget.backendUrl.trim())
+      final result = await FreshApi.signal()
           .postJson('/v1/providers/search/status', {});
       final raw = result['providers'];
       final providers = <String, Map<String, dynamic>>{};
@@ -2069,9 +2069,9 @@ class _AiAccessState extends State<AiAccessPage> {
       if (!mounted) return;
       setState(() => message = result['ok'] == true
           ? 'Cloud AI connected: $good. $details'
-          : 'Gemini connectivity test failed. Check GEMINI_API_KEY, model access, quota and Railway logs. $details');
+          : 'NVIDIA connectivity test failed. Check NVIDIA_API_KEY, model access, quota and Railway logs. $details');
     } catch (e) {
-      if (mounted) setState(() => message = 'Gemini test failed: ${e.toString().replaceFirst('Exception: ', '')}');
+      if (mounted) setState(() => message = 'NVIDIA/OpenRouter test failed: ${e.toString().replaceFirst('Exception: ', '')}');
     } finally {
       if (mounted) setState(() => working = false);
     }
@@ -2108,13 +2108,13 @@ class _AiAccessState extends State<AiAccessPage> {
       const ListTile(
         contentPadding: EdgeInsets.zero,
         leading: Icon(Icons.cloud_done, color: Colors.cyan),
-        title: Text('Gemini Cloud Chat'),
-        subtitle: Text('Gemini remains online. Configure GEMINI_API_KEY and GEMINI_MODEL in Railway Variables. No cloud Qwen or DeepSeek API key is used by this APK.'),
+        title: Text('NVIDIA Cloud Chat'),
+        subtitle: Text('NVIDIA is the primary cloud chat provider; OpenRouter is fallback. Configure NVIDIA_API_KEY and NVIDIA_CHAT_MODEL in Railway Variables. KUMO_NVIDIA_API_KEY is reserved for Kumo Tabular. No cloud Qwen or DeepSeek API key is used by this APK.'),
       ),
       FilledButton.icon(
         onPressed: working ? null : testAI,
         icon: const Icon(Icons.psychology),
-        label: Text(working ? 'TESTING…' : 'TEST GEMINI CONNECTION'),
+        label: Text(working ? 'TESTING…' : 'TEST NVIDIA CONNECTION'),
       ),
       const SizedBox(height: 18),
       const Section('Offline AI — On-device GGUF Models'),
