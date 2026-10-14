@@ -83,3 +83,16 @@ This is an evidence-based audit, not a claim that all tabs are now end-to-end ve
 - Market data: Angel One authenticated session, fresh exchange timestamps, option quotes/Greeks, WebSocket tick age and option-chain freshness during NSE/MCX sessions.
 - Flow: measure /v1/signals and /v1/option-chain p50/p95/p99, WebSocket reconnects, client 499 frequency and concurrency behavior after route changes.
 - Safety: deterministic WAIT remains authoritative unless required data/quant/risk checks pass; AI/Kumo must never promote blocked signals or submit broker orders.
+
+
+## Follow-up: Strategy Engine is now a mandatory live Quant gate
+
+The live /v1/signals path now passes each index's completed 5-minute Angel One candle strategy-suite consensus into a backend confluence filter before returning the shared response to the Flutter pages.
+
+- A Quant candidate of CALL BUY requires strategy-suite LONG with at least three LONG votes and more LONG than SHORT votes.
+- A Quant candidate of PUT BUY requires strategy-suite SHORT with at least three SHORT votes and more SHORT than LONG votes.
+- Missing, weak, or conflicting strategy consensus forces the final decision to WAIT; the actionable strike, expiry, entry, stop-loss and target are cleared. The original proposal is retained separately as candidate_setup with BLOCKED_NOT_ACTIONABLE status for diagnostics only.
+- The shared response exposes strategy_filter; the strategy execution trace now records that Research/Trading Setup consumed the strategy result. The independent /v1/strategies/evaluate endpoint remains research-only.
+- Added regression tests for matching, conflicting, weak-consensus and no-Quant-candidate cases.
+
+This does not claim NVIDIA chat or Kumo Tabular prediction is a verified live-signal input. Kumo still needs a validated feature/target schema and successful prediction evidence before it can be made a mandatory model gate. Deterministic data-quality, Quant, strategy-confluence and risk checks remain authoritative; no broker orders are placed.
