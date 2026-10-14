@@ -881,7 +881,7 @@ class BackendApiTests(unittest.TestCase):
                 api._refresh_market_intelligence_once()
                 state = dict(api._market_intel_state)
 
-            self.assertEqual(fetch.call_count, len(api.INDEXES))
+            self.assertEqual(fetch.call_count, len(api.INDEXES) + 1)  # six indexes plus MCX
             self.assertTrue(all(call.kwargs.get("force") is True for call in fetch.call_args_list))
             self.assertEqual(state["status"], "READY")
             self.assertEqual(state["summary"], "Source-backed test market brief.")
