@@ -2114,11 +2114,20 @@ def option_chain(index: str = Query(default="NIFTY"), _: str = Depends(_device))
     atm = min(range(len(strikes)), key=lambda i: abs(strikes[i] - spot)) if strikes else 0
     wanted = set(strikes[max(0, atm - 10): min(len(strikes), atm + 11)])
     contracts = [row for row in contracts if _strike_value(row.get("strike"), spot) in wanted][:100]
-    quote_map = _quotes(adapter, segment, [str(row.get("token", "")) for row in contracts if row.get("token")])
+    # Quotes and Greeks are independent upstream requests. Fetch them concurrently
+    # to avoid serially paying both broker latencies on every option-chain refresh.
+    quote_future = _market_data_executor.submit(
+        _quotes, adapter, segment,
+        [str(row.get("token", "")) for row in contracts if row.get("token")],
+    )
+    greek_future = _market_data_executor.submit(
+        _greeks_map, adapter, index, expiries[0].strftime("%d%b%Y").upper(),
+    )
+    quote_map = quote_future.result()
     # Request broker Greeks for MCX as well as index options. Some broker
     # accounts/underlyings may not return MCX Greeks; _greeks_map fails closed
     # to an empty map, so absent values remain null and cannot qualify a trade.
-    greek_map = _greeks_map(adapter, index, expiries[0].strftime("%d%b%Y").upper())
+    greek_map = greek_future.result()
     output = []
     for row in contracts:
         token = str(row.get("token", ""))
