@@ -2159,8 +2159,11 @@ def option_chain(index: str = Query(default="NIFTY"), _: str = Depends(_device))
         _greeks_map, adapter, index, expiries[0].strftime("%d%b%Y").upper(),
     )
     timed_out: list[str] = []
+    # Both futures share one deadline; sequential full timeouts would double the
+    # UI wait under a simultaneous broker slowdown.
+    upstream_deadline = time.monotonic() + OPTION_CHAIN_UPSTREAM_TIMEOUT_SECONDS
     try:
-        quote_map = quote_future.result(timeout=OPTION_CHAIN_UPSTREAM_TIMEOUT_SECONDS)
+        quote_map = quote_future.result(timeout=max(0.01, upstream_deadline - time.monotonic()))
     except FutureTimeoutError:
         quote_future.cancel()
         quote_map = {}
@@ -2168,7 +2171,7 @@ def option_chain(index: str = Query(default="NIFTY"), _: str = Depends(_device))
     # Greeks are supplemental and may time out independently. Missing values
     # remain null; never synthesize Greeks or use them to qualify a trade.
     try:
-        greek_map = greek_future.result(timeout=OPTION_CHAIN_UPSTREAM_TIMEOUT_SECONDS)
+        greek_map = greek_future.result(timeout=max(0.01, upstream_deadline - time.monotonic()))
     except FutureTimeoutError:
         greek_future.cancel()
         greek_map = {}
