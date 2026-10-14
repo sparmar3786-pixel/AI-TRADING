@@ -66,6 +66,7 @@ class StrategyQuantConfluenceGateTests(unittest.TestCase):
         self.assertEqual(filtered["decision"], "WAIT")
         self.assertFalse(filtered["strategy_filter"]["pass"])
         self.assertEqual(filtered["strategy_filter"]["state"], "BLOCKED_BY_QUANT_VALIDATION")
+        self.assertEqual(filtered["signal_stability"]["state"], "BLOCKED_BY_QUANT_VALIDATION")
         self.assertIn("QUANT_VALIDATION_BLOCKED", filtered["live_validation"]["blocks"])
         self.assertIsNone(filtered["strike"])
         self.assertIsNone(filtered["entry"])
