@@ -405,6 +405,40 @@ class BackendApiTests(unittest.TestCase):
         self.assertIn("25000.0", body["answer"])
         self.assertIn("missing option evidence", body["answer"])
 
+    def test_signals_and_ai_chat_consume_the_same_shared_signal_snapshot(self):
+        snapshot = {
+            "generated_at": "2026-10-14T02:00:00+00:00",
+            "market": {"NIFTY": {"ltp": 25000.0, "source": "angelone_smartapi", "live": False}},
+            "signals": {
+                "NIFTY": {
+                    "decision": "WAIT",
+                    "quant_engine": {"decision": "WAIT", "passed_layers": 1},
+                    "five_layer_engine": {"decision": "WAIT", "passed_layers": 1},
+                    "live_validation": {"verdict": "WAIT", "blocks": ["STALE_MARKET_DATA"]},
+                    "reasons": ["STALE_MARKET_DATA"],
+                }
+            },
+        }
+        with patch.object(api, "_get_signals", return_value=snapshot), \
+             patch.dict(os.environ, {
+                 "NVIDIA_API_KEY": "", "KUMO_NVIDIA_API_KEY": "",
+                 "OPENROUTER_API_KEY": "", "OPEN_ROUTER_API_KEY": "",
+             }, clear=False):
+            signals_response = self.client.get("/v1/signals", headers=self.device_headers)
+            chat_response = self.client.post(
+                "/v1/ai/chat", headers=self.device_headers,
+                json={"index": "NIFTY", "question": "Explain the current signal", "history": []},
+            )
+        self.assertEqual(signals_response.status_code, 200, signals_response.text)
+        self.assertEqual(chat_response.status_code, 200, chat_response.text)
+        signal = signals_response.json()["signals"]["NIFTY"]
+        chat_signal = chat_response.json()["signal"]
+        self.assertEqual(chat_signal["decision"], signal["decision"])
+        self.assertEqual(chat_signal["quant_engine"]["decision"], signal["quant_engine"]["decision"])
+        self.assertEqual(chat_signal["five_layer_engine"]["decision"], signal["five_layer_engine"]["decision"])
+        self.assertEqual(chat_signal["live_validation"]["verdict"], signal["live_validation"]["verdict"])
+        self.assertEqual(signal["decision"], "WAIT")
+
     def test_kumo_key_does_not_configure_nvidia_chat(self):
         payload = {
             "market": {"NIFTY": {"ltp": 25000.0, "age_seconds": 3, "live": True}},
