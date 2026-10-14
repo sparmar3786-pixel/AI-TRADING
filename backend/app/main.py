@@ -2477,10 +2477,10 @@ def _provider_key_present(*names: str) -> bool:
 
 @app.get("/v1/ai/status")
 def ai_status(_: str = Depends(_device)) -> dict[str, Any]:
-    # Only Gemini and OpenRouter are supported cloud providers in this app.
+    # NVIDIA is primary; OpenRouter is an optional fallback.
     providers = [
-        ("gemini", ("GEMINI_API_KEY", "GOOGLE_API_KEY"), os.getenv("GEMINI_MODEL", "gemini-2.5-flash")),
-        ("openrouter", ("OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY"), os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash")),
+        ("nvidia", ("NVIDIA_API_KEY", "KUMO_NVIDIA_API_KEY"), os.getenv("NVIDIA_CHAT_MODEL", "nvidia/llama-3.3-nemotron-super-49b-v1.5")),
+        ("openrouter", ("OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY"), os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct")),
     ]
     selected = next((item for item in providers if _provider_key_present(*item[1])), None)
     provider_status = {
@@ -2493,7 +2493,7 @@ def ai_status(_: str = Depends(_device)) -> dict[str, Any]:
         for name, env_names, model_name in providers
     }
     with _lock:
-        for name in ("gemini", "openrouter"):
+        for name in ("nvidia", "openrouter"):
             cached = _ai_provider_test_cache.get(name)
             if cached and cached.get("configured") == provider_status[name]["configured"]:
                 provider_status[name] = dict(cached)
@@ -2540,7 +2540,7 @@ def _run_ai_validation_probe(provider: str, api_key: str, model: str, endpoint: 
         headers["X-Title"] = "AI-TRADING Data Validator"
     request = urllib.request.Request(endpoint, data=body, headers=headers, method="POST")
     try:
-        data = _provider_json_with_retry(request, timeout=8, provider="openrouter")
+        data = _provider_json_with_retry(request, timeout=8, provider=provider)
         choices = data.get("choices") or []
         output = str(((choices[0].get("message") or {}).get("content") if choices else "") or "").strip()
         # Parse the model's verdict if possible; malformed output is WAIT, never PASS.
@@ -2595,7 +2595,7 @@ def ai_validate_snapshot(body: dict[str, Any], _: str = Depends(_device)) -> dic
     )
     providers: dict[str, Any] = {}
     for provider, env_names in (
-        ("gemini", ("GEMINI_API_KEY", "GOOGLE_API_KEY")),
+        ("nvidia", ("NVIDIA_API_KEY", "KUMO_NVIDIA_API_KEY")),
         ("openrouter", ("OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY")),
     ):
         configured = any(os.getenv(name, "").strip() for name in env_names)
@@ -2633,37 +2633,35 @@ def test_ai_providers(_: str = Depends(_device)) -> dict[str, Any]:
         and actual_age is not None and 0 <= actual_age <= 60
     )
     checks: list[dict[str, Any]] = []
-    gemini_key = (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()
-    gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
-    if gemini_key:
+    nvidia_key = (os.getenv("NVIDIA_API_KEY") or os.getenv("KUMO_NVIDIA_API_KEY") or "").strip()
+    nvidia_model = os.getenv("NVIDIA_CHAT_MODEL", "nvidia/llama-3.3-nemotron-super-49b-v1.5").strip()
+    if nvidia_key:
         try:
-            probe = _run_gemini_completion(gemini_key, gemini_model, [
-                {"role": "system", "content": "You are a connectivity probe. Reply with the exact text GEMINI_OK."},
-                {"role": "user", "content": "Reply with GEMINI_OK only."},
-            ])
-            checks.append({
-                "provider": "gemini", "configured": True, "ok": True, "status": "ok",
-                "model": probe.get("model"), "latency_ms": probe.get("latency_ms"),
-                "verdict": "WAIT", "message": "Gemini authenticated and returned a response.",
-            })
+            probe = _run_openai_compatible_completion(
+                nvidia_key, nvidia_model, [
+                    {"role": "system", "content": "You are a connectivity probe. Reply with the exact text NVIDIA_OK."},
+                    {"role": "user", "content": "Reply with NVIDIA_OK only."},
+                ],
+                provider="nvidia",
+                endpoint=os.getenv("NVIDIA_CHAT_BASE_URL", "https://integrate.api.nvidia.com/v1/chat/completions").strip(),
+            )
+            checks.append({"provider": "nvidia", "configured": True, "ok": True, "status": "ok",
+                           "model": probe.get("model"), "latency_ms": probe.get("latency_ms"),
+                           "verdict": "WAIT", "message": "NVIDIA authenticated and returned a real chat response."})
         except RuntimeError as exc:
-            checks.append({
-                "provider": "gemini", "configured": True, "ok": False, "status": str(exc)[:80],
-                "model": gemini_model, "verdict": "WAIT",
-            })
+            checks.append({"provider": "nvidia", "configured": True, "ok": False, "status": str(exc)[:80],
+                           "model": nvidia_model, "verdict": "WAIT"})
     else:
-        checks.append({
-            "provider": "gemini", "configured": False, "ok": False,
-            "status": "not_configured", "verdict": "WAIT",
-        })
+        checks.append({"provider": "nvidia", "configured": False, "ok": False,
+                       "status": "not_configured", "verdict": "WAIT"})
     openrouter_key = (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPEN_ROUTER_API_KEY") or "").strip()
     if openrouter_key:
         checks.append(_run_ai_validation_probe(
-            "openrouter", openrouter_key, os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash").strip(),
+            "openrouter", openrouter_key, os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct").strip(),
             "https://openrouter.ai/api/v1/chat/completions", market_row))
     else:
         checks.append({"provider": "openrouter", "configured": False, "ok": False, "status": "not_configured", "verdict": "WAIT"})
-    tested = [item for item in checks if item.get("provider") in ("gemini", "openrouter")]
+    tested = [item for item in checks if item.get("provider") in ("nvidia", "openrouter")]
     with _lock:
         for item in tested:
             _ai_provider_test_cache[item["provider"]] = dict(item)
@@ -2678,8 +2676,8 @@ def test_ai_providers(_: str = Depends(_device)) -> dict[str, Any]:
     }
 
 @app.post("/v1/ai/review-signal")
-def review_signal_with_gemini(payload: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
-    """Use Gemini first and OpenRouter as fallback; neither can override deterministic risk gates."""
+def review_signal_with_nvidia(payload: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
+    """Use NVIDIA first and OpenRouter as fallback; neither can override deterministic risk gates."""
     index = str(payload.get("index") or "").strip().upper()
     if index not in INDEXES:
         return {"provider": "none", "ok": False, "verdict": "WAIT", "decision": "WAIT", "status": "invalid_index", "reason": "Index is not supported."}
@@ -2701,17 +2699,17 @@ def review_signal_with_gemini(payload: dict[str, Any], _: str = Depends(_device)
             "signal_only": True, "order_placement_enabled": False,
         }
     providers: list[tuple[str, str, str]] = []
-    gemini_key = (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()
-    if gemini_key:
-        providers.append(("gemini", gemini_key, os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()))
+    nvidia_key = (os.getenv("NVIDIA_API_KEY") or os.getenv("KUMO_NVIDIA_API_KEY") or "").strip()
+    if nvidia_key:
+        providers.append(("nvidia", nvidia_key, os.getenv("NVIDIA_CHAT_MODEL", "nvidia/llama-3.3-nemotron-super-49b-v1.5").strip()))
     openrouter_key = (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPEN_ROUTER_API_KEY") or "").strip()
     if openrouter_key:
-        providers.append(("openrouter", openrouter_key, os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash").strip()))
+        providers.append(("openrouter", openrouter_key, os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct").strip()))
     if not providers:
         return {
             "provider": "none", "configured": False, "ok": False, "verdict": "WAIT",
             "decision": "WAIT", "status": "not_configured",
-            "reason": "Configure GEMINI_API_KEY and/or OPENROUTER_API_KEY on the backend.",
+            "reason": "Configure NVIDIA_API_KEY (or KUMO_NVIDIA_API_KEY) and/or OPENROUTER_API_KEY on the backend.",
             "blocks": ["AI_PROVIDER_NOT_CONFIGURED"],
             "checks": {"backend_validation": True, "ai_direction_consistent": False},
             "signal_only": True, "order_placement_enabled": False,
@@ -2730,8 +2728,11 @@ def review_signal_with_gemini(payload: dict[str, Any], _: str = Depends(_device)
     failures: list[dict[str, str]] = []
     for provider, api_key, model in providers:
         try:
-            if provider == "gemini":
-                result = _run_gemini_completion(api_key, model, messages)
+            if provider == "nvidia":
+                result = _run_openai_compatible_completion(
+                    api_key, model, messages, provider="nvidia",
+                    endpoint=os.getenv("NVIDIA_CHAT_BASE_URL", "https://integrate.api.nvidia.com/v1/chat/completions").strip(),
+                )
             else:
                 result = _run_openai_compatible_completion(
                     api_key, model, messages, provider="openrouter",
@@ -2760,7 +2761,7 @@ def review_signal_with_gemini(payload: dict[str, Any], _: str = Depends(_device)
     return {
         "provider": "none", "configured": True, "ok": False, "verdict": "WAIT",
         "decision": "WAIT", "status": "all_providers_failed",
-        "reason": "Gemini and OpenRouter review failed or returned invalid JSON.",
+        "reason": "NVIDIA and OpenRouter review failed or returned invalid JSON.",
         "provider_failures": failures,
         "blocks": ["AI_REVIEW_FAILED"],
         "checks": {"backend_validation": True, "ai_direction_consistent": False},
@@ -2855,13 +2856,8 @@ def _provider_json_with_retry(request: urllib.request.Request, *, timeout: float
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 data = json.loads(response.read().decode("utf-8"))
-            if provider == "gemini":
-                candidates = data.get("candidates") or []
-                parts = ((candidates[0].get("content") or {}).get("parts") or []) if candidates else []
-                answer = "\n".join(str(part.get("text") or "") for part in parts if isinstance(part, dict)).strip()
-            else:
-                choices = data.get("choices") or []
-                answer = str(((choices[0].get("message") or {}).get("content") if choices else "") or "").strip()
+            choices = data.get("choices") or []
+            answer = str(((choices[0].get("message") or {}).get("content") if choices else "") or "").strip()
             if answer or attempt == 1:
                 return data
             last_error = RuntimeError(f"{provider}_empty_response")
@@ -2980,6 +2976,7 @@ def _run_openai_compatible_completion(
 
 
 @app.post("/v1/ai/chat")
+@app.post("/v1/ai/nvidia-chat")
 @app.post("/v1/ai/gemini-chat")
 def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
     """Use a real cloud provider when configured; disclose fallback if every provider fails."""
@@ -3037,7 +3034,7 @@ def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
         # not success: each provider must return a real inference response.
         failures: list[dict[str, str]] = []
         providers = [
-            ("gemini", (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()),
+            ("nvidia", (os.getenv("NVIDIA_API_KEY") or os.getenv("KUMO_NVIDIA_API_KEY") or "").strip()),
             ("openrouter", (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPEN_ROUTER_API_KEY") or "").strip()),
         ]
         for provider, api_key in providers:
@@ -3045,13 +3042,15 @@ def ai_chat(body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
                 failures.append({"provider": provider, "status": "not_configured"})
                 continue
             try:
-                if provider == "gemini":
-                    result = _run_gemini_completion(
-                        api_key, os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip(), messages
+                if provider == "nvidia":
+                    result = _run_openai_compatible_completion(
+                        api_key, os.getenv("NVIDIA_CHAT_MODEL", "nvidia/llama-3.3-nemotron-super-49b-v1.5").strip(), messages,
+                        provider="nvidia",
+                        endpoint=os.getenv("NVIDIA_CHAT_BASE_URL", "https://integrate.api.nvidia.com/v1/chat/completions").strip(),
                     )
                 else:
                     result = _run_openai_compatible_completion(
-                        api_key, os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash").strip(), messages,
+                        api_key, os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct").strip(), messages,
                         provider="openrouter",
                         endpoint=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1/chat/completions").strip(),
                     )
