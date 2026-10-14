@@ -1,59 +1,60 @@
-# NVIDIA Kumo Tabular NIM integration
+# NVIDIA Kumo Tabular integration
 
 This integration is in **AI-TRADING**, not Fresh-Apk.
 
-## Architecture and limits
+## Hosted NVIDIA API Catalog (recommended first path)
 
-- `backend/app/kumo_nim_api.py` exposes a server-side proxy to NVIDIA Kumo Tabular NIM.
-- `GET /v1/ai/kumo/status` checks `/v1/health/ready` on the configured NIM host.
-- `POST /v1/ai/kumo/predict` forwards structured rows to `/v1/predictions`.
-- The NIM container must run on a reachable NVIDIA GPU host. The Railway Python API does not provide a GPU just because this proxy is deployed.
-- Kumo Tabular is for structured/tabular predictions, **not general-purpose chat**. It cannot safely replace Gemini's conversational capability by itself. The chat provider remains separate until another chat-capable provider is selected.
-- Prediction output is not an order or an approved trading signal. Keep the deterministic quant, data-freshness, and risk gates authoritative. No broker order endpoint is enabled here.
+The hosted API endpoint is:
 
-## Railway variables
+- Base: `https://ai.api.nvidia.com/v1/structured-data/nvidia/kumo-tabular`
+- Models/status check: `GET /models`
+- Prediction: `POST /predictions`
 
-Set these on the AI-TRADING backend service, never in the APK or committed source:
+The API key is created from the NVIDIA Kumo Tabular model page: https://build.nvidia.com/nvidia/kumo-tabular
 
-- `KUMO_NIM_BASE_URL`: private/reachable base URL of the GPU-hosted Kumo NIM service, e.g. `https://your-private-nim-host` (no trailing slash required).
-- `KUMO_NIM_API_KEY`: optional bearer token if the NIM gateway requires one.
+In Railway, open the **AI-TRADING backend service → Variables** and add:
 
-Do not set these to the NVIDIA registry login token. The NGC token is only for pulling the container image and must not be sent to the prediction endpoint. If an NGC token was shared in chat or committed anywhere, revoke and rotate it.
+- `KUMO_NVIDIA_API_KEY`: the NVIDIA API Catalog key (recommended variable name).
 
-## GPU host
+The backend also accepts `NVIDIA_API_KEY` as a fallback alias, but prefer `KUMO_NVIDIA_API_KEY` so credentials are clearly scoped. Do not put the key in Flutter/APK, commit it to GitHub, log it, or send it in chat.
 
-Run the NVIDIA-published Kumo Tabular NIM image on an NVIDIA GPU host using the exact tag and hardware/runtime requirements supported by your NGC account. Confirm that the host can pull the image, has working NVIDIA Container Toolkit / `--gpus all`, and exposes the NIM API only over a private network or authenticated TLS gateway. Do not assume Railway supports this GPU container.
+After redeploy, call `GET /v1/ai/kumo/status` with a valid `X-Device-Id` header (43–128 URL-safe characters). In hosted mode, the status endpoint checks NVIDIA's `/models` endpoint using bearer authentication. This verifies authentication/reachability, not a successful inference.
 
-## Example request
+### Hosted prediction request
 
-Use a real, validated trading feature schema—not the customer-renewal sample:
+`POST /v1/ai/kumo/predict` expects the full NVIDIA Universal TFM request envelope under the `request` property. The request must contain `model`, `task`, `schema`, `context`, `predict`, and `output`; `model` must be `kumo-tabular`. Use NVIDIA's official example and replace its demo data with a validated, representative trading dataset and a defined target:
+
+https://docs.api.nvidia.com/nim/reference/nvidia-kumo-tabular-statuspolling
+
+Example shape (not a complete inference request):
 
 ```json
 {
-  "data": [
-    {
-      "symbol": "NIFTY",
-      "timeframe": "5m",
-      "return_1": 0.0012,
-      "return_3": 0.0021,
-      "rsi_14": 56.4,
-      "atr_pct": 0.003,
-      "pcr": 1.08,
-      "depth_imbalance": 0.12
-    }
-  ]
+  "request": {
+    "model": "kumo-tabular",
+    "task": {},
+    "schema": {},
+    "context": {},
+    "predict": {},
+    "output": {"fields": ["prediction", "probabilities"]}
+  }
 }
 ```
 
-The feature names above are illustrative only; the active Kumo model's schema and trained target must match before this can be used for a trading decision.
+Do not send only `{"data":[...]}` to the hosted API. Kumo needs labeled context rows, a task/target definition, a matching schema, and prediction rows. Prediction quality depends on using a suitable target and relevant historical examples; a generic label like UP/DOWN must be properly defined and validated from historical data before use.
 
-## Verification checklist
+## Self-hosted NIM (alternative)
 
-1. Configure the GPU NIM host and Railway variables.
-2. Call `GET /v1/ai/kumo/status` with a valid `X-Device-Id` (43–128 URL-safe characters).
-3. Require `ready: true` from the live health check.
-4. Send a schema-valid feature row to `POST /v1/ai/kumo/predict`.
-5. Confirm a real prediction response, latency, and schema compatibility.
-6. Add offline tests and an end-to-end staging test before promoting the provider in UI.
+If running your own NIM on a separate compatible NVIDIA GPU host, set:
 
-Until steps 2–5 pass, the provider must be shown as unconfigured/unverified, not green.
+- `KUMO_NIM_BASE_URL`: reachable base URL of the NIM service, with no trailing slash.
+- `KUMO_NIM_API_KEY`: optional bearer token if your gateway requires it.
+
+The self-hosted container exposes `GET /v1/health/ready` and `POST /v1/predictions` on port 8000. The Railway backend itself does not gain a GPU from this proxy.
+
+## Important boundaries
+
+- Kumo Tabular predicts classification labels or regression values from structured tables. It is not a general-purpose chat model and does not replace Gemini/OpenRouter chat.
+- A green status only indicates provider API reachability/authentication. Verify a real prediction before marking inference as working.
+- Prediction output is not an approved trade. Keep market-data freshness, deterministic quant, strategy, and risk gates authoritative. No broker order placement is enabled by this integration.
+- The NVIDIA NGC registry token used to pull a Docker image is not the hosted API Catalog key. Never use an NGC registry token as the API key. If a token was shared or committed, revoke and rotate it.
