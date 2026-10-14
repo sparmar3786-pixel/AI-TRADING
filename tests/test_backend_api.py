@@ -867,8 +867,8 @@ class BackendApiTests(unittest.TestCase):
                 "TAVILY_API_KEY": "tavily-test",
                 "NVIDIA_API_KEY": "nvidia-test",
                 "NVIDIA_CHAT_MODEL": "test-nvidia-model",
-            }, clear=False), \\
-                 patch.object(api, "fetch_market_news_sentiment", side_effect=fake_news) as fetch, \\
+            }, clear=False), \
+                 patch.object(api, "fetch_market_news_sentiment", side_effect=fake_news) as fetch, \
                  patch.object(api, "_run_openai_compatible_completion", return_value={
                      "answer": "Source-backed test market brief.",
                      "provider": "nvidia",
