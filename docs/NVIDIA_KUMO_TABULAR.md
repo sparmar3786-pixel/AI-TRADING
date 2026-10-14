@@ -54,7 +54,7 @@ The self-hosted container exposes `GET /v1/health/ready` and `POST /v1/predictio
 
 ## Important boundaries
 
-- Kumo Tabular predicts classification labels or regression values from structured tables. It is not a general-purpose chat model and does not replace Gemini/OpenRouter chat.
+- Kumo Tabular predicts classification labels or regression values from structured tables. It is not a general-purpose chat model and does not replace NVIDIA cloud chat or its OpenRouter fallback. Keep `KUMO_NVIDIA_API_KEY` dedicated to Kumo Tabular; configure `NVIDIA_API_KEY` separately for chat.
 - A green status only indicates provider API reachability/authentication. Verify a real prediction before marking inference as working.
 - Prediction output is not an approved trade. When `index` is supplied, the response includes `quant_connection` with the real model output attached as external evidence, the current deterministic gate verdict, and the unchanged Quant decision. This is deliberately not a trade-direction mapping: Kumo task/target semantics must be explicitly defined and validated before its label can participate in a decision. The bridge does not mutate the cached signal or override WAIT. Keep market-data freshness, deterministic quant, strategy, and risk gates authoritative. No broker order placement is enabled by this integration.
 - The NVIDIA NGC registry token used to pull a Docker image is not the hosted API Catalog key. Never use an NGC registry token as the API key. If a token was shared or committed, revoke and rotate it.
