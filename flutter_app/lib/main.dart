@@ -2696,7 +2696,8 @@ class _ProCandlestickChartState extends State<ProCandlestickChart> with WidgetsB
     _subscription = null;
     if (mounted) setState(() { _connected = false; _error = reason; });
     _reconnectTimer?.cancel();
-    final seconds = (1 << _reconnectAttempt.clamp(0, 5)).clamp(1, 30);
+    final exponent = _reconnectAttempt.clamp(0, 5).toInt();
+    final seconds = (1 << exponent).clamp(1, 30).toInt();
     _reconnectAttempt++;
     _reconnectTimer = Timer(Duration(seconds: seconds), () {
       if (!_disposed) _syncChart();
