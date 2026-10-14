@@ -1543,7 +1543,7 @@ class DashboardPage extends StatelessWidget {
         const SizedBox(height:12),Row(children:[Expanded(child:_metric('CONFIDENCE',s['confidence']==null?'—':s['confidence'].toString()+'%')),Expanded(child:_metric('REGIME',(s['regime']??'—').toString())),Expanded(child:_metric('QUALIFIED',qualifiedCount.toString()+' / 5'))]),
       ])),
       const SizedBox(height:10),_status('Market feed',fresh?'LIVE VERIFIED':'NOT VERIFIED',fresh),
-      const Section('AI PROVIDERS • GEMINI + OPENROUTER'),
+      const Section('AI PROVIDERS • NVIDIA + OPENROUTER'),
       Card(child: Column(children: [
         ListTile(leading: Icon(Icons.circle, color: nvidia['ok'] == true ? Colors.greenAccent : Colors.redAccent, size: 12), title: const Text('NVIDIA'), subtitle: Text((nvidia['status'] ?? 'STATUS NOT CHECKED').toString()), trailing: Text((nvidia['model'] ?? '—').toString(), style: const TextStyle(fontSize: 10))),
         ListTile(leading: Icon(Icons.circle, color: openrouter['ok'] == true ? Colors.greenAccent : Colors.redAccent, size: 12), title: const Text('OpenRouter'), subtitle: Text((openrouter['status'] ?? 'STATUS NOT CHECKED').toString()), trailing: Text((openrouter['model'] ?? '—').toString(), style: const TextStyle(fontSize: 10))),
@@ -1967,7 +1967,7 @@ class SignalPage extends StatelessWidget {
       Card(child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          InfoRow('AI mode', (agentAnalysis['mode'] ?? (nvidiaProvider['ok'] == true ? 'GEMINI CONNECTED • PRIMARY REVIEW' : openrouterProvider['ok'] == true ? 'OPENROUTER CONNECTED • FALLBACK REVIEW' : 'WAITING FOR GEMINI / OPENROUTER PROVIDER TEST')).toString()),
+          InfoRow('AI mode', (agentAnalysis['mode'] ?? (nvidiaProvider['ok'] == true ? 'NVIDIA CONNECTED • PRIMARY REVIEW' : openrouterProvider['ok'] == true ? 'OPENROUTER CONNECTED • FALLBACK REVIEW' : 'WAITING FOR NVIDIA / OPENROUTER PROVIDER TEST')).toString()),
           InfoRow('NVIDIA provider', (nvidiaProvider['status'] ?? 'STATUS NOT CHECKED').toString()),
           InfoRow('NVIDIA model', (nvidiaProvider['model'] ?? '—').toString()),
           InfoRow('OpenRouter provider', (openrouterProvider['status'] ?? 'STATUS NOT CHECKED').toString()),
@@ -2383,7 +2383,7 @@ class _AiAccessState extends State<AiAccessPage>{
 
   @override
   Widget build(BuildContext context) => ListView(padding: const EdgeInsets.all(14), children: [
-    const Section('CLOUD AI • GEMINI CHAT + PROVIDER VALIDATION'),
+    const Section('CLOUD AI • NVIDIA CHAT + PROVIDER VALIDATION'),
     Card(child: ListTile(
       leading: Icon(
         providers['nvidia']?['ok'] == true ? Icons.cloud_done : Icons.cloud_off,
@@ -2395,10 +2395,10 @@ class _AiAccessState extends State<AiAccessPage>{
         '${providers['nvidia']?['status'] ?? 'not tested'} • AI remains advisory; deterministic freshness and risk gates control trade eligibility.',
       ),
     )),
-    FilledButton.icon(onPressed: working ? null : test, icon: const Icon(Icons.psychology), label: Text(working ? 'TESTING GEMINI + OPENROUTER…' : 'TEST GEMINI + OPENROUTER')),
+    FilledButton.icon(onPressed: working ? null : test, icon: const Icon(Icons.psychology), label: Text(working ? 'TESTING NVIDIA + OPENROUTER…' : 'TEST NVIDIA + OPENROUTER')),
     const SizedBox(height: 10),
     Card(child: Padding(padding: const EdgeInsets.all(12), child: Text(message))),
-    const Section('LLM PROVIDERS • GEMINI + OPENROUTER'),
+    const Section('LLM PROVIDERS • NVIDIA + OPENROUTER'),
     provider('nvidia'), provider('openrouter'),
     OutlinedButton.icon(onPressed: checking ? null : refresh, icon: const Icon(Icons.refresh), label: Text(checking ? 'CHECKING…' : 'REFRESH LLM STATUS')),
     const Section('SEARCH EVIDENCE • BACKEND CONFIGURED'),
