@@ -85,7 +85,7 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(signal["live_validation"]["verdict"], "WAIT")
         self.assertIn("checks", signal["live_validation"])
         self.assertFalse(any(signal["live_validation"]["checks"].values()))
-    def test_gemini_review_cannot_override_or_conflict_with_deterministic_candidate(self):
+    def test_nvidia_review_cannot_override_or_conflict_with_deterministic_candidate(self):
         payload = {
             "market": {"NIFTY": {"ltp": 25000.0, "age_seconds": 3.0, "live": True}},
             "signals": {"NIFTY": {
@@ -98,10 +98,10 @@ class BackendApiTests(unittest.TestCase):
         }
         with (
             patch.object(api, "_signal_cache", payload),
-            patch.dict(os.environ, {"GEMINI_API_KEY": "test-key", "GOOGLE_API_KEY": ""}, clear=False),
+            patch.dict(os.environ, {"NVIDIA_API_KEY": "test-key", "GOOGLE_API_KEY": ""}, clear=False),
             patch.object(
                 api,
-                "_run_gemini_completion",
+                "_run_openai_compatible_completion",
                 return_value={
                     "answer": json.dumps({
                         "verdict": "PASS",
@@ -109,7 +109,7 @@ class BackendApiTests(unittest.TestCase):
                         "conflicting_direction": False,
                         "reason": "All checks agree.",
                     }),
-                    "model": "gemini-2.5-flash",
+                    "model": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
                     "latency_ms": 25.0,
                 },
             ),
@@ -121,10 +121,10 @@ class BackendApiTests(unittest.TestCase):
 
         with (
             patch.object(api, "_signal_cache", payload),
-            patch.dict(os.environ, {"GEMINI_API_KEY": "test-key", "GOOGLE_API_KEY": ""}, clear=False),
+            patch.dict(os.environ, {"NVIDIA_API_KEY": "test-key", "GOOGLE_API_KEY": ""}, clear=False),
             patch.object(
                 api,
-                "_run_gemini_completion",
+                "_run_openai_compatible_completion",
                 return_value={
                     "answer": json.dumps({
                         "verdict": "PASS",
@@ -132,7 +132,7 @@ class BackendApiTests(unittest.TestCase):
                         "conflicting_direction": True,
                         "reason": "Direction conflicts.",
                     }),
-                    "model": "gemini-2.5-flash",
+                    "model": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
                     "latency_ms": 25.0,
                 },
             ),
@@ -159,7 +159,7 @@ class BackendApiTests(unittest.TestCase):
             "generated_at": "2026-10-13T00:00:00+00:00",
         }
         with patch.object(api, "_get_signals", return_value=payload), \
-             patch.dict(os.environ, {"GEMINI_API_KEY": "", "GOOGLE_API_KEY": "", "OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
+             patch.dict(os.environ, {"NVIDIA_API_KEY": "", "GOOGLE_API_KEY": "", "OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
             response = self.client.post(
                 "/v1/ai/validate",
                 headers=self.device_headers,
@@ -174,7 +174,7 @@ class BackendApiTests(unittest.TestCase):
 
     def test_openai_environment_key_is_ignored_by_ai_status(self):
         with patch.dict(os.environ, {
-            "GEMINI_API_KEY": "", "GOOGLE_API_KEY": "",
+            "NVIDIA_API_KEY": "", "GOOGLE_API_KEY": "",
             "OPENROUTER_API_KEY": "", "OPEN_ROUTER_API_KEY": "",
             "OPENAI_API_KEY": "legacy-key-must-be-ignored",
             "OPENAI_MODEL": "legacy-model-must-be-ignored",
@@ -373,7 +373,7 @@ class BackendApiTests(unittest.TestCase):
             "signals": {"NIFTY": {"decision": "WAIT", "reasons": ["missing option evidence"], "live_validation": {"verdict": "WARN"}}},
         }
         with patch.object(api, "_get_signals", return_value=payload), \
-             patch.dict(os.environ, {"GEMINI_API_KEY": "", "GOOGLE_API_KEY": "", "OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
+             patch.dict(os.environ, {"NVIDIA_API_KEY": "", "GOOGLE_API_KEY": "", "OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
             response = self.client.post(
                 "/v1/ai/chat",
                 headers=self.device_headers,
@@ -386,7 +386,7 @@ class BackendApiTests(unittest.TestCase):
         self.assertIn("25000.0", body["answer"])
         self.assertIn("missing option evidence", body["answer"])
 
-    def test_ai_chat_uses_openrouter_when_gemini_is_unconfigured(self):
+    def test_ai_chat_uses_openrouter_when_nvidia_is_unconfigured(self):
         payload = {"market": {"NIFTY": {
                        "ltp": 25000.0, "age_seconds": 3, "live": True,
                        "strategy_suite": {"signal": "WAIT", "trace": {
@@ -396,7 +396,7 @@ class BackendApiTests(unittest.TestCase):
                    }},
                    "signals": {"NIFTY": {"decision": "WAIT", "reasons": ["risk gate wait"]}}}
         with patch.object(api, "_get_signals", return_value=payload), \
-             patch.dict(os.environ, {"GEMINI_API_KEY": "", "GOOGLE_API_KEY": "",
+             patch.dict(os.environ, {"NVIDIA_API_KEY": "", "GOOGLE_API_KEY": "",
                                       "OPENROUTER_API_KEY": "unit-test-key", "OPENROUTER_MODEL": "router-test"}, clear=False), \
              patch.object(api, "_run_openai_compatible_completion", return_value={
                  "answer": "Distinct test response", "provider": "openrouter", "model": "router-test",
@@ -415,26 +415,26 @@ class BackendApiTests(unittest.TestCase):
         self.assertFalse(body["strategy_consumption_trace"]["ai_semantic_use_verifiable"])
         completion.assert_called_once()
 
-    def test_ai_chat_falls_back_to_openrouter_when_gemini_fails(self):
+    def test_ai_chat_falls_back_to_openrouter_when_nvidia_fails(self):
         payload = {"market": {"NIFTY": {"ltp": 25000.0, "age_seconds": 3, "live": True}},
                    "signals": {"NIFTY": {"decision": "WAIT", "reasons": ["risk gate wait"]}}}
         with patch.object(api, "_get_signals", return_value=payload), \
-             patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-test-key", "GOOGLE_API_KEY": "",
+             patch.dict(os.environ, {"NVIDIA_API_KEY": "nvidia-test-key", "GOOGLE_API_KEY": "",
                                       "OPENROUTER_API_KEY": "router-test-key", "OPENROUTER_MODEL": "router-test"}, clear=False), \
-             patch.object(api, "_run_gemini_completion", side_effect=RuntimeError("gemini_http_503")) as gemini, \
-             patch.object(api, "_run_openai_compatible_completion", return_value={
-                 "answer": "Router fallback response", "provider": "openrouter", "model": "router-test",
-                 "llm_used": True, "ok": True, "status": "connected", "latency_ms": 15.0,
-             }) as router:
+             patch.object(api, "_run_openai_compatible_completion", side_effect=[
+                 RuntimeError("nvidia_http_503"),
+                 {"answer": "Router fallback response", "provider": "openrouter", "model": "router-test",
+                  "llm_used": True, "ok": True, "status": "connected", "latency_ms": 15.0},
+             ]) as completion:
             response = self.client.post("/v1/ai/chat", headers=self.device_headers,
                                         json={"index": "NIFTY", "question": "Explain the current wait", "history": []})
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
         self.assertEqual(body["provider"], "openrouter")
         self.assertEqual(body["answer"], "Router fallback response")
-        self.assertEqual(body["provider_failures"][0]["status"], "gemini_http_503")
-        gemini.assert_called_once()
-        router.assert_called_once()
+        self.assertEqual(body["provider_failures"][0]["status"], "nvidia_http_503")
+        self.assertEqual(completion.call_count, 2)
+        
 
     def test_ai_chat_can_read_mcX_commodity_snapshot(self):
         payload = {
@@ -448,7 +448,7 @@ class BackendApiTests(unittest.TestCase):
             }],
         }
         with patch.object(api, "_get_signals", return_value=payload), \
-             patch.dict(os.environ, {"GEMINI_API_KEY": "", "GOOGLE_API_KEY": "", "OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
+             patch.dict(os.environ, {"NVIDIA_API_KEY": "", "GOOGLE_API_KEY": "", "OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""}, clear=False):
             response = self.client.post(
                 "/v1/ai/chat", headers=self.device_headers,
                 json={"index": "CRUDEOILM", "question": "Analyze current MCX context", "history": []},
@@ -460,7 +460,7 @@ class BackendApiTests(unittest.TestCase):
         self.assertIn("5500.0", data["answer"])
         self.assertIn("verified Greeks", data["answer"])
 
-    def test_ai_chat_uses_gemini_only_when_configured(self):
+    def test_ai_chat_uses_nvidia_only_when_configured(self):
         payload = {
             "market": {"NIFTY": {"ltp": 25000.0, "age_seconds": 3, "live": True, "source": "angelone_smartapi"}},
             "signals": {"NIFTY": {"decision": "WAIT", "reasons": ["risk gate"], "live_validation": {"verdict": "WARN"}}},
@@ -470,10 +470,10 @@ class BackendApiTests(unittest.TestCase):
             def __enter__(self): return self
             def __exit__(self, *_args): return False
             def read(self):
-                return json.dumps({"candidates": [{"content": {"parts": [{"text": "Snapshot reviewed; risk gate remains WAIT."}]}}]}).encode()
+                return json.dumps({"choices": [{"message": {"content": "Snapshot reviewed; risk gate remains WAIT."}}]}).encode()
 
         with patch.object(api, "_get_signals", return_value=payload), \
-             patch.dict(os.environ, {"GEMINI_API_KEY": "test-key", "GEMINI_MODEL": "gemini-2.5-flash", "GOOGLE_API_KEY": "", "OPENAI_API_KEY": "openai-key-must-not-be-used", "OPENAI_MODEL": "gpt-4o-mini", "OPENROUTER_API_KEY": "router-key-must-not-be-used"}, clear=False), \
+             patch.dict(os.environ, {"NVIDIA_API_KEY": "test-key", "NVIDIA_MODEL": "nvidia/llama-3.3-nemotron-super-49b-v1.5", "GOOGLE_API_KEY": "", "OPENAI_API_KEY": "openai-key-must-not-be-used", "OPENAI_MODEL": "gpt-4o-mini", "OPENROUTER_API_KEY": "router-key-must-not-be-used"}, clear=False), \
              patch.object(api.urllib.request, "urlopen", return_value=FakeResponse()):
             response = self.client.post(
                 "/v1/ai/chat", headers=self.device_headers,
@@ -482,7 +482,7 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         data = response.json()
         self.assertTrue(data["llm_used"])
-        self.assertEqual(data["provider"], "gemini")
+        self.assertEqual(data["provider"], "nvidia")
         self.assertEqual(data["answer"], "Snapshot reviewed; risk gate remains WAIT.")
         self.assertFalse(data["order_placement_enabled"])
 
