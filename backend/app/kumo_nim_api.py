@@ -37,9 +37,16 @@ def _self_hosted_base() -> str:
     return os.getenv("KUMO_NIM_BASE_URL", "").strip().rstrip("/")
 
 
+def _hosted_url_configured() -> bool:
+    # Users sometimes paste the hosted Catalog /predictions URL into the old
+    # NIM-base variable. Recognize it as hosted, not as a self-hosted health URL.
+    base = _self_hosted_base()
+    return base == NVIDIA_CATALOG_BASE or base == NVIDIA_CATALOG_BASE + "/predictions"
+
+
 def _hosted_key() -> str:
-    # Prefer the provider-specific variable; NVIDIA_API_KEY is supported as an alias.
-    return (os.getenv("KUMO_NVIDIA_API_KEY") or os.getenv("NVIDIA_API_KEY") or "").strip()
+    # Kumo has a dedicated credential; a chat credential must never configure it.
+    return os.getenv("KUMO_NVIDIA_API_KEY", "").strip()
 
 
 def _http_json(url: str, method: str = "GET", payload: dict[str, Any] | None = None,
@@ -97,6 +104,17 @@ def kumo_status(_: str = Depends(_device)) -> dict[str, Any]:
     # NVIDIA API Catalog is a hosted endpoint: it has a models endpoint, not the
     # self-hosted NIM /v1/health/ready endpoint.
     key = _hosted_key()
+    if _hosted_url_configured() and not key:
+        return {
+            "provider": "nvidia_kumo_tabular",
+            "mode": "hosted_api_catalog",
+            "status": "not_configured",
+            "configured": False,
+            "ready": False,
+            "capability": "structured_tabular_prediction",
+            "general_chat_supported": False,
+            "message": "Set KUMO_NVIDIA_API_KEY for the hosted NVIDIA Kumo API; NVIDIA_API_KEY is reserved for chat.",
+        }
     if key:
         try:
             code, data, elapsed = _http_json(NVIDIA_CATALOG_BASE + "/models", token=key)
@@ -171,6 +189,8 @@ def kumo_predict(body: KumoPredictionRequest, _: str = Depends(_device)) -> dict
         if index not in signal_api.INDEXES:
             raise HTTPException(status_code=422, detail="Unsupported index for Kumo-to-Quant connection.")
     hosted_key = _hosted_key()
+    if _hosted_url_configured() and not hosted_key:
+        raise HTTPException(status_code=503, detail="Hosted Kumo URL is configured but KUMO_NVIDIA_API_KEY is missing.")
     if hosted_key:
         payload = body.request
         if not isinstance(payload, dict):
