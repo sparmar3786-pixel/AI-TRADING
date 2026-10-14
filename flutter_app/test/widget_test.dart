@@ -1,8 +1,36 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ai_trading_signal/main.dart';
+import 'package:ai_trading_signal/risk_calculator_page.dart';
 
 void main() {
+  testWidgets('Risk calculator follows parent selection from an index to an MCX contract', (tester) async {
+    const market = <String, dynamic>{
+      'NIFTY': <String, dynamic>{'ltp': 25000, 'age_seconds': 2, 'live': true, 'lot_size': 25},
+    };
+    const commodities = <dynamic>[
+      <String, dynamic>{'name': 'CRUDEOIL', 'symbol': 'CRUDEOIL', 'ltp': 6200, 'age_seconds': 2, 'live': true, 'lot_size': 100},
+    ];
+
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: RiskCalculator(selectedIndex: 'NIFTY', marketByIndex: market, commodities: commodities),
+      ),
+    ));
+    expect(find.text('NIFTY'), findsOneWidget);
+
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: RiskCalculator(selectedIndex: 'CRUDEOIL', marketByIndex: market, commodities: commodities),
+      ),
+    ));
+    await tester.pump();
+
+    expect(find.text('CRUDEOIL'), findsOneWidget);
+    expect(find.text('LTP: ₹6200.00'), findsOneWidget);
+    expect(find.text('LTP: ₹25000.00'), findsNothing);
+  });
+
   testWidgets('Fresh app renders all top-level tabs', (tester) async {
     await tester.pumpWidget(const FreshApp());
 

@@ -340,34 +340,41 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         if (mounted) setState(() { signalsEndpointOnline = false; signalsFetchError = e.toString().replaceFirst('Exception: ', ''); });
         s = _makeCachedSignalsNonActionable(await _loadCachedSignals());
       }
-      // The signal endpoint deliberately fails closed when candles/Greeks are
-      // incomplete. Fetch the option chain independently so its valid quotes
-      // can still populate Option Chain/OI Lab. Throttle this heavier endpoint.
+      // Always refresh the selected index's option chain independently of the
+      // signal snapshot. A non-empty embedded chain can itself be cached/stale,
+      // so it must never suppress a live broker quote refresh.
       final responseMarket = Map<String, dynamic>.from(s['market'] as Map? ?? const {});
       final selectedMarket = Map<String, dynamic>.from(responseMarket[selectedIndex] as Map? ?? const {});
       final embeddedChain = (selectedMarket['option_chain'] as List?) ?? const <dynamic>[];
-      if (embeddedChain.isNotEmpty) {
-        optionChainsByIndex[selectedIndex] = List<dynamic>.from(embeddedChain);
-        optionChainError = null;
-      } else {
-        final now = DateTime.now();
-        final shouldFetchChain = _lastOptionChainIndex != selectedIndex ||
-            _lastOptionChainFetchAt == null ||
-            now.difference(_lastOptionChainFetchAt!) >= const Duration(seconds: 30);
-        if (shouldFetchChain) {
-          _lastOptionChainIndex = selectedIndex;
-          _lastOptionChainFetchAt = now;
-          try {
-            final chainResponse = await signalApi.getJson('/v1/option-chain?index=${Uri.encodeQueryComponent(selectedIndex)}', timeout: const Duration(seconds: 35));
-            final chainRows = (chainResponse['option_chain'] as List?) ?? const <dynamic>[];
-            if (chainRows.isNotEmpty) {
-              optionChainsByIndex[selectedIndex] = List<dynamic>.from(chainRows);
-              optionChainError = null;
-            } else {
-              optionChainError = (chainResponse['reason'] ?? 'Broker returned no option-chain quotes yet.').toString();
+      final now = DateTime.now();
+      final shouldFetchChain = _lastOptionChainIndex != selectedIndex ||
+          _lastOptionChainFetchAt == null ||
+          now.difference(_lastOptionChainFetchAt!) >= const Duration(seconds: 5);
+      if (shouldFetchChain) {
+        _lastOptionChainIndex = selectedIndex;
+        _lastOptionChainFetchAt = now;
+        try {
+          final chainResponse = await signalApi.getJson(
+            '/v1/option-chain?index=${Uri.encodeQueryComponent(selectedIndex)}',
+            timeout: const Duration(seconds: 12),
+          );
+          final chainRows = (chainResponse['option_chain'] as List?) ?? const <dynamic>[];
+          if (chainRows.isNotEmpty) {
+            optionChainsByIndex[selectedIndex] = _markOptionRowsFresh(chainRows);
+            optionChainError = null;
+          } else {
+            optionChainError = (chainResponse['reason'] ?? 'Broker returned no option-chain quotes yet.').toString();
+            // Preserve an embedded snapshot only as an explicitly stale fallback.
+            if (optionChainsByIndex[selectedIndex] == null && embeddedChain.isNotEmpty) {
+              optionChainsByIndex[selectedIndex] = _markOptionRowsFresh(embeddedChain, forceStale: true);
             }
-          } catch (e) {
-            optionChainError = e.toString().replaceFirst('Exception: ', '');
+          }
+        } catch (e) {
+          optionChainError = e.toString().replaceFirst('Exception: ', '');
+          // Keep the last good rows visible for inspection, but never label them
+          // live after the independent refresh fails.
+          if (optionChainsByIndex[selectedIndex] == null && embeddedChain.isNotEmpty) {
+            optionChainsByIndex[selectedIndex] = _markOptionRowsFresh(embeddedChain, forceStale: true);
           }
         }
       }
@@ -395,10 +402,10 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           final cachedChain = optionChainsByIndex[key];
           final currentChain = (row['option_chain'] as List?) ?? const <dynamic>[];
           if (currentChain.isEmpty && cachedChain != null) {
-            row['option_chain'] = _markOptionRowsFresh(cachedChain, forceStale: row['cached'] == true);
+            row['option_chain'] = _markOptionRowsFresh(cachedChain, forceStale: row['cached'] == true || optionChainError != null);
             row['option_chain_source'] = 'independent_timestamped_broker_quote';
           } else if (currentChain.isNotEmpty) {
-            row['option_chain'] = _markOptionRowsFresh(currentChain, forceStale: row['cached'] == true);
+            row['option_chain'] = _markOptionRowsFresh(currentChain, forceStale: row['cached'] == true || optionChainError != null);
           }
           return MapEntry(key, row);
         });
