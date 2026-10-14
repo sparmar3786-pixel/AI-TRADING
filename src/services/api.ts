@@ -226,28 +226,58 @@ class ApiService {
 
       if (resp.ok) {
         const data = await resp.json();
-        const gatedSignals = this.applyTenMinuteSignalGate(data.signals || {});
-        return {
-          signals: gatedSignals,
-          market: data.market || this.generateFallbackMarket(),
-          commodities: data.commodities || this.generateFallbackCommodities(),
-          isLive: true,
-        };
+        const rows = data.market && typeof data.market === 'object'
+          ? Object.values(data.market) as MarketRow[]
+          : [];
+        const hasFreshLiveMarket = rows.length > 0 && rows.every(row => {
+          const timestamp = Date.parse(row.timestamp || '');
+          const ageMs = Date.now() - timestamp;
+          return row.live === true && Number.isFinite(timestamp) && ageMs >= 0 && ageMs <= 120000;
+        });
+        const hasSignals = data.signals && Object.keys(data.signals).length > 0;
+
+        // A 200 response is not proof of fresh broker data. Fail closed if
+        // market rows lack an explicit live marker or fresh exchange timestamp.
+        if (hasFreshLiveMarket && hasSignals) {
+          return {
+            signals: this.applyTenMinuteSignalGate(data.signals),
+            market: data.market,
+            commodities: Array.isArray(data.commodities) ? data.commodities : [],
+            isLive: true,
+          };
+        }
       }
     } catch (e: any) {
       // Railway backend is cold or sleeping, use local high-fidelity generator
     }
 
     const fallbackMarket = this.generateFallbackMarket();
+    // Offline prices are for layout continuity only, never for trading decisions.
     const rawFallbackSignals = this.generateFallbackSignals(fallbackMarket);
-    const gatedFallbackSignals = this.applyTenMinuteSignalGate(rawFallbackSignals);
+    const safeOfflineSignals = Object.fromEntries(
+      Object.entries(rawFallbackSignals).map(([key, signal]) => [key, {
+        ...signal,
+        decision: 'WAIT',
+        candidate_decision: 'WAIT',
+        confidence: 0,
+        guards: ['LIVE MARKET DATA UNAVAILABLE'],
+        live_validation: {
+          verdict: 'WARN',
+          decision: 'WAIT',
+          blocks: ['Live market data is missing, stale, or not broker-validated'],
+        },
+        reasons: ['Trading disabled until fresh broker data is verified'],
+        data_fresh: false,
+      }]),
+    ) as Record<string, SignalData>;
+    const gatedFallbackSignals = this.applyTenMinuteSignalGate(safeOfflineSignals);
 
     return {
       signals: gatedFallbackSignals,
       market: fallbackMarket,
-      commodities: this.generateFallbackCommodities(),
+      commodities: [],
       isLive: false,
-      error: 'Backend sleeping • Showing live simulated market telemetry with active 10-min stability gate',
+      error: 'OFFLINE • Broker data unavailable or stale. Synthetic prices are non-live; signals are forced to WAIT.',
     };
   }
 
@@ -284,7 +314,7 @@ class ApiService {
         trend: change >= 0 ? 'BULLISH' : 'BEARISH',
         option_chain,
         timestamp: new Date().toISOString(),
-        live: true,
+        live: false,
       };
     });
 
