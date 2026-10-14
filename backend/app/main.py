@@ -372,18 +372,23 @@ def _refresh_market_intelligence_once() -> None:
         # are labeled stale and must never be presented as current prices.
         market_context: dict[str, Any] = {}
         try:
-            snapshot = _get_signals()
+            with _lock:
+                snapshot = dict(_signal_cache or {})
+                snapshot_age = time.monotonic() - _signal_cache_at if _signal_cache is not None else None
+            snapshot_is_fresh = snapshot_age is not None and snapshot_age < SIGNAL_CACHE_SECONDS
             for index in INDEXES:
                 row = dict((snapshot.get("market") or {}).get(index) or {})
+                quote_is_live = snapshot_is_fresh and row.get("live") is True
                 market_context[index] = {
-                    "ltp": row.get("ltp") if row.get("live") is True else None,
-                    "live": row.get("live") is True,
+                    "ltp": row.get("ltp") if quote_is_live else None,
+                    "live": quote_is_live,
                     "source_timestamp": row.get("source_timestamp") or row.get("timestamp"),
                     "age_seconds": row.get("age_seconds"),
-                    "day_move_pct": row.get("day_move_pct"),
-                    "sentiment_label": row.get("sentiment_label"),
-                    "pcr": row.get("pcr"),
-                    "data_status": "LIVE" if row.get("live") is True else "STALE_OR_UNAVAILABLE",
+                    "snapshot_age_seconds": round(snapshot_age, 1) if snapshot_age is not None else None,
+                    "day_move_pct": row.get("day_move_pct") if quote_is_live else None,
+                    "sentiment_label": row.get("sentiment_label") if quote_is_live else None,
+                    "pcr": row.get("pcr") if quote_is_live else None,
+                    "data_status": "LIVE" if quote_is_live else "STALE_OR_UNAVAILABLE",
                 }
         except Exception:
             market_context = {index: {"data_status": "UNAVAILABLE", "ltp": None, "live": False} for index in INDEXES}
