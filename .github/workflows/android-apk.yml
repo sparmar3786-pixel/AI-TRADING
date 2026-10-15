@@ -2,7 +2,7 @@ name: Build AI-TRADING Android APK
 
 on:
   push:
-    branches: [main]
+    branches: [main, fix/signal-backend-health-status]
     paths:
       - 'flutter_app/**'
       - '.github/workflows/android-apk.yml'
