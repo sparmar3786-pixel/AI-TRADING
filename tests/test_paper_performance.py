@@ -86,7 +86,7 @@ class PaperPerformanceSummaryTests(unittest.TestCase):
         self.assertEqual(metrics["net_pnl_coverage_count"], 1)
         self.assertEqual(report["by_instrument"]["NIFTY"]["closed_count"], 2)
         self.assertIn("BANKNIFTY", report["by_instrument"])
-        self.assertEqual(report["mcx"]["status"], "NOT_TRACKED_BY_INDEX_OPTION_SIGNAL_ENGINE")
+        self.assertEqual(report["mcx"]["status"], "UNVERIFIED_NO_CLOSED_MCX_OUTCOMES")
         self.assertEqual(report["persistence"]["status"], "OK")
 
     def test_mcx_short_future_target_uses_direction_and_explicit_costs(self):
