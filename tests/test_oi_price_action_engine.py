@@ -36,3 +36,35 @@ class OIPriceActionEngineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    def test_depth_pressure_detects_bid_and_ask_imbalance(self):
+        engine = OIPriceActionEngine()
+        candles = pd.DataFrame([
+            {"open": 10, "high": 11, "low": 9, "close": 10},
+            {"open": 10, "high": 11, "low": 9, "close": 10},
+            {"open": 10, "high": 11, "low": 9, "close": 10},
+        ])
+        self.assertEqual(engine._pressure(candles, {"bid_qty": 900, "ask_qty": 100}), "BUY_PRESSURE")
+        self.assertEqual(engine._pressure(candles, {"bid_qty": 100, "ask_qty": 900}), "SELL_PRESSURE")
+
+    def test_rejection_wicks_and_two_candle_structure(self):
+        engine = OIPriceActionEngine()
+        bullish = {"open": 10.0, "high": 10.5, "low": 5.0, "close": 10.2}
+        bearish = {"open": 10.5, "high": 15.0, "low": 10.3, "close": 10.4}
+        self.assertTrue(engine._rejection_wick(bullish, "bull"))
+        self.assertTrue(engine._rejection_wick(bearish, "bear"))
+        candles = pd.DataFrame([
+            {"open": 10, "high": 11, "low": 9, "close": 10.5},
+            {"open": 10.5, "high": 12, "low": 10, "close": 11.5},
+        ])
+        bull, bear, tags = engine._two_candle_structure(candles)
+        self.assertTrue(bull)
+        self.assertFalse(bear)
+        self.assertIn("2-candle HH-HL structure", tags)
+
+    def test_invalid_price_action_configuration_rejected(self):
+        with self.assertRaises(ValueError):
+            OIPriceActionEngine(hold_bars=0)
+        with self.assertRaises(ValueError):
+            OIPriceActionEngine(wick_ratio=0)
