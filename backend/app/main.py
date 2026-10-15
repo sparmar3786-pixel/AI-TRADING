@@ -3854,34 +3854,45 @@ def _signal_outcome_path() -> Path:
 def _load_signal_outcomes() -> list[dict[str, Any]]:
     with _lock:
         db_ok, db_value = get_state("signal_outcomes")
-        if db_ok and isinstance(db_value, list):
-            _signal_outcomes_memory.clear()
-            _signal_outcomes_memory.extend(
-                dict(item) for item in db_value
-                if isinstance(item, dict) and item.get("outcome_id")
-            )
-            _signal_outcome_persistence.update({
-                "status": "POSTGRES_OK", "last_error": None,
-                "path": "postgresql:ai_trading_state/signal_outcomes",
-                "records": len(_signal_outcomes_memory),
-            })
-            return [dict(item) for item in _signal_outcomes_memory]
         path = _signal_outcome_path()
+        volume_rows: list[dict[str, Any]] = []
         try:
             if path.is_file():
-                raw = json.loads(path.read_text(encoding="utf-8"))
-                if isinstance(raw, list):
-                    _signal_outcomes_memory.clear()
-                    _signal_outcomes_memory.extend(
-                        dict(item) for item in raw
-                        if isinstance(item, dict) and item.get("outcome_id")
-                    )
-                    migrated = put_state("signal_outcomes", list(_signal_outcomes_memory))
-                    _signal_outcome_persistence.update({
-                        "status": "VOLUME_OK_POSTGRES_MIGRATED" if migrated else "VOLUME_FALLBACK",
-                        "last_error": None, "path": str(path),
-                        "records": len(_signal_outcomes_memory),
-                    })
+                raw_volume = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(raw_volume, list):
+                    volume_rows = [dict(item) for item in raw_volume if isinstance(item, dict) and item.get("outcome_id")]
+        except (OSError, ValueError, TypeError):
+            volume_rows = []
+        if db_ok and isinstance(db_value, list):
+            merged: dict[str, dict[str, Any]] = {}
+            for item in volume_rows:
+                merged[str(item["outcome_id"])] = item
+            for item in db_value:
+                if isinstance(item, dict) and item.get("outcome_id"):
+                    merged[str(item["outcome_id"])] = dict(item)
+            combined = list(merged.values())[-SIGNAL_OUTCOMES_MAX_ROWS:]
+            migrated = len(combined) > len(db_value)
+            if migrated:
+                put_state("signal_outcomes", combined)
+            _signal_outcomes_memory.clear()
+            _signal_outcomes_memory.extend(combined)
+            _signal_outcome_persistence.update({
+                "status": "POSTGRES_OK_MERGED_VOLUME" if migrated else "POSTGRES_OK",
+                "last_error": None,
+                "path": "postgresql:ai_trading_state/signal_outcomes",
+                "records": len(combined),
+            })
+            return [dict(item) for item in _signal_outcomes_memory]
+        try:
+            if volume_rows:
+                _signal_outcomes_memory.clear()
+                _signal_outcomes_memory.extend(volume_rows[-SIGNAL_OUTCOMES_MAX_ROWS:])
+                migrated = put_state("signal_outcomes", list(_signal_outcomes_memory))
+                _signal_outcome_persistence.update({
+                    "status": "VOLUME_OK_POSTGRES_MIGRATED" if migrated else "VOLUME_FALLBACK",
+                    "last_error": None, "path": str(path),
+                    "records": len(_signal_outcomes_memory),
+                })
             else:
                 _signal_outcome_persistence.update({
                     "status": "NOT_INITIALIZED", "last_error": None,
@@ -3893,7 +3904,6 @@ def _load_signal_outcomes() -> list[dict[str, Any]]:
                 "path": str(path), "records": len(_signal_outcomes_memory),
             })
         return [dict(item) for item in _signal_outcomes_memory]
-
 
 def _save_signal_outcomes(rows: list[dict[str, Any]]) -> bool:
     bounded = rows[-SIGNAL_OUTCOMES_MAX_ROWS:]
