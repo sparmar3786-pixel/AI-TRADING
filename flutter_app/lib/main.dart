@@ -624,14 +624,6 @@ String _diagValue(
 class ApiRailwayPage extends StatelessWidget {
   const ApiRailwayPage({super.key});
 
-  static const links = <(String, String, String)>[
-    ('Railway deploy from GitHub', 'https://railway.com/new', 'Connect a repository and deploy a service'),
-    ('Railway dashboard', 'https://railway.com/dashboard', 'Manage services, deployments and variables'),
-    ('Railway documentation', 'https://docs.railway.com', 'Deployment, variables, domains and health checks'),
-    ('Railway CLI', 'https://docs.railway.com/guides/cli', 'CLI install and deploy instructions'),
-    ('FastAPI documentation', 'https://fastapi.tiangolo.com', 'API routes, validation and OpenAPI docs'),
-  ];
-
   @override
   Widget build(BuildContext context) => ListView(
     padding: const EdgeInsets.all(12),
@@ -647,16 +639,6 @@ class ApiRailwayPage extends StatelessWidget {
         const Divider(height: 1),
         const ListTile(leading: Icon(Icons.vpn_key_outlined), title: Text('Secret handling'), subtitle: Text('Store credentials as Railway variables or encrypted server-side settings. Never commit .env files, API keys, Angel password, PIN, or TOTP seed.')),
       ])),
-      for (final item in links)
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.open_in_new, color: Color(0xFF12D6FF)),
-            title: Text(item.$1),
-            subtitle: Text(item.$3),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => _openExternal(context, item.$2),
-          ),
-        ),
     ],
   );
 }
@@ -987,30 +969,16 @@ class TradingSetupPage extends StatelessWidget {
   final Map<String, dynamic> market, signals, ai, liveStatus;
   final String? lastFetch;
 
-  static const sections = <(String, String, List<(String, String, String)>)>[
-    ('1 • Broker & Market Data', 'Angel One SmartAPI is the broker integration for this app; Zerodha/Kite is not used. Live ticks, historical candles, instruments, option-chain/OI fields and feed freshness must be verified independently.', [
-      ('Angel One SmartAPI documentation', 'https://smartapi.angelone.in/docs', 'Login, market data, WebSocket and order API reference'),
-      ('Angel One SmartAPI guide', 'https://www.angelone.in/knowledge-center/smartapi/making-sense-of-the-smartapi-documentation', 'WebSocket and strategy integration guide'),
-      ('Historical candle API reference', 'https://smartapi.angelone.in/docs', 'Historical candle request contract for deterministic backtesting'),
-    ]),
-    ('2 • Strategy & Signal Engine', 'Run deterministic indicators and OI classification first; use AI only as an evidence-based interpretation layer. Missing/stale/conflicting data must result in WAIT/NO TRADE.', [
-    ]),
-    ('3 • Signal Quality & Evidence Filter', 'Score independent evidence, reject stale quotes, require a minimum data-quality gate and avoid treating an LLM confidence statement as a probability of profit.', [
-    ]),
-    ('4 • Backtesting & Walk-Forward Validation', 'Use out-of-sample periods, walk-forward testing, slippage, brokerage, taxes/fees, option expiry and realistic fill assumptions. Avoid look-ahead bias and overfitting.', [
-    ]),
-    ('5 • Risk & Trade Management', 'Require per-trade risk caps, max daily loss, max drawdown, max open positions, lot-size validation, spread/liquidity checks, kill switch and explicit handling of partial fills and rejected orders.', [
-    ]),
-    ('6 • Order Execution & Trade Lifecycle', 'Fresh-Apk has an Angel One execution boundary, but real orders are deliberately gated. Confirm authentication, contract mapping, quote freshness, order book state, partial fills and exit handling before enabling live orders.', [
-    ]),
-    ('7 • Monitoring, Alerts & Audit', 'Track WebSocket disconnects, stale data, API failures, rejected orders, latency, daily P&L, exposure and audit events. Alerts should never silently imply that an order filled.', [
-    ]),
-    ('8 • Dashboard, Charts & Mobile UX', 'Keep compact F&O-first screens, clear data timestamps, candle timeframe controls, option-chain/strike view, signal explanation, risk card, execution mode and connection health.', [
-    ]),
-    ('9 • Backend, Secrets & Deployment', 'Android → HTTPS Railway backend → Angel One REST/WebSocket → normalized store → strategy/risk gates → signal/monitoring APIs. Keep API keys, PIN and TOTP secrets off-device and out of Git.', [
-      ('FastAPI documentation', 'https://fastapi.tiangolo.com', 'API/schema/testing docs'),
-      ('Railway documentation', 'https://docs.railway.com', 'Deployments, variables, domains and health checks'),
-    ]),
+  static const sections = <(String, String)>[
+    ('1 • Broker & Market Data', 'Angel One SmartAPI is the broker integration for this app. Live ticks, historical candles, instruments, option-chain/OI fields and feed freshness must be verified independently.'),
+    ('2 • Strategy & Signal Engine', 'Run deterministic indicators and OI classification first; use AI only as an evidence-based interpretation layer. Missing, stale or conflicting data must result in WAIT / NO TRADE.'),
+    ('3 • Signal Quality & Evidence Filter', 'Score independent evidence, reject stale quotes, require a minimum data-quality gate and avoid treating an AI confidence statement as a probability of profit.'),
+    ('4 • Backtesting & Walk-Forward Validation', 'Use out-of-sample periods, walk-forward testing, slippage, brokerage, taxes/fees, option expiry and realistic fill assumptions. Avoid look-ahead bias and overfitting.'),
+    ('5 • Risk & Trade Management', 'Require per-trade risk caps, max daily loss, max drawdown, max open positions, lot-size validation, spread/liquidity checks, kill switch and explicit handling of partial fills and rejected orders.'),
+    ('6 • Order Execution & Trade Lifecycle', 'Real orders are deliberately gated. Confirm authentication, contract mapping, quote freshness, order book state, partial fills and exit handling before enabling live orders.'),
+    ('7 • Monitoring, Alerts & Audit', 'Track WebSocket disconnects, stale data, API failures, rejected orders, latency, daily P&L, exposure and audit events. Alerts should never silently imply that an order filled.'),
+    ('8 • Dashboard, Charts & Mobile UX', 'Keep compact F&O-first screens, clear data timestamps, candle timeframe controls, option-chain/strike view, signal explanation, risk card, execution mode and connection health.'),
+    ('9 • Backend, Secrets & Deployment', 'Android → HTTPS Railway backend → Angel One REST/WebSocket → normalized store → strategy/risk gates → signal/monitoring APIs. Keep API keys, PIN and TOTP secrets off-device and out of the app.'),
   ];
 
   @override
@@ -1072,7 +1040,7 @@ class TradingSetupPage extends StatelessWidget {
         ]),
       )),
       const SizedBox(height: 8),
-      for (final section in sections.where((section) => section.$3.any((link) => !link.$2.contains('github.com'))))
+      for (final section in sections)
         Card(
           child: ExpansionTile(
             initiallyExpanded: false,
@@ -1084,14 +1052,6 @@ class TradingSetupPage extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
                 child: Text(section.$2),
               ),
-              for (final link in section.$3.where((link) => !link.$2.contains('github.com')))
-                ListTile(
-                  dense: true,
-                  leading: const Icon(Icons.open_in_new, size: 18),
-                  title: Text(link.$1),
-                  subtitle: Text(link.$3),
-                  onTap: () => _openExternal(context, link.$2),
-                ),
             ],
           ),
         ),
