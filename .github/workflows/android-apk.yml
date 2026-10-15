@@ -2,6 +2,7 @@ name: Build AI-TRADING Android APK
 
 on:
   # Build on workflow changes and Flutter source changes so UI updates can produce a fresh APK.
+  # Hero Zero UI release: rebuild after the reviewed Flutter source branch is updated.
   push:
     branches: [main]
     paths:
