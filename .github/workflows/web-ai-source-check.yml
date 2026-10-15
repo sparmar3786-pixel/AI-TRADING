@@ -1,0 +1,36 @@
+name: Web AI source verification (no APK)
+
+on:
+  push:
+    branches:
+      - fix/cloud-nvidia-ai-truthful-status-20261015
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - '.github/workflows/web-ai-source-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-ai-source-check-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  web-source-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies without rewriting the lockfile
+        run: npm install --package-lock=false
+      - name: TypeScript validation
+        run: npm run lint
+      - name: Build web frontend only (no Android/APK)
+        run: npm run build
