@@ -99,7 +99,7 @@ class NvidiaService {
     modelOverride?: string
   ): Promise<{ answer: string; model: string; provider: string } | null> {
     const { apiService } = await import('./api');
-    const backendUrl = apiService.getSignalBackend().replace(/\\/+$/, '');
+    const backendUrl = apiService.getSignalBackend();
     const response = await fetch(`${backendUrl}/v1/ai/nvidia-chat`, {
       method: 'POST',
       headers: {
@@ -109,7 +109,7 @@ class NvidiaService {
       },
       body: JSON.stringify({
         index: 'NIFTY',
-        question: `${systemPrompt}\\n\\n${prompt}`,
+        question: [systemPrompt, prompt].join(String.fromCharCode(10).repeat(2)),
         history: history.slice(-4),
         context: { requested_model: modelOverride || this.getSelectedModel() },
       }),
