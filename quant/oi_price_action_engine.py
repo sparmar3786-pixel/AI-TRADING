@@ -57,8 +57,10 @@ class QuantSignal:
 
 
 def _wait(reason: str, **metadata: Any) -> QuantSignal:
+    supplied_guards = metadata.pop("guards", [])
+    guards = list(dict.fromkeys(["NO_VALID_SETUP", *supplied_guards]))
     return QuantSignal(
-        reasons=[reason], guards=["NO_VALID_SETUP"],
+        reasons=[reason], guards=guards,
         live_validation={"verdict": "FAIL", "decision": "WAIT", "blocks": [reason]},
         **metadata,
     )
