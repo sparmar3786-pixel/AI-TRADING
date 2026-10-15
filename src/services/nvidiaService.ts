@@ -65,13 +65,16 @@ class NvidiaService {
       const status = String(ai.nvidia_status ?? '').toLowerCase();
       const configured = Boolean(ai.configured) &&
         !['', 'unavailable', 'not_configured', 'disabled', 'error', 'failed'].includes(status);
-      const active = configured &&
-        ['active', 'ok', 'connected', 'ready', 'healthy', 'operational'].includes(status);
-      this.lastStatus = { configured, active, checkedAt: Date.now() };
-      return { configured, active };
+      // Diagnostics prove configuration only. Active requires recent successful inference.
+      const inferenceStillFresh = Boolean(this.lastStatus?.active &&
+        Date.now() - this.lastStatus.checkedAt <= this.STATUS_TTL_MS);
+      this.lastStatus = { configured, active: inferenceStillFresh, checkedAt: inferenceStillFresh ? this.lastStatus!.checkedAt : Date.now() };
+      return { configured, active: inferenceStillFresh };
     } catch {
-      this.lastStatus = { configured: false, active: false, checkedAt: Date.now() };
-      return { configured: false, active: false };
+      const inferenceStillFresh = Boolean(this.lastStatus?.active &&
+        Date.now() - this.lastStatus.checkedAt <= this.STATUS_TTL_MS);
+      this.lastStatus = { configured: false, active: inferenceStillFresh, checkedAt: inferenceStillFresh ? this.lastStatus!.checkedAt : Date.now() };
+      return { configured: false, active: inferenceStillFresh };
     } finally {
       clearTimeout(timeoutId);
     }
