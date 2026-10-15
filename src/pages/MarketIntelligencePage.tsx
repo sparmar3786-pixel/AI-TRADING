@@ -430,7 +430,7 @@ export const MarketIntelligencePage: React.FC = () => {
             </div>
           </div>
           <span className="text-[10px] text-cyan-400 font-mono font-semibold">
-            {isDirectKey ? 'NVIDIA Nemotron 70B (Direct Key)' : 'NVIDIA Nemotron 70B (Active)'}
+            {isDirectKey ? 'NVIDIA direct key • not verified' : 'NVIDIA cloud • not verified'}
           </span>
         </div>
 
