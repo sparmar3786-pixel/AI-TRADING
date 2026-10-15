@@ -143,7 +143,7 @@ export const MarketIntelligencePage: React.FC = () => {
   const handleTestAndSaveKey = async () => {
     if (!nvidiaKey.trim()) {
       nvidiaService.setNvidiaApiKey('');
-      setKeyStatusMessage({ text: 'NVIDIA API Key cleared. Using built-in AI quant engine.', ok: true });
+      setKeyStatusMessage({ text: 'Direct NVIDIA key removed. Cloud AI status will depend on a verified server response.', ok: true });
       void loadIntelligence(true);
       return;
     }
@@ -157,7 +157,7 @@ export const MarketIntelligencePage: React.FC = () => {
     if (result.valid) {
       nvidiaService.setNvidiaApiKey(nvidiaKey);
       nvidiaService.setSelectedModel(selectedModel);
-      setKeyStatusMessage({ text: '✅ NVIDIA NIM API Key connected and verified successfully!', ok: true });
+      setKeyStatusMessage({ text: 'NVIDIA key authenticated at the models endpoint. Actual chat inference is verified only after a successful AI response.', ok: true });
       void loadIntelligence(true);
       setTimeout(() => setShowConfig(false), 2000);
     } else {
