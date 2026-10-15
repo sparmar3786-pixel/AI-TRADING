@@ -526,14 +526,19 @@ def _start_market_intelligence_scheduler_on_startup() -> None:
             _load_signal_outcomes()
             _load_paper_trades()
             storage = _storage_diagnostics()
-            logger.info(
-                "persistent state migration status: postgres=%s outcomes=%s paper_trades=%s encrypted_credentials=%s volume_detach_ready=%s",
-                storage.get("postgres_reachable"), storage.get("signal_outcomes_in_postgres"),
-                storage.get("paper_trades_in_postgres"), storage.get("encrypted_credentials_in_postgres"),
-                storage.get("ready_to_detach_volume"),
+            print(
+                "PERSISTENT_STATE_MIGRATION "
+                f"postgres={storage.get('postgres_reachable')} "
+                f"outcomes={storage.get('signal_outcomes_in_postgres')} "
+                f"paper_trades={storage.get('paper_trades_in_postgres')} "
+                f"encrypted_credentials={storage.get('encrypted_credentials_in_postgres')} "
+                f"volume_detach_ready={storage.get('ready_to_detach_volume')}",
+                flush=True,
             )
-        except Exception:
-            logger.warning("persistent state migration deferred; volume fallback remains enabled")
+        except Exception as exc:
+            print(f"PERSISTENT_STATE_MIGRATION deferred error_type={type(exc).__name__}", flush=True)
+    else:
+        print("PERSISTENT_STATE_MIGRATION database_configured=False volume_detach_ready=False", flush=True)
     enabled = os.getenv("MARKET_INTELLIGENCE_AUTO_REFRESH", "true").strip().lower()
     if enabled not in {"0", "false", "no", "off"}:
         _ensure_market_intelligence_scheduler()
