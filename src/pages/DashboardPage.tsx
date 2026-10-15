@@ -312,19 +312,6 @@ export const DashboardPage: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setActiveTab('SMC Chart')}
-            className="card-base card-hover p-3 border border-[#1C2740] flex items-center space-x-2.5 text-left transition-all"
-          >
-            <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400">
-              <Zap className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="text-xs font-bold text-white">SMC Pro Chart</div>
-              <div className="text-[10px] text-slate-400">OB & FVG structure</div>
-            </div>
-          </button>
-
-          <button
             onClick={() => setActiveTab('Commodities')}
             className="card-base card-hover p-3 border border-[#1C2740] flex items-center space-x-2.5 text-left transition-all"
           >
