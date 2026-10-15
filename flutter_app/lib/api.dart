@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'config.dart';
+import 'repository_link_filter.dart';
 
 class FreshApi {
   FreshApi([String? baseUrl, http.Client? client])
@@ -131,7 +132,8 @@ class FreshApi {
     if (decoded is! Map) {
       throw Exception('HTTP ${response.statusCode}: invalid JSON response');
     }
-    return Map<String, dynamic>.from(decoded);
+    final sanitized = RepositoryLinkFilter.sanitizeValue(decoded);
+    return Map<String, dynamic>.from(sanitized as Map);
   }
 
   Future<Map<String, dynamic>> health() => getJson('/health');
