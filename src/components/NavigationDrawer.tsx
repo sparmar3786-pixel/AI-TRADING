@@ -8,7 +8,6 @@ import {
   Sliders,
   Zap,
   ShieldAlert,
-  Flame,
   Activity,
   Cpu,
   BrainCircuit,
@@ -39,7 +38,6 @@ export const NavigationDrawer: React.FC = () => {
         { id: 'Option Chain', label: 'Option Chain & Greeks', icon: Table2 },
         { id: 'OI Lab', label: 'OI Lab & PCR Analysis', icon: BarChart3 },
         { id: 'Indicators', label: 'Technical Indicators', icon: Sliders },
-        { id: 'Commodities', label: 'MCX Commodities', icon: Flame },
       ],
     },
     {
