@@ -1,7 +1,11 @@
 name: Build AI-TRADING Android APK
 
 on:
-  # APK builds are paused until explicitly requested.
+  # Also build once when this workflow file is updated on main, so the latest APK can be produced without a manual dispatch.
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/android-apk.yml'
   workflow_dispatch:
 
 permissions:
