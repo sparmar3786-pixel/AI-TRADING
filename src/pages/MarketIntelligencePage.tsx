@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useTrading } from '../context/TradingContext';
 import { apiService } from '../services/api';
 import { sanitizeRepositoryLinks } from '../services/repositoryLinkFilter';
-import { generateMarketIntelligenceAnswer } from '../services/aiIntelligence';
 import {
   nvidiaService,
   SUPPORTED_NVIDIA_MODELS,
@@ -10,7 +9,6 @@ import {
 } from '../services/nvidiaService';
 import {
   BrainCircuit,
-  Send,
   RefreshCw,
   AlertTriangle,
   ExternalLink,
@@ -18,7 +16,6 @@ import {
   Sparkles,
   Key,
   CheckCircle2,
-  Cpu,
   ChevronDown,
   ChevronUp,
   Sliders,
@@ -27,13 +24,7 @@ import {
   Layers,
 } from 'lucide-react';
 
-type ChatMessage = {
-  role: 'user' | 'assistant';
-  content: string;
-  provider?: string;
-  model?: string;
-  time?: string;
-};
+
 
 export const MarketIntelligencePage: React.FC = () => {
   const { selectedIndex, market, signals } = useTrading();
@@ -55,11 +46,6 @@ export const MarketIntelligencePage: React.FC = () => {
   const [nextRefreshAt, setNextRefreshAt] = useState<string>('');
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // Interactive AI Chat State
-  const [question, setQuestion] = useState('');
-  const [chatBusy, setChatBusy] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   const currentMarket = market[selectedIndex];
   const currentSignal = signals[selectedIndex];
@@ -166,53 +152,6 @@ export const MarketIntelligencePage: React.FC = () => {
       setTimeout(() => setShowConfig(false), 2000);
     } else {
       setKeyStatusMessage({ text: `❌ ${result.message}`, ok: false });
-    }
-  };
-
-  // Submit Question to NVIDIA cloud AI; backend OpenRouter fallback is server-side.
-  const handleAskAI = async (e?: React.FormEvent, presetPrompt?: string) => {
-    if (e) e.preventDefault();
-    const prompt = (presetPrompt || question).trim();
-    if (!prompt || chatBusy) return;
-
-    const userMsg: ChatMessage = {
-      role: 'user',
-      content: prompt,
-      time: new Date().toLocaleTimeString('en-IN', { hour12: true, hour: '2-digit', minute: '2-digit' }),
-    };
-
-    setMessages(prev => [...prev, userMsg]);
-    if (!presetPrompt) setQuestion('');
-    setChatBusy(true);
-
-    try {
-      const result = await generateMarketIntelligenceAnswer({
-        index: selectedIndex,
-        question: prompt,
-        market: currentMarket,
-        signal: currentSignal,
-        history: messages.map(m => ({ role: m.role, content: m.content })),
-      });
-
-      const assistantMsg: ChatMessage = {
-        role: 'assistant',
-        content: result.answer,
-        provider: result.provider,
-        model: result.model,
-        time: new Date().toLocaleTimeString('en-IN', { hour12: true, hour: '2-digit', minute: '2-digit' }),
-      };
-
-      setMessages(prev => [...prev, assistantMsg]);
-    } catch (err) {
-      const errMsg: ChatMessage = {
-        role: 'assistant',
-        content: `Error: ${err instanceof Error ? err.message : 'Unable to complete AI inference.'}`,
-        provider: 'System Error',
-        time: new Date().toLocaleTimeString('en-IN', { hour12: true, hour: '2-digit', minute: '2-digit' }),
-      };
-      setMessages(prev => [...prev, errMsg]);
-    } finally {
-      setChatBusy(false);
     }
   };
 
@@ -424,88 +363,7 @@ export const MarketIntelligencePage: React.FC = () => {
         </div>
       </div>
 
-      {/* Interactive AI Chat Section */}
-      <div className="card-base p-4 border border-[#1C2740] bg-[#101726] rounded-2xl space-y-3 shadow-lg">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <Cpu className="w-4 h-4 text-cyan-400" />
-            <div className="text-xs font-bold text-white font-mono uppercase">
-              ASK NVIDIA & QUANT AI ABOUT {selectedIndex}
-            </div>
-          </div>
-          <span className="text-[10px] text-cyan-400 font-mono font-semibold">
-            {isDirectKey ? 'NVIDIA direct key • not verified' : 'NVIDIA cloud • not verified'}
-          </span>
-        </div>
 
-        {/* Quick Prompt Chips */}
-        <div className="flex flex-wrap gap-1.5">
-          {[
-            `Analyze ${selectedIndex} trend & PCR`,
-            `Best ATM strike and entry level`,
-            `Major support & resistance zones`,
-            `Risk management & stop loss rules`,
-          ].map((promptText, i) => (
-            <button
-              key={i}
-              onClick={() => void handleAskAI(undefined, promptText)}
-              disabled={chatBusy}
-              className="px-2.5 py-1 rounded-lg bg-[#070B12] hover:bg-cyan-500/10 border border-[#1C2740] hover:border-cyan-500/40 text-[11px] text-slate-300 hover:text-cyan-300 font-mono transition-all text-left"
-            >
-              💬 {promptText}
-            </button>
-          ))}
-        </div>
-
-        {/* Chat History Container */}
-        <div className="space-y-3 max-h-80 overflow-y-auto p-2 rounded-xl bg-[#070B12] border border-[#1C2740]">
-          {messages.length === 0 ? (
-            <div className="p-4 text-center text-xs text-slate-400 font-mono">
-              Ask any question about {selectedIndex} spot, strike selection, Greeks, institutional flow, or risk rules.
-            </div>
-          ) : (
-            messages.map((message, index) => (
-              <div
-                key={index}
-                className={`p-3 rounded-xl text-xs leading-relaxed whitespace-pre-wrap ${
-                  message.role === 'user'
-                    ? 'ml-8 bg-cyan-500/15 border border-cyan-500/30 text-white'
-                    : 'mr-2 bg-[#121A2D] border border-[#1C2740] text-slate-200'
-                }`}
-              >
-                <div className="flex items-center justify-between text-[10px] font-mono text-cyan-400 mb-1">
-                  <span>{message.role === 'user' ? 'YOU' : `${message.provider || 'AI'}${message.model ? ` (${message.model})` : ''}`}</span>
-                  {message.time && <span className="text-slate-500">{message.time}</span>}
-                </div>
-                {message.content}
-              </div>
-            ))
-          )}
-          {chatBusy && (
-            <div className="p-3 rounded-xl bg-[#121A2D] border border-[#1C2740] text-xs text-cyan-300 flex items-center gap-2">
-              <RefreshCw className="w-3.5 h-3.5 animate-spin text-cyan-400" />
-              <span>NVIDIA AI is analyzing market structure, PCR and 5-layer quant data...</span>
-            </div>
-          )}
-        </div>
-
-        {/* Question Input Form */}
-        <form onSubmit={handleAskAI} className="flex items-center gap-2">
-          <input
-            value={question}
-            onChange={e => setQuestion(e.target.value)}
-            placeholder={`Ask NVIDIA AI about ${selectedIndex} trends, strikes, or signals...`}
-            className="flex-1 min-w-0 p-3 rounded-xl bg-[#070B12] border border-[#1C2740] text-white text-xs font-mono focus:outline-none focus:border-cyan-400"
-          />
-          <button
-            type="submit"
-            disabled={!question.trim() || chatBusy}
-            className="p-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-[#070B12] font-bold disabled:opacity-40 transition-all shadow-md shadow-cyan-500/20"
-          >
-            {chatBusy ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-          </button>
-        </form>
-      </div>
     </div>
   );
 };
