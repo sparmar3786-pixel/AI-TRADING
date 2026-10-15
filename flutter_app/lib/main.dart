@@ -1,11 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:ui' show PlatformDispatcher;
 import 'package:flutter/material.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:llama_flutter_android/llama_flutter_android.dart' as llama;
 import 'package:url_launcher/url_launcher.dart';
 import 'api.dart';
 import 'config.dart';
@@ -454,7 +451,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         CommodityPage(items:commodities),
         BacktestingPage(backendUrl: backendUrl),
         ApiPage(backendUrl:backendUrl,signalBackendUrl:signalBackendUrl,feed:feed,storeDiagnostics:storeDiagnostics,market:market,onSaved:(url){setState(()=>backendUrl=url);refresh();}),
-        AiAccessPage(backendUrl:backendUrl, onOpenLocalQwen: () => DefaultTabController.of(context).animateTo(tabs.indexOf('AI Chat'))),
+        AiAccessPage(backendUrl: backendUrl),
         DataHealthPage(
           backendUrl: backendUrl,
           signalBackendUrl: signalBackendUrl,
@@ -1754,359 +1751,72 @@ class _ApiPageState extends State<ApiPage> {
 }
 
 class AiAccessPage extends StatefulWidget {
-  const AiAccessPage({required this.backendUrl, required this.onOpenLocalQwen, super.key});
+  const AiAccessPage({required this.backendUrl, super.key});
   final String backendUrl;
-  final VoidCallback onOpenLocalQwen;
-  @override State<AiAccessPage> createState() => _AiAccessState();
+  @override
+  State<AiAccessPage> createState() => _AiAccessState();
 }
 
 class _AiAccessState extends State<AiAccessPage> {
-  bool working = false;
-  bool searchChecking = false;
-  String message = 'Search providers are managed by Railway. Add offline GGUF models from this phone.';
-  Map<String, Map<String, dynamic>> searchStatus = const {};
-  List<String> modelPaths = [];
-  String? selectedModelPath;
-  bool modelTesting = false;
-  String? activeModelPath;
-  final Map<String, String> modelTestStatus = {};
-  final Map<String, String> modelTestDetail = {};
+  bool _working = false;
+  String _aiResult = 'Not tested yet';
+  String _searchResult = 'Not tested yet';
+  String? _error;
 
-  static const expectedOfflineModels = <String>[
-    'DeepSeek-V4-Pro-Qwen3.5-4B',
-    'Qwen3.5-4B_Q4_K_M.gguf',
-    'smollm2-1.7b-instruct-q4_k_m.gguf',
-    'Llama-3.2-1B-Instruct-Q4_K_M.gguf',
-    'gemma-3-1b-it-Q4_K_M.gguf',
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    _restoreModels();
-    refreshSearchStatus();
-  }
-
-  Future<void> _restoreModels() async {
+  Future<void> _testProviders() async {
+    if (_working) return;
+    setState(() { _working = true; _error = null; });
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final paths = prefs.getStringList('fresh_local_qwen_model_paths') ?? <String>[];
-      final selected = prefs.getString('fresh_local_qwen_selected_model_path') ??
-          prefs.getString('fresh_local_qwen_model_path');
+      final api = FreshApi(widget.backendUrl.trim());
+      final results = await Future.wait([
+        api.testAIProviders(),
+        api.testSearchProviders(),
+      ]);
       if (!mounted) return;
       setState(() {
-        modelPaths = paths.where((p) => p.trim().isNotEmpty).toSet().toList();
-        if (selected != null && modelPaths.contains(selected)) {
-          selectedModelPath = selected;
-        } else if (modelPaths.isNotEmpty) {
-          selectedModelPath = modelPaths.first;
-        }
-      });
-    } catch (_) {}
-  }
-
-  Future<void> _addOfflineModels() async {
-    if (working) return;
-    setState(() { working = true; message = 'Opening model picker…'; });
-    try {
-      final picked = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: const ['gguf'],
-        allowMultiple: true,
-        withData: false,
-      );
-      if (picked == null) return;
-      final additions = picked.files
-          .map((f) => f.path)
-          .whereType<String>()
-          .where((p) => p.toLowerCase().endsWith('.gguf'))
-          .toList();
-      if (additions.isEmpty) {
-        setState(() => message = 'No accessible GGUF files selected. Copy model files to Downloads and try again.');
-        return;
-      }
-      final prefs = await SharedPreferences.getInstance();
-      final merged = <String>{...modelPaths, ...additions}.toList();
-      final selected = selectedModelPath ?? additions.first;
-      await prefs.setStringList('fresh_local_qwen_model_paths', merged);
-      await prefs.setString('fresh_local_qwen_selected_model_path', selected);
-      await prefs.setString('fresh_local_qwen_model_path', selected);
-      if (!mounted) return;
-      setState(() {
-        modelPaths = merged;
-        selectedModelPath = selected;
-        message = 'Added ${additions.length} offline model(s). Run TEST ALL OFFLINE MODELS to check compatibility.';
-      });
-    } catch (e) {
-      if (mounted) setState(() => message = 'Model import failed: ${e.toString().replaceFirst('Exception: ', '')}');
-    } finally {
-      if (mounted) setState(() => working = false);
-    }
-  }
-
-  Future<void> _selectModel(String? path) async {
-    if (path == null) return;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('fresh_local_qwen_selected_model_path', path);
-    await prefs.setString('fresh_local_qwen_model_path', path);
-    if (mounted) setState(() => selectedModelPath = path);
-  }
-
-  String _templateFor(String path) {
-    final name = path.toLowerCase();
-    if (name.contains('gemma')) return 'gemma';
-    if (name.contains('llama-2')) return 'llama2';
-    if (name.contains('phi')) return 'phi';
-    if (name.contains('smollm')) return 'chatml';
-    return 'chatml'; // Qwen and Llama 3.x use ChatML-style formatting.
-  }
-
-  Future<void> testOfflineModels() async {
-    if (modelTesting || working) return;
-    final candidates = modelPaths.where((p) => p.toLowerCase().endsWith('.gguf')).toList();
-    if (candidates.isEmpty) {
-      setState(() => message = 'NO OFFLINE AI WORKING • Add the GGUF files first.');
-      return;
-    }
-    setState(() { modelTesting = true; message = 'Testing offline models one at a time…'; });
-    int passed = 0;
-    for (final path in candidates) {
-      if (!mounted) break;
-      setState(() { activeModelPath = path; modelTestStatus[path] = 'testing'; modelTestDetail[path] = 'Checking RAM, load and inference…'; });
-      llama.LlamaController? controller;
-      try {
-        final file = File(path);
-        if (!await file.exists()) throw Exception('File not accessible');
-        final bytes = await file.length();
-        final probe = llama.LlamaController();
-        final gpu = await probe.detectGpu();
-        await probe.dispose();
-        const reserve = 1536 * 1024 * 1024;
-        if (gpu.freeRamBytes < bytes + reserve) {
-          final free = (gpu.freeRamBytes / 1073741824).toStringAsFixed(2);
-          final size = (bytes / 1073741824).toStringAsFixed(2);
-          throw Exception('Low RAM: free ${free} GB, model file ${size} GB; skipped safely');
-        }
-        controller = llama.LlamaController();
-        await controller.loadModel(modelPath: path, threads: 2, contextSize: 512);
-        final output = StringBuffer();
-        final done = Completer<void>();
-        controller.generateChat(
-          messages: [
-            llama.ChatMessage(role: 'system', content: 'You are a local model compatibility test. Reply with exactly: OFFLINE_OK'),
-            llama.ChatMessage(role: 'user', content: 'Reply with exactly OFFLINE_OK'),
-          ],
-          template: _templateFor(path),
-          temperature: 0.0,
-          maxTokens: 12,
-        ).listen((token) => output.write(token),
-          onError: (Object error, StackTrace stack) { if (!done.isCompleted) done.completeError(error, stack); },
-          onDone: () { if (!done.isCompleted) done.complete(); },
-          cancelOnError: true,
-        );
-        await done.future.timeout(const Duration(minutes: 2));
-        if (output.toString().trim().isEmpty) throw Exception('Model loaded but returned no tokens');
-        passed++;
-        if (mounted) setState(() { modelTestStatus[path] = 'working'; modelTestDetail[path] = 'LOAD + INFERENCE PASSED • ${output.toString().trim().substring(0, output.toString().trim().length > 90 ? 90 : output.toString().trim().length)}'; });
-      } catch (e) {
-        if (mounted) setState(() { modelTestStatus[path] = 'failed'; modelTestDetail[path] = e.toString().replaceFirst('Exception: ', ''); });
-      } finally {
-        try { await controller?.dispose(); } catch (_) {}
-        if (mounted) setState(() { if (activeModelPath == path) activeModelPath = null; });
-      }
-    }
-    if (mounted) setState(() {
-      modelTesting = false;
-      message = passed == 0
-        ? 'NO OFFLINE AI WORKING • No model passed load + inference. Cloud AI remains available.'
-        : '$passed of ${candidates.length} offline model(s) passed load + inference. Models were tested sequentially and unloaded after each test.';
-    });
-  }
-
-  Future<void> refreshSearchStatus() async {
-    if (searchChecking) return;
-    setState(() => searchChecking = true);
-    try {
-      final result = await FreshApi(widget.backendUrl.trim())
-          .postJson('/v1/providers/search/status', {});
-      final raw = result['providers'];
-      final providers = <String, Map<String, dynamic>>{};
-      if (raw is Map) {
-        for (final name in ['exa', 'tavily']) {
-          final value = raw[name];
-          if (value is Map) providers[name] = Map<String, dynamic>.from(value);
-        }
-      }
-      if (!mounted) return;
-      setState(() {
-        searchStatus = providers;
-        message = 'Search provider status refreshed from Railway. Keys are not entered or stored in this APK.';
+        _aiResult = const JsonEncoder.withIndent('  ').convert(results[0]);
+        _searchResult = const JsonEncoder.withIndent('  ').convert(results[1]);
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        searchStatus = const {
-          'exa': {'working': false, 'configured': false, 'evidence_count': 0},
-          'tavily': {'working': false, 'configured': false, 'evidence_count': 0},
-        };
-        message = 'Could not check search providers: ${e.toString().replaceFirst('Exception: ', '')}';
-      });
+      setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
     } finally {
-      if (mounted) setState(() => searchChecking = false);
+      if (mounted) setState(() => _working = false);
     }
-  }
-
-  Future<void> testAI() async {
-    setState(() => working = true);
-    try {
-      final result = await FreshApi(widget.backendUrl.trim()).testAIProviders();
-      final checks = (result['checks'] as List? ?? const []);
-      final good = checks.whereType<Map>().where((x) => x['ok'] == true)
-          .map((x) => x['provider'].toString()).join(', ');
-      final details = checks.whereType<Map>().map((x) {
-        final provider = (x['provider'] ?? 'provider').toString();
-        if (x['ok'] == true) return '$provider: OK (${x['model'] ?? 'model responded'})';
-        return '$provider: FAILED (${x['error'] ?? 'unknown error'})';
-      }).join(' | ');
-      if (!mounted) return;
-      setState(() => message = result['ok'] == true
-          ? 'Cloud AI connected: $good. $details'
-          : 'Gemini connectivity test failed. Check GEMINI_API_KEY, model access, quota and Railway logs. $details');
-    } catch (e) {
-      if (mounted) setState(() => message = 'Gemini test failed: ${e.toString().replaceFirst('Exception: ', '')}');
-    } finally {
-      if (mounted) setState(() => working = false);
-    }
-  }
-
-  Widget _providerStatusTile(String name) {
-    final data = searchStatus[name];
-    final workingNow = data?['working'] == true;
-    final configured = data?['configured'] == true;
-    final color = data == null
-        ? Colors.blueGrey
-        : (workingNow ? Colors.green : Colors.red);
-    final label = data == null
-        ? 'CHECK REQUIRED'
-        : (workingNow ? 'WORKING' : (configured ? 'NOT WORKING' : 'NOT CONFIGURED'));
-    return Card(
-      child: ListTile(
-        leading: Icon(Icons.circle, color: color, size: 15),
-        title: Text(name == 'exa' ? 'Exa Search' : 'Tavily Search',
-            style: const TextStyle(fontWeight: FontWeight.w800)),
-        subtitle: Text(data == null
-            ? 'Status has not been checked.'
-            : '$label • ${data['evidence_count'] ?? 0} evidence items returned'),
-        trailing: Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: 11)),
-      ),
-    );
   }
 
   @override
   Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.all(10),
+    padding: const EdgeInsets.all(12),
     children: [
-      const Section('Cloud AI — Railway Backend'),
-      const ListTile(
-        contentPadding: EdgeInsets.zero,
-        leading: Icon(Icons.cloud_done, color: Colors.cyan),
-        title: Text('Gemini Cloud Chat'),
-        subtitle: Text('Gemini remains online. Configure GEMINI_API_KEY and GEMINI_MODEL in Railway Variables. No cloud Qwen or DeepSeek API key is used by this APK.'),
-      ),
-      FilledButton.icon(
-        onPressed: working ? null : testAI,
-        icon: const Icon(Icons.psychology),
-        label: Text(working ? 'TESTING…' : 'TEST GEMINI CONNECTION'),
-      ),
-      const SizedBox(height: 18),
-      const Section('Offline AI — On-device GGUF Models'),
-      const Text('Add multiple GGUF models stored on this phone. Only the selected model is loaded into RAM at a time; model speed and quality depend on phone RAM, CPU/GPU and quantization.'),
-      const SizedBox(height: 10),
-      OutlinedButton.icon(
-        onPressed: working ? null : _addOfflineModels,
-        icon: const Icon(Icons.add_to_photos),
-        label: Text(working ? 'PLEASE WAIT…' : 'ADD OFFLINE GGUF MODELS'),
-      ),
-      const SizedBox(height: 12),
-      const Section('Offline AI Compatibility & Heartbeat'),
-      const Text('All registered GGUF files are tested one at a time. Green means load + inference passed; red means failed or skipped. Only one model is loaded during each test.'),
+      const Text('CLOUD AI ACCESS', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
       const SizedBox(height: 8),
-      ...expectedOfflineModels.map((expected) {
-        final matches = modelPaths.where((p) => p.split('/').last.toLowerCase().contains(expected.toLowerCase().replaceAll('.gguf', ''))).toList();
-        final path = matches.isNotEmpty ? matches.first : null;
-        final status = path == null ? 'missing' : (modelTestStatus[path] ?? 'untested');
-        final color = status == 'working' ? Colors.green : (status == 'testing' ? Colors.lightGreenAccent : (status == 'failed' ? Colors.red : Colors.blueGrey));
-        final label = status == 'working' ? 'WORKING' : (status == 'testing' ? 'TESTING • HEARTBEAT' : (status == 'failed' ? 'NOT WORKING' : (path == null ? 'ADD FILE' : 'NOT TESTED')));
-        return Card(
-          child: ListTile(
-            leading: Icon(status == 'testing' ? Icons.favorite : Icons.circle, color: color),
-            title: Text(expected, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
-            subtitle: Text(path == null ? 'Select this GGUF using ADD OFFLINE GGUF MODELS.' : (modelTestDetail[path] ?? 'Registered • compatibility not yet tested')),
-            trailing: Text(label, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w900)),
-          ),
-        );
-      }),
-      FilledButton.icon(
-        onPressed: modelTesting || modelPaths.isEmpty ? null : testOfflineModels,
-        icon: modelTesting ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.monitor_heart),
-        label: Text(modelTesting ? 'TESTING MODELS SEQUENTIALLY…' : 'TEST ALL OFFLINE MODELS'),
-      ),
-      if (modelPaths.isEmpty)
-        const ListTile(
-          leading: Icon(Icons.info_outline),
-          title: Text('No offline models added'),
-          subtitle: Text('Select one or more .gguf files from Downloads or phone storage.'),
-        )
-      else ...[
-        DropdownButtonFormField<String>(
-          value: selectedModelPath != null && modelPaths.contains(selectedModelPath)
-              ? selectedModelPath : modelPaths.first,
-          isExpanded: true,
-          decoration: const InputDecoration(labelText: 'Selected offline model'),
-          items: modelPaths.map((path) => DropdownMenuItem<String>(
-            value: path,
-            child: Text(path.split('/').last, overflow: TextOverflow.ellipsis),
-          )).toList(),
-          onChanged: _selectModel,
-        ),
-        const SizedBox(height: 6),
-        Text('${modelPaths.length} model(s) registered • one model runs at a time.'),
-      ],
-      FilledButton.icon(
-        onPressed: widget.onOpenLocalQwen,
-        icon: const Icon(Icons.memory),
-        label: const Text('OPEN AI CHAT • LOAD SELECTED OFFLINE MODEL'),
-      ),
-      const SizedBox(height: 18),
-      const Section('News & Evidence Search Status'),
-      const Text('Exa and Tavily keys are managed on Railway. This page only checks whether each provider returns evidence; no key fields are needed here.'),
-      const SizedBox(height: 8),
-      _providerStatusTile('exa'),
-      _providerStatusTile('tavily'),
-      OutlinedButton.icon(
-        onPressed: searchChecking ? null : refreshSearchStatus,
-        icon: searchChecking
-            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-            : const Icon(Icons.refresh),
-        label: Text(searchChecking ? 'CHECKING PROVIDERS…' : 'REFRESH EXA / TAVILY STATUS'),
-      ),
-      const SizedBox(height: 10),
-      Text(message),
+      const Text('AI providers and Exa/Tavily search are managed by the Railway backend. No API-key fields, repository links or on-device model controls are shown in the APK.', style: TextStyle(color: Colors.white70)),
       const SizedBox(height: 12),
-      const Text('Offline Qwen can review the engine context when it is provided to the local chat. Its output is advisory only: no AI model can guarantee zero mistakes or replace deterministic price freshness, option quote, risk, and order checks.', style: TextStyle(fontSize: 12)),
+      Card(child: ListTile(
+        leading: const Icon(Icons.cloud_outlined, color: Color(0xFF12D6FF)),
+        title: const Text('AI provider health'),
+        subtitle: Text(_aiResult, style: const TextStyle(fontSize: 11)),
+      )),
+      Card(child: ListTile(
+        leading: const Icon(Icons.travel_explore, color: Color(0xFF12D6FF)),
+        title: const Text('Exa / Tavily search health'),
+        subtitle: Text(_searchResult, style: const TextStyle(fontSize: 11)),
+      )),
+      if (_error != null)
+        Card(child: ListTile(
+          leading: const Icon(Icons.error_outline, color: Colors.redAccent),
+          title: const Text('Provider test failed'),
+          subtitle: Text(_error!),
+        )),
+      const SizedBox(height: 8),
+      FilledButton.icon(
+        onPressed: _working ? null : _testProviders,
+        icon: _working ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.refresh),
+        label: Text(_working ? 'TESTING BACKEND PROVIDERS…' : 'TEST CLOUD AI + EXA / TAVILY'),
+      ),
     ],
   );
-}
-
-class StrategyLink extends StatelessWidget {
-  const StrategyLink({required this.title,required this.detail,required this.url,super.key});
-  final String title,detail,url;
-  Future<void> _open(BuildContext context) async {
-    final uri=Uri.parse(url);
-    try { if(!await launchUrl(uri,mode:LaunchMode.externalApplication) && context.mounted){ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Could not open $url')));} }
-    catch(_){if(context.mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Could not open $url')));}
-  }
-  @override Widget build(BuildContext context)=>Card(child:ListTile(leading:const Icon(Icons.open_in_new,color:Colors.cyan),title:Text(title,style:const TextStyle(fontWeight:FontWeight.w800)),subtitle:Text(detail),trailing:const Icon(Icons.chevron_right),onTap:()=>_open(context)));
 }
 
 class ProCandlestickChart extends StatefulWidget {
