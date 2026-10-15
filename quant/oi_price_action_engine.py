@@ -1,0 +1,259 @@
+"""OI buildup + price-action confluence engine.
+
+This is a candidate generator, not an execution engine. It intentionally returns
+WAIT in the public decision field; a downstream freshness/risk/stability gate must
+promote candidate_decision before any order can be considered.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import datetime, time, timedelta, timezone
+from typing import Any, Optional
+import math
+
+import numpy as np
+import pandas as pd
+
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+@dataclass
+class QuantSignal:
+    decision: str = "WAIT"
+    candidate_decision: Optional[str] = None
+    strike: Optional[float] = None
+    option_side: Optional[str] = None
+    entry: Optional[float] = None
+    stop_loss: Optional[float] = None
+    target: Optional[float] = None
+    risk_reward: Optional[str] = None
+    confidence: float = 0.0
+    regime: str = "OI_PA"
+    reasons: list[str] = field(default_factory=list)
+    guards: list[str] = field(default_factory=list)
+    live_validation: dict[str, Any] = field(
+        default_factory=lambda: {"verdict": "FAIL", "decision": "WAIT", "blocks": []}
+    )
+    engine_source: str = "OI_PA"
+    pcr: Optional[float] = None
+    ce_oi_change: Optional[float] = None
+    pe_oi_change: Optional[float] = None
+    oi_bias: Optional[str] = None
+    support_strike: Optional[float] = None
+    resistance_strike: Optional[float] = None
+    atr_value: Optional[float] = None
+    pa_tags: list[str] = field(default_factory=list)
+
+
+def _wait(reason: str, **metadata: Any) -> QuantSignal:
+    return QuantSignal(
+        reasons=[reason], guards=["NO_VALID_SETUP"],
+        live_validation={"verdict": "FAIL", "decision": "WAIT", "blocks": [reason]},
+        **metadata,
+    )
+
+
+class OIPriceActionEngine:
+    """Option-chain OI/PCR, breakout, candle pattern and ATR risk confluence."""
+
+    def __init__(
+        self, atr_period: int = 14, atr_sl_mult: float = 1.2,
+        risk_reward: float = 1.8, min_oi_change_pct: float = 3.0,
+        pcr_bull: float = 1.05, pcr_bear: float = 0.95,
+        volume_mult: float = 1.3, min_score: int = 5,
+        skip_first_minutes: int = 10, valid_from: str = "09:25",
+        valid_until: str = "15:10", drop_forming_candle: bool = True,
+    ):
+        if atr_period < 2 or atr_sl_mult <= 0 or risk_reward <= 0 or min_score < 1:
+            raise ValueError("Invalid engine risk/scoring configuration")
+        self.atr_period = atr_period
+        self.atr_sl_mult = atr_sl_mult
+        self.rr = risk_reward
+        self.min_oi_change_pct = min_oi_change_pct
+        self.pcr_bull, self.pcr_bear = pcr_bull, pcr_bear
+        self.volume_mult, self.min_score = volume_mult, min_score
+        self.skip_first_minutes = skip_first_minutes
+        self.valid_from = time.fromisoformat(valid_from)
+        self.valid_until = time.fromisoformat(valid_until)
+        self.drop_forming = drop_forming_candle
+
+    @staticmethod
+    def _number(value: Any) -> bool:
+        try:
+            return math.isfinite(float(value))
+        except (TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def _col(df: pd.DataFrame, *names: str) -> Optional[str]:
+        lookup = {str(c).lower(): c for c in df.columns}
+        return next((lookup[n] for n in names if n in lookup), None)
+
+    def _chain(self, chain: pd.DataFrame) -> pd.DataFrame:
+        df = chain.copy()
+        aliases = {
+            "strike": ("strike", "strikeprice", "strike_price"),
+            "ce_oi": ("ce_oi", "calloi", "call_oi", "ceoi"),
+            "pe_oi": ("pe_oi", "putoi", "put_oi", "peoi"),
+            "ce_oi_ch": ("ce_oi_change", "ce_changeinoi", "calloi_change", "ce_oi_ch"),
+            "pe_oi_ch": ("pe_oi_change", "pe_changeinoi", "putoi_change", "pe_oi_ch"),
+        }
+        rename = {}
+        for standard, candidates in aliases.items():
+            found = self._col(df, *candidates)
+            if found:
+                rename[found] = standard
+        df = df.rename(columns=rename)
+        if "strike" not in df:
+            raise ValueError("option_chain must contain strike")
+        for c in ("ce_oi", "pe_oi", "ce_oi_ch", "pe_oi_ch"):
+            if c not in df:
+                df[c] = 0.0
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+        df["strike"] = pd.to_numeric(df["strike"], errors="coerce")
+        df = df.dropna(subset=["strike", "ce_oi", "pe_oi", "ce_oi_ch", "pe_oi_ch"])
+        if df.empty or (df[["ce_oi", "pe_oi"]].values < 0).any():
+            raise ValueError("option-chain OI values are invalid")
+        return df
+
+    def generate(
+        self, intraday_df: pd.DataFrame, option_chain: pd.DataFrame,
+        current_spot: float, current_time: Optional[datetime] = None,
+        strike_step: int = 50, fut_oi_now: Optional[float] = None,
+        fut_oi_prev: Optional[float] = None, spot_ref: Optional[float] = None,
+    ) -> QuantSignal:
+        if not self._number(current_spot) or float(current_spot) <= 0:
+            return _wait("Invalid spot price")
+        now = current_time or datetime.now(IST)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=IST)
+        else:
+            now = now.astimezone(IST)
+        if not (self.valid_from <= now.time() <= self.valid_until):
+            return _wait("Outside OI-PA trade window")
+        if strike_step <= 0:
+            return _wait("Invalid strike step")
+        required = {"open", "high", "low", "close"}
+        if intraday_df is None or option_chain is None or option_chain.empty:
+            return _wait("Option chain missing")
+        if not required.issubset({str(c).lower() for c in intraday_df.columns}):
+            return _wait("Required OHLC candles missing")
+        df = intraday_df.copy()
+        df.columns = [str(c).lower() for c in df.columns]
+        if not isinstance(df.index, pd.DatetimeIndex):
+            return _wait("Candles require a DatetimeIndex")
+        df.index = df.index.tz_localize(IST) if df.index.tz is None else df.index.tz_convert(IST)
+        df = df[(df.index.date == now.date()) & (df.index <= now)]
+        if self.drop_forming and len(df) > 1:
+            df = df.iloc[:-1]
+        if len(df) < max(8, self.atr_period + 1):
+            return _wait("Insufficient closed candles")
+        if self.skip_first_minutes:
+            df = df[df.index >= df.index[0] + pd.Timedelta(minutes=self.skip_first_minutes)]
+        if len(df) < max(8, self.atr_period + 1):
+            return _wait("Insufficient candles after time filters")
+        for c in required:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+        df = df.replace([np.inf, -np.inf], np.nan).dropna(subset=list(required))
+        if len(df) < max(8, self.atr_period + 1):
+            return _wait("Invalid candle values")
+        if (df["high"] < df[["open", "close", "low"]].max(axis=1)).any() or (df["low"] > df[["open", "close", "high"]].min(axis=1)).any():
+            return _wait("Inconsistent OHLC candle")
+        tr = pd.concat([df.high - df.low, (df.high - df.close.shift()).abs(),
+                        (df.low - df.close.shift()).abs()], axis=1).max(axis=1)
+        atr = float(tr.ewm(alpha=1 / self.atr_period, adjust=False).mean().iloc[-1])
+        if not math.isfinite(atr) or atr <= 0:
+            return _wait("Invalid ATR")
+        try:
+            chain = self._chain(option_chain)
+        except ValueError as exc:
+            return _wait(str(exc))
+        atm = float(math.floor(float(current_spot) / strike_step + 0.5) * strike_step)
+        band = chain[(chain.strike >= atm - 10 * strike_step) & (chain.strike <= atm + 10 * strike_step)]
+        if band.empty:
+            return _wait("No option-chain strikes around ATM")
+        ce, pe = float(band.ce_oi.sum()), float(band.pe_oi.sum())
+        cch, pch = float(band.ce_oi_ch.sum()), float(band.pe_oi_ch.sum())
+        pcr = pe / ce if ce > 0 else None
+        support = float(band.loc[band.pe_oi.idxmax(), "strike"])
+        resistance = float(band.loc[band.ce_oi.idxmax(), "strike"])
+        ce_base, pe_base = ce - cch, pe - pch
+        ce_pct = cch / ce_base * 100 if ce_base > 0 else 0.0
+        pe_pct = pch / pe_base * 100 if pe_base > 0 else 0.0
+        bull = bear = 0
+        reasons, tags = [], []
+        if pch > 0 and abs(pe_pct) >= self.min_oi_change_pct: bull += 1
+        if cch < 0 and abs(ce_pct) >= self.min_oi_change_pct: bull += 1
+        if cch > 0 and abs(ce_pct) >= self.min_oi_change_pct: bear += 1
+        if pch < 0 and abs(pe_pct) >= self.min_oi_change_pct: bear += 1
+        if pcr is not None and pcr >= self.pcr_bull: bull += 1
+        if pcr is not None and pcr <= self.pcr_bear: bear += 1
+        bias = "BULLISH" if bull >= 2 and bull > bear else "BEARISH" if bear >= 2 and bear > bull else "NEUTRAL"
+        prev, last = df.iloc[-2], df.iloc[-1]
+        if last.close > df.high.iloc[:-1].max(): bull += 2; reasons.append("PA: break above prior high")
+        if last.close < df.low.iloc[:-1].min(): bear += 2; reasons.append("PA: break below prior low")
+        if prev.close < prev.open and last.close > last.open and last.close >= prev.open and last.open <= prev.close:
+            bull += 2; tags.append("Bullish engulfing")
+        if prev.close > prev.open and last.close < last.open and last.close <= prev.open and last.open >= prev.close:
+            bear += 2; tags.append("Bearish engulfing")
+        if last.close > last.open and (last.close-last.low) / max(last.high-last.low, 1e-9) >= .75:
+            bull += 1; tags.append("Strong close near high")
+        if last.close < last.open and (last.close-last.low) / max(last.high-last.low, 1e-9) <= .25:
+            bear += 1; tags.append("Strong close near low")
+        if "volume" in df and len(df) >= 12:
+            avg = float(df.volume.iloc[-12:-1].mean())
+            if self._number(avg) and avg > 0 and float(df.volume.iloc[-1]) > avg * self.volume_mult:
+                if (last.close-last.low)/max(last.high-last.low, 1e-9) >= .7: bull += 1
+                elif (last.close-last.low)/max(last.high-last.low, 1e-9) <= .3: bear += 1
+        if bias == "BULLISH": bull += 2
+        elif bias == "BEARISH": bear += 2
+        structure = "UNKNOWN"
+        if fut_oi_now is not None and fut_oi_prev is not None and self._number(fut_oi_now) and self._number(fut_oi_prev) and fut_oi_prev > 0:
+            up, oi_up = float(current_spot) > float(spot_ref if spot_ref is not None else df.close.iloc[0]), fut_oi_now > fut_oi_prev
+            structure = "LONG_BUILDUP" if up and oi_up else "SHORT_COVERING" if up else "SHORT_BUILDUP" if oi_up else "LONG_UNWINDING"
+            if structure in ("LONG_BUILDUP", "SHORT_COVERING"): bull += 1
+            else: bear += 1
+        if bull >= self.min_score and bull > bear: decision, side = "CALL BUY", "CE"
+        elif bear >= self.min_score and bear > bull: decision, side = "PUT BUY", "PE"
+        else: return _wait("Weak OI + price-action confluence", pcr=pcr, oi_bias=bias, support_strike=support, resistance_strike=resistance, atr_value=round(atr, 2), pa_tags=tags, reasons=reasons + [f"Scores bull={bull} bear={bear}"])
+        entry = float(current_spot)
+        if decision == "CALL BUY":
+            sl = min(float(last.low), entry - self.atr_sl_mult * atr)
+            risk = entry - sl
+            target = min(entry + risk * self.rr, resistance) if resistance > entry else entry + risk * self.rr
+        else:
+            sl = max(float(last.high), entry + self.atr_sl_mult * atr)
+            risk = sl - entry
+            target = max(entry - risk * self.rr, support) if support < entry else entry - risk * self.rr
+        if risk <= 0 or not all(map(math.isfinite, (sl, target))) or (decision == "CALL BUY" and target <= entry) or (decision == "PUT BUY" and target >= entry):
+            return _wait("Invalid stop-loss/target geometry")
+        return QuantSignal(
+            decision="WAIT", candidate_decision=decision, strike=atm, option_side=side,
+            entry=round(entry, 2), stop_loss=round(sl, 2), target=round(target, 2),
+            risk_reward=f"1 : {self.rr}", confidence=min(90.0, 50.0 + max(bull, bear) * 6),
+            regime=f"OI_PA_{bias}", reasons=reasons + tags + [f"Scores bull={bull} bear={bear}"],
+            guards=["DOWNSTREAM_RISK_AND_STABILITY_GATE_REQUIRED"],
+            live_validation={"verdict": "PENDING", "decision": "WAIT", "blocks": ["Await downstream freshness, risk and 10-minute stability validation"]},
+            pcr=round(pcr, 3) if pcr is not None else None, ce_oi_change=cch, pe_oi_change=pch,
+            oi_bias=bias, support_strike=support, resistance_strike=resistance, atr_value=round(atr, 2),
+            pa_tags=tags,
+        )
+
+
+def to_signal_data(q: QuantSignal, index: str = "", timestamp: str = "", data_fresh: bool = True) -> dict[str, Any]:
+    """Serialize safely: candidate prices remain hidden until downstream promotion."""
+    wait = q.candidate_decision is None or not data_fresh
+    return {
+        "index": index, "decision": "WAIT",
+        "candidate_decision": None if wait else q.candidate_decision,
+        "strike": None if wait else q.strike, "option_side": None if wait else q.option_side,
+        "entry": None if wait else q.entry, "stop_loss": None if wait else q.stop_loss,
+        "target": None if wait else q.target, "risk_reward": None if wait else q.risk_reward,
+        "confidence": 0.0 if wait else q.confidence, "regime": q.regime,
+        "reasons": q.reasons, "guards": q.guards, "live_validation": q.live_validation,
+        "engine_source": "OI_PA", "pcr": q.pcr, "ce_oi_change": q.ce_oi_change,
+        "pe_oi_change": q.pe_oi_change, "oi_bias": q.oi_bias,
+        "support_strike": q.support_strike, "resistance_strike": q.resistance_strike,
+        "atr_value": q.atr_value, "pa_tags": q.pa_tags, "timestamp": timestamp,
+        "data_fresh": data_fresh,
+    }
