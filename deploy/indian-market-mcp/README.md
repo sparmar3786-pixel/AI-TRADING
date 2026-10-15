@@ -5,7 +5,7 @@
 - Project: https://github.com/afthabvp/indian-market-mcp
 - Package: `indian-market-mcp`
 - Declared license: MIT; retain its copyright/license notice when redistributing source.
-- Upstream README advertises NSE/BSE/MCX, F&O option chain, OI/PCR/max-pain, indices, news, fundamentals and other tools. Treat this as upstream-described functionality, not a verified service-level guarantee.
+- This repository's app integration is limited to supported NSE/BSE index and F&O research flows. Do not expose commodity/MCX tools through AI-TRADING UI; upstream package capabilities are not a guarantee of availability.
 - Upstream README describes cache TTLs of 60 seconds for quotes, 120 seconds for option chains/gainers/losers, 300 seconds for indices/ETFs/FII-DII and longer for historical/fund data. These are cache settings, not proof that upstream data itself is current.
 - Public NSE endpoints may rate-limit or change; data may be delayed, missing, or unavailable. The client must show source and fetch time and must not treat cached public data as an execution-grade feed.
 
