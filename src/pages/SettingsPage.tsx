@@ -280,7 +280,7 @@ export const SettingsPage: React.FC = () => {
                   : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
               }`}>
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                {nvidiaService.isNvidiaConfigured() ? 'NVIDIA NIM DIRECT KEY' : 'NVIDIA NIM ACTIVE (70B)'}
+                {nvidiaService.isNvidiaConfigured() ? 'NVIDIA KEY CONFIGURED • NOT VERIFIED' : 'NVIDIA CLOUD NOT VERIFIED'}
               </span>
             </div>
 
