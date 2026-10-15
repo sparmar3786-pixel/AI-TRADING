@@ -499,11 +499,11 @@ IconData _tabIcon(int index) => switch (index) {
   15 => Icons.auto_awesome_outlined,
   16 => Icons.layers_outlined,
   17 => Icons.library_books_outlined,
-  17 => Icons.account_balance_wallet_outlined,
-  18 => Icons.picture_as_pdf_outlined,
-  19 => Icons.science_outlined,
-  20 => Icons.library_books_outlined,
-  21 => Icons.chat_bubble_outline,
+  18 => Icons.account_balance_wallet_outlined,
+  19 => Icons.picture_as_pdf_outlined,
+  20 => Icons.science_outlined,
+  21 => Icons.library_books_outlined,
+  22 => Icons.chat_bubble_outline,
   _ => Icons.layers_outlined,
 };
 
