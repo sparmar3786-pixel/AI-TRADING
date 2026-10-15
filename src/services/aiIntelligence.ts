@@ -1,5 +1,4 @@
 import { IndexSymbol, MarketRow, SignalData } from '../types/market';
-import { nvidiaService } from './nvidiaService';
 import { apiService } from './api';
 import { stripRepositoryLinks } from './repositoryLinkFilter';
 
@@ -29,22 +28,6 @@ export async function generateMarketIntelligenceAnswer(params: {
   const maxPain = market?.max_pain;
   const decision = signal?.decision || 'WAIT';
   const confidence = signal?.confidence;
-
-  const systemPrompt = `You are NVIDIA AI Market Intelligence, an elite algorithmic trading quant analyst and mentor specialized in Indian NSE indices (NIFTY 50, BANKNIFTY, FINNIFTY, SENSEX, MIDCPNIFTY).
-Current Market Context:
-- Index: ${index}
-- Last Traded Price (LTP): ₹${ltp.toLocaleString('en-IN')} (${change >= 0 ? '+' : ''}${change} / ${changePct}%)
-- Trend: ${trend}
-- Put-Call Ratio (PCR): ${pcr ?? 'unavailable'}
-- Max Pain: ${typeof maxPain === 'number' ? `₹${maxPain.toLocaleString('en-IN')}` : 'unavailable'}
-- Algo Decision: ${decision} (Confidence: ${typeof confidence === 'number' ? `${confidence}%` : 'unavailable'})
-- 10-Minute Stability Gate: ${signal?.signal_stability?.state || 'ACTIVE'}
-
-Instructions:
-1. Provide concise, professional analysis in English or clear Hinglish.
-2. Use only values explicitly present in the supplied context; if support/resistance, strike, Greeks, or other fields are missing, say unavailable instead of estimating or inventing them.
-3. Never turn WAIT into a buy/sell recommendation and never claim a trade is safe or profitable.
-4. Emphasize risk management and format with clean bullets.`;
 
   // NVIDIA is the primary provider and inference runs through Railway so credentials stay server-side.
   // Do not call NVIDIA directly from the browser or silently hide backend errors.
