@@ -1,9 +1,9 @@
 name: Python tests
 on:
   push:
-    branches: [main, integrate-trading-research-v2-20261010, fix/commodity-footprint-ai-provider-ui, fix/signal-backend-health-status]
+    branches: [main, integrate-trading-research-v2-20261010, fix/commodity-footprint-ai-provider-ui, fix/signal-backend-health-status, fix/reliability-performance-mcx-20261015]
   pull_request:
-    branches: [main]
+    branches: [main, fix/signal-backend-health-status]
   workflow_dispatch:
 jobs:
   tests:
