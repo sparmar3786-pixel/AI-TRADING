@@ -80,7 +80,7 @@ This is an evidence-based audit, not a claim that all tabs are now end-to-end ve
 ### Verification gates before declaring fully working
 - CI: Python tests, Flutter analyze, widget/API URI tests, release and ARM64 APK jobs all green on the audit branch.
 - Runtime: authenticated device request to `/v1/ai/kumo/status`; one representative Kumo prediction using validated target/schema; real NVIDIA chat probe and OpenRouter fallback test.
-- Market data: Angel One authenticated session, fresh exchange timestamps, option quotes/Greeks, WebSocket tick age and option-chain freshness during NSE/MCX sessions.
+- Market data: Angel One authenticated session, fresh exchange timestamps, option quotes/Greeks, WebSocket tick age and option-chain freshness during NSE sessions.
 - Flow: measure /v1/signals and /v1/option-chain p50/p95/p99, WebSocket reconnects, client 499 frequency and concurrency behavior after route changes.
 - Safety: deterministic WAIT remains authoritative unless required data/quant/risk checks pass; AI/Kumo must never promote blocked signals or submit broker orders.
 
