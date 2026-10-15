@@ -8,9 +8,12 @@ export const QuantEngineLabPage: React.FC = () => {
   const currentSignal = signals[selectedIndex];
   const layers = apiService.getQuantLayers();
 
-  const totalScore = Math.round(
-    layers.reduce((acc, l) => acc + (l.score * l.weight) / 100, 0)
+  const quantAvailable = layers.length > 0 && layers.every(layer =>
+    layer.status !== 'UNAVAILABLE' && layer.score !== null
   );
+  const totalScore = quantAvailable
+    ? Math.round(layers.reduce((acc, layer) => acc + ((layer.score ?? 0) * layer.weight) / 100, 0))
+    : null;
 
   return (
     <div className="p-3 pb-8 space-y-4 select-none max-w-2xl mx-auto">
@@ -28,10 +31,10 @@ export const QuantEngineLabPage: React.FC = () => {
 
           <div className="text-right">
             <div className="text-2xl font-black text-emerald-400 font-mono">
-              {totalScore}%
+              {totalScore === null ? 'N/A' : `${totalScore}%`}
             </div>
             <div className="text-[10px] text-slate-400 font-mono">
-              Confluence Score
+              {quantAvailable ? 'Confluence Score' : 'Live score unavailable'}
             </div>
           </div>
         </div>
@@ -40,12 +43,12 @@ export const QuantEngineLabPage: React.FC = () => {
         <div className="mt-3 pt-3 border-t border-[#1C2740]">
           <div className="flex justify-between text-[10px] text-slate-400 font-mono mb-1">
             <span>Minimum Gate: 80%</span>
-            <span className="text-emerald-400 font-bold">Passed Threshold: {totalScore}%</span>
+            <span className={quantAvailable ? 'text-emerald-400 font-bold' : 'text-rose-300 font-bold'}>{quantAvailable ? `Passed Threshold: ${totalScore}%` : 'Threshold not evaluated'}</span>
           </div>
           <div className="w-full h-2 bg-[#070B12] rounded-full overflow-hidden">
             <div
               className="h-full bg-gradient-to-r from-cyan-500 to-emerald-400 rounded-full transition-all duration-500"
-              style={{ width: `${totalScore}%` }}
+              style={{ width: `${totalScore ?? 0}%` }}
             ></div>
           </div>
         </div>
@@ -73,10 +76,10 @@ export const QuantEngineLabPage: React.FC = () => {
               </div>
 
               <div className="flex items-center space-x-2">
-                <span className="text-xs font-mono font-bold text-emerald-400">
-                  {layer.score}/100
+                <span className={`text-xs font-mono font-bold ${layer.status === 'PASS' ? 'text-emerald-400' : layer.status === 'UNAVAILABLE' ? 'text-rose-300' : 'text-amber-300'}`}>
+                  {layer.score === null ? 'N/A' : `${layer.score}/100`}
                 </span>
-                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 font-mono">
+                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold font-mono ${layer.status === 'PASS' ? 'bg-emerald-500/20 text-emerald-400' : layer.status === 'UNAVAILABLE' ? 'bg-rose-500/15 text-rose-300' : 'bg-amber-500/20 text-amber-300'}`}>
                   {layer.status}
                 </span>
               </div>
@@ -100,9 +103,11 @@ export const QuantEngineLabPage: React.FC = () => {
           <span>ALGO CONFLUENCE SUMMARY</span>
         </div>
         <p className="text-xs text-slate-300 leading-relaxed">
-          {currentSignal?.candidate_decision && currentSignal.candidate_decision !== 'WAIT'
-            ? `The 5-Layer Quant Engine has validated a high-probability ${currentSignal.candidate_decision} on ${selectedIndex} with ${totalScore}% weighted score. The signal is currently monitored under the 10-minute continuous gate.`
-            : `All 5 quantitative layers are actively monitoring ${selectedIndex}. Signal generation is held in WAIT until minimum 80% weighted confluence is achieved.`}
+          {!quantAvailable
+            ? 'Quant confluence is unavailable because verified backend layer calculations are not available. Do not treat this panel as a validated signal.'
+            : currentSignal?.candidate_decision && currentSignal.candidate_decision !== 'WAIT'
+              ? `The 5-Layer Quant Engine has validated a high-probability ${currentSignal.candidate_decision} on ${selectedIndex} with ${totalScore}% weighted score. The signal is currently monitored under the 10-minute continuous gate.`
+              : `All 5 quantitative layers are actively monitoring ${selectedIndex}. Signal generation is held in WAIT until minimum 80% weighted confluence is achieved.`}
         </p>
       </div>
     </div>
