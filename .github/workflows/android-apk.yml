@@ -62,6 +62,17 @@ jobs:
             echo "Removed SMC/Order Flow chart UI is still present in Flutter source."
             exit 1
           fi
+      - name: Verify repository links are removed from active APK screens
+        run: |
+          set -euo pipefail
+          if grep -nE 'https://github.com/' lib/main.dart lib/trade_engine_page.dart lib/pdf_report_solutions_page.dart; then
+            echo "Repository links remain in an active APK screen."
+            exit 1
+          fi
+          if grep -nE 'Repository Library|Quant Research Hub|Quant & Trading Repositories|REFERENCE REPOSITORIES|REPOSITORY & DOCUMENTATION LINKS|Strategy Library • research links' lib/main.dart lib/trade_engine_page.dart lib/pdf_report_solutions_page.dart; then
+            echo "Repository-only navigation or cards remain in an active APK screen."
+            exit 1
+          fi
       - name: Analyze Dart
         run: flutter analyze --no-fatal-infos
       - name: Widget and API tests
