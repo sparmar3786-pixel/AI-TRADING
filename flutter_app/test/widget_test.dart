@@ -213,7 +213,8 @@ void main() {
     expect(find.text('SIGNAL ENGINE'), findsOneWidget);
     final engineList = find.byKey(const ValueKey('trade-engine-primary-list'));
     expect(engineList, findsOneWidget);
-    final engineScrollable = find.descendant(
+    // Scrollable wraps the ListView, so locate it as an ancestor of the keyed list.
+    final engineScrollable = find.ancestor(
       of: engineList,
       matching: find.byType(Scrollable),
     );
