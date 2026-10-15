@@ -208,6 +208,11 @@ class FailedMoveFadeEngine:
             session_open = pd.Timestamp(datetime.combine(now.date(), time(9, 15), tzinfo=IST))
             eligible_after = session_open + pd.Timedelta(minutes=self.skip_first_minutes)
             df = df.loc[df.index >= eligible_after]
+            if df.empty:
+                return _wait("No completed intraday bars after filters", guards=["NO_COMPLETED_CANDLES"])
+            candle_age = (now - df.index[-1].to_pydatetime()).total_seconds()
+            if candle_age < 0 or candle_age > 360:
+                return _wait("Latest completed candle is stale or future-dated", guards=["STALE_CANDLES"])
             if len(df) < max(self.hold_bars + 2, self.atr_period + 2):
                 return _wait("Insufficient completed intraday bars after filters")
 
@@ -274,7 +279,7 @@ class FailedMoveFadeEngine:
                 regime="FAILED_RECLAIM_CONT_BULL" if above else "FAILED_RECLAIM_CONT_BEAR",
                 reasons=reasons,
                 guards=["RISK_CAPPED"] if raw_risk > max_risk else [],
-                live_validation={"verdict": "PASS", "decision": decision, "blocks": []},
+                live_validation={"verdict": "PENDING", "decision": "WAIT", "blocks": ["Downstream freshness, risk, option-premium mapping and 10-minute stability validation required"]},
                 engine_source="FAILED_MOVE",
                 pdh=round(pdh, 2),
                 pdl=round(pdl, 2),
@@ -304,6 +309,9 @@ def failed_move_to_signal_data(
         "breakout_level": signal.breakout_level,
         "hold_bars": signal.hold_bars,
         "atr_value": signal.atr_value,
+        "entry_price_basis": "UNDERLYING_SPOT",
+        "stop_loss_price_basis": "UNDERLYING_SPOT",
+        "target_price_basis": "UNDERLYING_SPOT",
     }
     if not data_fresh:
         return {
@@ -365,7 +373,7 @@ def failed_move_to_signal_data(
         "regime": signal.regime,
         "reasons": list(signal.reasons),
         "guards": list(signal.guards),
-        "live_validation": {"verdict": "PASS", "decision": signal.decision, "blocks": []},
+        "live_validation": {"verdict": "PENDING", "decision": "WAIT", "blocks": ["Downstream risk and stability validation required"]},
         "signal_stability": {"state": "CONFIRMING", "required_minutes": 10, "elapsed_seconds": 0, "remaining_seconds": 600},
     }
 
