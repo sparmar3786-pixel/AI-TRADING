@@ -17,6 +17,7 @@ interface TradingContextType {
   isLive: boolean;
   isRefreshing: boolean;
   lastUpdated: string;
+  marketStatus: { equityOpen: boolean; istTime: string };
   diagnostics: SystemDiagnostics | null;
   paperBalance: number;
   paperTrades: PaperTrade[];
