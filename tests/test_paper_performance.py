@@ -9,10 +9,10 @@ from backend.app.main import _paper_performance_summary, _signal_outcomes_memory
 class PaperPerformanceSummaryTests(unittest.TestCase):
     def test_reports_win_loss_target_stop_and_per_instrument(self):
         rows = [
-            {"trade_id": "1", "instrument": "NIFTY", "status": "CLOSED", "gross_r": 2.0, "net_r": 1.96, "exit_reason": "TARGET", "net_pnl_inr": 1470.0},
-            {"trade_id": "2", "instrument": "NIFTY", "status": "CLOSED", "gross_r": -1.0, "net_r": -1.04, "exit_reason": "STOP_LOSS", "net_pnl_inr": -780.0},
-            {"trade_id": "3", "instrument": "BANKNIFTY", "status": "CLOSED", "gross_r": 0.5, "net_r": 0.46, "exit_reason": "TARGET_HIT", "net_pnl_inr": 690.0},
-            {"trade_id": "4", "instrument": "CRUDEOIL", "status": "CLOSED", "gross_r": -1.0, "net_r": -1.04, "exit_reason": "SL", "net_pnl_inr": -520.0},
+            {"trade_id": "1", "instrument": "NIFTY", "status": "CLOSED", "gross_r": 2.0, "net_r": 1.96, "exit_reason": "TARGET", "net_pnl_inr": 1470.0, "costs_explicit": True},
+            {"trade_id": "2", "instrument": "NIFTY", "status": "CLOSED", "gross_r": -1.0, "net_r": -1.04, "exit_reason": "STOP_LOSS", "net_pnl_inr": -780.0, "costs_explicit": True},
+            {"trade_id": "3", "instrument": "BANKNIFTY", "status": "CLOSED", "gross_r": 0.5, "net_r": 0.46, "exit_reason": "TARGET_HIT", "net_pnl_inr": 690.0, "costs_explicit": True},
+            {"trade_id": "4", "instrument": "CRUDEOIL", "status": "CLOSED", "gross_r": -1.0, "net_r": -1.04, "exit_reason": "SL", "net_pnl_inr": -520.0, "costs_explicit": True},
             {"trade_id": "5", "instrument": "NIFTY", "status": "OPEN", "net_r": None},
         ]
         report = _paper_performance_summary(rows)
