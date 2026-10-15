@@ -7,7 +7,6 @@ import {
   Clock,
   CheckCircle2,
   AlertTriangle,
-  Flame,
   Layers,
   ArrowRight,
   Wallet,
@@ -24,7 +23,6 @@ export const DashboardPage: React.FC = () => {
     signals,
     setActiveTab,
     executePaperTrade,
-    marketStatus,
   } = useTrading();
 
   const currentMarket = market[selectedIndex];
@@ -311,18 +309,6 @@ export const DashboardPage: React.FC = () => {
             </div>
           </button>
 
-          <button
-            onClick={() => setActiveTab('Commodities')}
-            className="card-base card-hover p-3 border border-[#1C2740] flex items-center space-x-2.5 text-left transition-all"
-          >
-            <div className="p-2 rounded-lg bg-amber-500/10 text-amber-400">
-              <Flame className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="text-xs font-bold text-white">MCX Commodities</div>
-              <div className="text-[10px] text-slate-400">Crude, Gold, Silver</div>
-            </div>
-          </button>
 
           <button
             onClick={() => setActiveTab('Paper Trading')}
