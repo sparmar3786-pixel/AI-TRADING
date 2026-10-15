@@ -6,6 +6,8 @@ on:
     paths:
       - "quant/hero_zero.py"
       - "backend/app/main.py"
+      - "Dockerfile"
+      - "Dockerfile"
       - "backend/requirements.txt"
       - "tests/test_hero_zero.py"
       - ".github/workflows/hero-zero-tests.yml"
