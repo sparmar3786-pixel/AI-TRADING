@@ -1,0 +1,52 @@
+name: Flutter source verification (no APK)
+
+on:
+  push:
+    branches:
+      - feat/ai-trading-signal-apk
+    paths:
+      - 'flutter_app/**'
+      - '.github/workflows/flutter-source-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flutter-source-check-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  source-check:
+    name: Flutter analysis, tests, and removed-feature guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: flutter_app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Verify repository links and local-model UI are absent
+        working-directory: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -RniE 'https?://(www\\.)?(github\\.com|gitlab\\.com|bitbucket\\.org|sourceforge\\.net)/|Repository Library|Quant Research Hub|Quant & Trading Repositories|PDF Report & Repositories' flutter_app/lib; then
+            echo "Repository-link UI or repository URLs remain in active Flutter source."
+            exit 1
+          fi
+          if grep -RniE 'llama_flutter_android|LlamaController|file_picker|\\.gguf|GGUF model|offline Qwen' flutter_app/lib flutter_app/pubspec.yaml; then
+            echo "On-device GGUF/Qwen model code or dependency remains in the APK source."
+            exit 1
+          fi
+          echo "Repository-link and on-device-model source guards passed."
+      - name: Install Flutter dependencies
+        run: flutter pub get
+      - name: Analyze Dart
+        run: flutter analyze --no-fatal-infos
+      - name: Run Flutter tests
+        run: flutter test
