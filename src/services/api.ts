@@ -1,10 +1,8 @@
 import {
   IndexSymbol,
-  CommoditySymbol,
   SignalData,
   MarketRow,
   OptionChainRow,
-  CommodityRow,
   SystemDiagnostics,
   TechnicalIndicators,
   SmcStructure,
@@ -24,15 +22,7 @@ export const INDEX_CONFIG: Record<IndexSymbol, { name: string; lotSize: number; 
   BANKEX: { name: 'BSE BANKEX', lotSize: 30, strikeStep: 100, basePrice: 58180.30 },
 };
 
-export const COMMODITY_CONFIG: Record<CommoditySymbol, { name: string; unit: string; basePrice: number }> = {
-  CRUDEOIL: { name: 'Crude Oil', unit: '₹/bbl', basePrice: 6245.00 },
-  NATURALGAS: { name: 'Natural Gas', unit: '₹/mmBtu', basePrice: 238.40 },
-  GOLD: { name: 'Gold Petal / 10g', unit: '₹/10g', basePrice: 76850.00 },
-  SILVER: { name: 'Silver Mini / kg', unit: '₹/kg', basePrice: 91400.00 },
-  COPPER: { name: 'Copper', unit: '₹/kg', basePrice: 824.70 },
-  ZINC: { name: 'Zinc', unit: '₹/kg', basePrice: 278.20 },
-  ALUMINIUM: { name: 'Aluminium', unit: '₹/kg', basePrice: 242.10 },
-};
+
 
 class ApiService {
   private signalBackendUrl: string = DEFAULT_SIGNAL_BACKEND;
@@ -80,8 +70,8 @@ class ApiService {
     localStorage.setItem('fresh_legacy_backend_url', url);
   }
 
-  // Check whether Indian equity market or MCX is open right now in IST
-  public getMarketOpenStatus(): { equityOpen: boolean; mcxOpen: boolean; istTime: string } {
+  // Check whether the Indian equity market is open right now in IST
+  public getMarketOpenStatus(): { equityOpen: boolean; istTime: string } {
     const now = new Date();
     // Convert to IST (UTC + 5:30)
     const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
@@ -95,12 +85,10 @@ class ApiService {
     const isWeekend = day === 0 || day === 6; // Sunday or Saturday
     // Equity: 09:15 to 15:30 IST
     const equityOpen = !isWeekend && totalMinutes >= (9 * 60 + 15) && totalMinutes <= (15 * 60 + 30);
-    // MCX: 09:00 to 23:30 IST
-    const mcxOpen = !isWeekend && totalMinutes >= (9 * 60) && totalMinutes <= (23 * 60 + 30);
 
     const istTimeStr = istDate.toLocaleTimeString('en-IN', { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' IST';
 
-    return { equityOpen, mcxOpen, istTime: istTimeStr };
+    return { equityOpen, istTime: istTimeStr };
   }
 
   // 10-Minute Signal Stability Gate
@@ -207,7 +195,6 @@ class ApiService {
   public async fetchSignals(): Promise<{
     signals: Record<string, SignalData>;
     market: Record<string, MarketRow>;
-    commodities: CommodityRow[];
     isLive: boolean;
     error?: string;
   }> {
@@ -242,7 +229,6 @@ class ApiService {
           return {
             signals: this.applyTenMinuteSignalGate(data.signals),
             market: data.market,
-            commodities: Array.isArray(data.commodities) ? data.commodities : [],
             isLive: true,
           };
         }
@@ -275,7 +261,6 @@ class ApiService {
     return {
       signals: gatedFallbackSignals,
       market: fallbackMarket,
-      commodities: [],
       isLive: false,
       error: 'OFFLINE • Broker data unavailable or stale. Synthetic prices are non-live; signals are forced to WAIT.',
     };
@@ -364,241 +349,6 @@ class ApiService {
     }
 
     return strikes;
-  }
-
-  public generateFallbackCommodities(): CommodityRow[] {
-    const list: CommodityRow[] = [];
-    const now = new Date();
-    const minute = now.getMinutes();
-
-    (Object.keys(COMMODITY_CONFIG) as CommoditySymbol[]).forEach(sym => {
-      const cfg = COMMODITY_CONFIG[sym];
-      const drift = Math.sin(minute / 4 + sym.length) * 0.6;
-      const ltp = Number((cfg.basePrice * (1 + drift / 100)).toFixed(2));
-      const change = Number((ltp - cfg.basePrice).toFixed(2));
-      const change_percent = Number((change / cfg.basePrice * 100).toFixed(2));
-
-      list.push({
-        symbol: sym,
-        name: cfg.name,
-        unit: cfg.unit,
-        ltp,
-        change,
-        change_percent,
-        high: Number((cfg.basePrice * 1.01).toFixed(2)),
-        low: Number((cfg.basePrice * 0.99).toFixed(2)),
-        open: cfg.basePrice,
-        volume: 12500 + Math.floor(Math.random() * 4000),
-        oi: 4200 + Math.floor(Math.random() * 1200),
-        market_open: true,
-        timestamp: now.toISOString(),
-      });
-    });
-
-    return list;
-  }
-
-  public generateFallbackSignals(market: Record<string, MarketRow>): Record<string, SignalData> {
-    const signals: Record<string, SignalData> = {};
-
-    Object.entries(market).forEach(([key, row]) => {
-      const cfg = INDEX_CONFIG[key as IndexSymbol];
-      const strikeStep = cfg.strikeStep;
-      const atmStrike = Math.round(row.ltp / strikeStep) * strikeStep;
-
-      if (key === 'NIFTY') {
-        const targetStrike = atmStrike + strikeStep;
-        signals[key] = {
-          index: key,
-          decision: 'CALL BUY',
-          candidate_decision: 'CALL BUY',
-          strike: targetStrike,
-          option_side: 'CE',
-          entry: 142.50,
-          stop_loss: 112.00,
-          target: 205.00,
-          risk_reward: '1 : 2.05',
-          confidence: 88,
-          regime: 'TRENDING_BULLISH',
-          guards: [],
-          live_validation: {
-            verdict: 'PASS',
-            decision: 'CALL BUY',
-            blocks: [],
-            reasons: ['EMA 8 > 13 > 21 confluence confirmed', 'Supertrend bullish green', 'PCR > 1.15 strong put support'],
-          },
-          reasons: ['5-Layer Quant Engine confluence 88%', 'Bullish Order Block mitigation at 24,820', 'Open Interest unwinding on Calls'],
-          timestamp: new Date().toISOString(),
-          data_fresh: true,
-        };
-      } else if (key === 'BANKNIFTY') {
-        const targetStrike = atmStrike - strikeStep;
-        signals[key] = {
-          index: key,
-          decision: 'PUT BUY',
-          candidate_decision: 'PUT BUY',
-          strike: targetStrike,
-          option_side: 'PE',
-          entry: 285.00,
-          stop_loss: 235.00,
-          target: 395.00,
-          risk_reward: '1 : 2.20',
-          confidence: 82,
-          regime: 'BREAKDOWN_BEARISH',
-          guards: [],
-          live_validation: {
-            verdict: 'PASS',
-            decision: 'PUT BUY',
-            blocks: [],
-            reasons: ['Bearish CHoCH on 5-minute candle', 'Heavy Call OI addition at 51,500'],
-          },
-          reasons: ['Smart Money liquidity sweep above 51,550', 'VWAP rejection with high volume'],
-          timestamp: new Date().toISOString(),
-          data_fresh: true,
-        };
-      } else {
-        signals[key] = {
-          index: key,
-          decision: 'WAIT',
-          candidate_decision: 'WAIT',
-          regime: 'RANGE_BOUND',
-          confidence: 50,
-          guards: ['ADX < 20 Sideways Market', 'Spread > 2.5 pts'],
-          live_validation: {
-            verdict: 'WARN',
-            decision: 'WAIT',
-            blocks: ['Market in tight consolidation range - waiting for range breakout'],
-          },
-          reasons: ['No high probability 5-layer quant confluence currently active'],
-          timestamp: new Date().toISOString(),
-          data_fresh: true,
-        };
-      }
-    });
-
-    return signals;
-  }
-
-  public getTechnicalIndicators(ltp: number): TechnicalIndicators {
-    return {
-      ema8: Number((ltp * 1.0008).toFixed(2)),
-      ema13: Number((ltp * 1.0002).toFixed(2)),
-      ema21: Number((ltp * 0.9991).toFixed(2)),
-      ema50: Number((ltp * 0.9975).toFixed(2)),
-      ema200: Number((ltp * 0.9920).toFixed(2)),
-      rsi14: 58.4,
-      macd: {
-        macd: 18.4,
-        signal: 12.1,
-        histogram: 6.3,
-      },
-      supertrend: {
-        direction: 'BULLISH',
-        value: Number((ltp * 0.996).toFixed(2)),
-      },
-      atr14: Number((ltp * 0.0065).toFixed(2)),
-      bollinger: {
-        upper: Number((ltp * 1.006).toFixed(2)),
-        middle: Number((ltp).toFixed(2)),
-        lower: Number((ltp * 0.994).toFixed(2)),
-      },
-      vwap: Number((ltp * 0.9994).toFixed(2)),
-    };
-  }
-
-  public getSmcStructure(ltp: number): SmcStructure {
-    return {
-      trend: 'BULLISH',
-      last_bos: {
-        price: Number((ltp * 0.998).toFixed(2)),
-        type: 'BULLISH',
-        time: '11:15 IST',
-      },
-      last_choch: {
-        price: Number((ltp * 0.995).toFixed(2)),
-        type: 'BULLISH',
-        time: '10:05 IST',
-      },
-      order_blocks: [
-        {
-          type: 'BULLISH_OB',
-          high: Number((ltp * 0.9975).toFixed(2)),
-          low: Number((ltp * 0.9960).toFixed(2)),
-          mitigated: false,
-        },
-        {
-          type: 'BEARISH_OB',
-          high: Number((ltp * 1.0050).toFixed(2)),
-          low: Number((ltp * 1.0035).toFixed(2)),
-          mitigated: false,
-        },
-      ],
-      fair_value_gaps: [
-        {
-          type: 'BULLISH_FVG',
-          top: Number((ltp * 0.9990).toFixed(2)),
-          bottom: Number((ltp * 0.9980).toFixed(2)),
-          filled: false,
-        },
-      ],
-      liquidity_pools: [
-        {
-          type: 'BUY_SIDE',
-          level: Number((ltp * 1.0040).toFixed(2)),
-          swept: false,
-        },
-        {
-          type: 'SELL_SIDE',
-          level: Number((ltp * 0.9950).toFixed(2)),
-          swept: true,
-        },
-      ],
-    };
-  }
-
-  public getQuantLayers(): QuantLayerResult[] {
-    return [
-      {
-        layer: 1,
-        name: 'Trend Alignment & Moving Averages',
-        status: 'PASS',
-        score: 92,
-        weight: 25,
-        detail: 'EMA 8 > 13 > 21 stack bullish aligned. Supertrend (10,3) green buy mode.',
-      },
-      {
-        layer: 2,
-        name: 'Momentum & Volatility Filter',
-        status: 'PASS',
-        score: 85,
-        weight: 20,
-        detail: 'RSI(14) at 58.4 holding above 50 midpoint. MACD histogram expanding positive.',
-      },
-      {
-        layer: 3,
-        name: 'Smart Money Concepts & Liquidity',
-        status: 'PASS',
-        score: 88,
-        weight: 25,
-        detail: 'Reaction from 15m Bullish Order Block. Sell-side liquidity sweep completed.',
-      },
-      {
-        layer: 4,
-        name: 'Options Open Interest & PCR Flow',
-        status: 'PASS',
-        score: 90,
-        weight: 20,
-        detail: 'PCR 1.18 indicates solid put writing floor. Max Pain above current price.',
-      },
-      {
-        layer: 5,
-        name: 'Execution Guard & Slippage Filter',
-        status: 'PASS',
-        score: 95,
-        weight: 10,
-        detail: 'Bid-Ask spread 0.25 pts within tight tolerance. Volatility circuit safe.',
-      },
-    ];
   }
 
   public async getDiagnostics(): Promise<SystemDiagnostics> {
