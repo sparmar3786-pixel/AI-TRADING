@@ -2303,6 +2303,40 @@ def market_ticks(_: str = Depends(_device)) -> dict[str, Any]:
     return {"source": "angelone_smartapi", "ticks": _last_market, "count": len(_last_market), "observed_at": _utc_now().isoformat()}
 
 
+def _stale_option_chain_payload(
+    cached: tuple[float, dict[str, Any]] | None,
+    reason: str,
+    request_started: float,
+) -> dict[str, Any] | None:
+    """Return an explicit display-only WAIT snapshot for short broker outages."""
+    if not cached:
+        return None
+    cached_at, cached_payload = cached
+    age_seconds = time.monotonic() - cached_at
+    if age_seconds > OPTION_CHAIN_STALE_MAX_SECONDS:
+        return None
+    snapshot = json.loads(json.dumps(cached_payload, default=str))
+    snapshot.update({
+        "status": "WAIT",
+        "live": False,
+        "actionable": False,
+        "stale": True,
+        "served_at": _utc_now().isoformat(),
+        "reason": f"{reason} Showing the last verified snapshot as stale display-only data; no trade may be qualified from it.",
+        "cache": {"hit": True, "stale": True, "age_ms": round(age_seconds * 1000, 1), "stale_max_age_seconds": OPTION_CHAIN_STALE_MAX_SECONDS},
+        "request_elapsed_ms": round((time.monotonic() - request_started) * 1000, 1),
+    })
+    for field in ("contracts", "option_chain"):
+        values = snapshot.get(field)
+        if isinstance(values, list):
+            snapshot[field] = [
+                {**item, "live": False, "stale": True, "freshness": "STALE", "actionable": False}
+                if isinstance(item, dict) else item
+                for item in values
+            ]
+    return snapshot
+
+
 @app.get("/v1/option-chain")
 def option_chain(index: str = Query(default="NIFTY"), _: str = Depends(_device)) -> dict[str, Any]:
     index = index.strip().upper()
@@ -2320,36 +2354,20 @@ def option_chain(index: str = Query(default="NIFTY"), _: str = Depends(_device))
         # Retain the expired snapshot briefly for an explicit WAIT-only fallback
         # if Angel One cannot provide a fresh underlying quote on this request.
 
-    def stale_fallback(reason: str) -> dict[str, Any] | None:
-        if not cached:
-            return None
-        cached_at, cached_payload = cached
-        age_seconds = time.monotonic() - cached_at
-        if age_seconds > OPTION_CHAIN_STALE_MAX_SECONDS:
-            return None
-        snapshot = json.loads(json.dumps(cached_payload, default=str))
-        snapshot.update({
-            "status": "WAIT",
-            "live": False,
-            "actionable": False,
-            "stale": True,
-            "served_at": _utc_now().isoformat(),
-            "reason": f"{reason} Showing the last verified snapshot as stale display-only data; no trade may be qualified from it.",
-            "cache": {"hit": True, "stale": True, "age_ms": round(age_seconds * 1000, 1), "stale_max_age_seconds": OPTION_CHAIN_STALE_MAX_SECONDS},
-            "request_elapsed_ms": round((time.monotonic() - request_started) * 1000, 1),
-        })
-        for field in ("contracts", "option_chain"):
-            values = snapshot.get(field)
-            if isinstance(values, list):
-                snapshot[field] = [
-                    {**item, "live": False, "stale": True, "freshness": "STALE", "actionable": False}
-                    if isinstance(item, dict) else item
-                    for item in values
-                ]
-        return snapshot
-
-    adapter = _require_adapter()
-    rows = _load_master()
+    try:
+        adapter = _require_adapter()
+    except HTTPException as exc:
+        fallback = _stale_option_chain_payload(cached, f"Angel One session unavailable (HTTP {exc.status_code}).", request_started)
+        if fallback is not None:
+            return fallback
+        raise
+    try:
+        rows = _load_master()
+    except HTTPException as exc:
+        fallback = _stale_option_chain_payload(cached, "Angel One instrument master unavailable.", request_started)
+        if fallback is not None:
+            return fallback
+        raise
     commodity = index in COMMODITY_NAMES
     if not commodity and index not in INDEXES:
         raise HTTPException(status_code=400, detail=f"Unsupported underlying. Choose an index or supported MCX commodity: {', '.join(INDEXES)}; {', '.join(COMMODITY_NAMES)}.")
@@ -2375,7 +2393,7 @@ def option_chain(index: str = Query(default="NIFTY"), _: str = Depends(_device))
             spot_quote = spot_future.result(timeout=OPTION_CHAIN_UPSTREAM_TIMEOUT_SECONDS).get(future_token)
         except FutureTimeoutError:
             spot_future.cancel()
-            fallback = stale_fallback("Angel One underlying quote timed out.")
+            fallback = _stale_option_chain_payload(cached, "Angel One underlying quote timed out.", request_started)
             if fallback is not None:
                 return fallback
             raise HTTPException(status_code=504, detail={
@@ -2394,7 +2412,7 @@ def option_chain(index: str = Query(default="NIFTY"), _: str = Depends(_device))
             spot_quote = spot_future.result(timeout=OPTION_CHAIN_UPSTREAM_TIMEOUT_SECONDS).get(config["token"])
         except FutureTimeoutError:
             spot_future.cancel()
-            fallback = stale_fallback("Angel One underlying quote timed out.")
+            fallback = _stale_option_chain_payload(cached, "Angel One underlying quote timed out.", request_started)
             if fallback is not None:
                 return fallback
             raise HTTPException(status_code=504, detail={
@@ -2407,7 +2425,7 @@ def option_chain(index: str = Query(default="NIFTY"), _: str = Depends(_device))
         option_instrument = "OPTIDX"
         option_name = index
     if spot is None or spot <= 0:
-        fallback = stale_fallback(f"Angel One underlying quote is missing for {index}.")
+        fallback = _stale_option_chain_payload(cached, f"Angel One underlying quote is missing for {index}.", request_started)
         if fallback is not None:
             return fallback
         raise HTTPException(status_code=502, detail=f"Angel One underlying quote is missing for {index}; no fresh quote or eligible cached snapshot is available.")
