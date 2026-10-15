@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTrading } from '../context/TradingContext';
 import { apiService } from '../services/api';
+import { sanitizeRepositoryLinks } from '../services/repositoryLinkFilter';
 import { generateMarketIntelligenceAnswer } from '../services/aiIntelligence';
 import {
   nvidiaService,
@@ -92,7 +93,7 @@ export const MarketIntelligencePage: React.FC = () => {
         if (!response.ok) {
           throw new Error(`Market intelligence API returned HTTP ${response.status}.`);
         }
-        const body = await response.json();
+        const body = sanitizeRepositoryLinks(await response.json()) as any;
         if (body && typeof body.summary === 'string' && body.summary.trim() &&
             body.summary_provider && body.summary_model && body.updated_at) {
           setSummary(body.summary);
