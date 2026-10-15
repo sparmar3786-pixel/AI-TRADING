@@ -11,7 +11,6 @@ import { MarketPage } from './pages/MarketPage';
 import { OptionChainPage } from './pages/OptionChainPage';
 import { SignalsPage } from './pages/SignalsPage';
 import { QuantEngineLabPage } from './pages/QuantEngineLabPage';
-import { CommoditiesPage } from './pages/CommoditiesPage';
 import { BrokerHomePage } from './pages/BrokerHomePage';
 import { IndicatorsPage } from './pages/IndicatorsPage';
 import { OILabPage } from './pages/OILabPage';
@@ -37,8 +36,6 @@ const MainContent: React.FC = () => {
         return <SignalsPage />;
       case '5-Layer Quant':
         return <QuantEngineLabPage />;
-      case 'Commodities':
-        return <CommoditiesPage />;
       case 'Paper Trading':
         return <BrokerHomePage />;
       case 'Indicators':
