@@ -34,9 +34,6 @@ class OIPriceActionEngineTests(unittest.TestCase):
             OIPriceActionEngine(atr_period=0)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
     def test_depth_pressure_detects_bid_and_ask_imbalance(self):
         engine = OIPriceActionEngine()
@@ -68,3 +65,7 @@ if __name__ == "__main__":
             OIPriceActionEngine(hold_bars=0)
         with self.assertRaises(ValueError):
             OIPriceActionEngine(wick_ratio=0)
+
+
+if __name__ == "__main__":
+    unittest.main()
