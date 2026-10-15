@@ -88,5 +88,38 @@ class OIPriceActionEngineTests(unittest.TestCase):
         self.assertEqual(payload["target_price_basis"], "UNDERLYING_SPOT")
 
 
+    def test_stale_option_chain_timestamp_fails_closed(self):
+        now = datetime(2026, 10, 15, 10, 0, tzinfo=IST)
+        chain = pd.DataFrame([{
+            "strike": 25000, "ce_oi": 100, "pe_oi": 100,
+            "ce_oi_change": 1, "pe_oi_change": 1,
+        }])
+        result = OIPriceActionEngine().generate(
+            pd.DataFrame(), chain, 25000, now,
+            option_chain_timestamp=now.replace(minute=58),
+        )
+        self.assertEqual(result.decision, "WAIT")
+        self.assertIn("STALE_OPTION_CHAIN", result.guards)
+
+    def test_stale_completed_candle_fails_closed(self):
+        now = datetime(2026, 10, 15, 10, 0, tzinfo=IST)
+        candles = pd.DataFrame(
+            {"open": [100, 101], "high": [102, 103], "low": [99, 100], "close": [101, 102]},
+            index=pd.DatetimeIndex([
+                datetime(2026, 10, 15, 9, 20, tzinfo=IST),
+                datetime(2026, 10, 15, 9, 25, tzinfo=IST),
+            ]),
+        )
+        chain = pd.DataFrame([{
+            "strike": 25000, "ce_oi": 100, "pe_oi": 100,
+            "ce_oi_change": 1, "pe_oi_change": 1,
+        }])
+        result = OIPriceActionEngine().generate(
+            candles, chain, 25000, now, option_chain_timestamp=now - __import__("datetime").timedelta(seconds=5)
+        )
+        self.assertEqual(result.decision, "WAIT")
+        self.assertIn("STALE_CANDLES", result.guards)
+
+
 if __name__ == "__main__":
     unittest.main()
