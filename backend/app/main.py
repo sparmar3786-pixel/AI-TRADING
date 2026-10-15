@@ -3913,15 +3913,20 @@ def _update_signal_outcomes(signals: dict[str, Any], market: dict[str, Any]) -> 
             continue
         outcome["status"] = "CLOSED"
         outcome["exit_reason"] = exit_reason
-        outcome["exit_price"] = price
+        # Do not credit an overshoot beyond the target. For stop-outs, retain the
+        # observed quote so a gap through the stop is not hidden.
+        exit_price = target if exit_reason == "TARGET" and target is not None else price
+        outcome["observed_exit_price"] = price
+        outcome["exit_price"] = exit_price
+        outcome["exit_price_basis"] = "target_level_assumed" if exit_reason == "TARGET" else "observed_stop_quote"
         outcome["closed_at"] = now
-        outcome["gross_points"] = round(price - entry, 4) if entry is not None else None
+        outcome["gross_points"] = round(exit_price - entry, 4) if entry is not None else None
         risk_distance = abs(entry - stop) if entry is not None and stop is not None else None
-        outcome["gross_r"] = round((price - entry) / risk_distance, 6) if entry is not None and risk_distance else None
+        outcome["gross_r"] = round((exit_price - entry) / risk_distance, 6) if entry is not None and risk_distance else None
         quantity = _number(outcome.get("quantity"))
         lot_size = _number(outcome.get("lot_size"))
         if entry is not None and quantity is not None and quantity > 0 and lot_size is not None and lot_size > 0:
-            outcome["gross_pnl_inr"] = round((price - entry) * quantity * lot_size, 2)
+            outcome["gross_pnl_inr"] = round((exit_price - entry) * quantity * lot_size, 2)
         costs = {
             "brokerage_inr": _number(os.getenv("PAPER_BROKERAGE_INR_PER_ROUND_TRIP")),
             "slippage_inr": _number(os.getenv("PAPER_SLIPPAGE_INR_PER_ROUND_TRIP")),
