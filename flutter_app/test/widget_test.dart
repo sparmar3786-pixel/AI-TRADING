@@ -14,24 +14,28 @@ void main() {
   });
 
 
-  testWidgets('SMC and Order Flow chart pages are absent from the Android app', (tester) async {
-    const removedChartLabels = <String>[
+  testWidgets('SMC, Order Flow, and MCX pages are absent from the Android app', (tester) async {
+    const removedPageLabels = <String>[
       'SMC Pro Chart',
       'SMC Chart',
       'Order Flow & Footprint',
       'FOOTPRINT CHART',
+      'MCX Commodities',
+      'MCX Commodity Exchange',
     ];
     expect(tabs, isNot(contains('SMC Pro Chart')));
     expect(tabs, isNot(contains('SMC Chart')));
     expect(tabs, isNot(contains('Order Flow & Footprint')));
+    expect(tabs, isNot(contains('Commodities')));
+    expect(tabs, isNot(contains('MCX Commodities')));
 
     await tester.pumpWidget(const FreshApp());
-    for (final label in removedChartLabels) {
+    for (final label in removedPageLabels) {
       expect(find.text(label), findsNothing, reason: '$label must not be visible in the APK');
     }
     await tester.tap(find.byKey(const ValueKey('open-navigation-menu')));
     await tester.pumpAndSettle();
-    for (final label in removedChartLabels) {
+    for (final label in removedPageLabels) {
       expect(find.text(label), findsNothing, reason: '$label must not appear in the APK navigation');
     }
   });
