@@ -3989,7 +3989,10 @@ def _paper_performance_summary(trades: list[dict[str, Any]]) -> dict[str, Any]:
     overall["open_trade_count"] = sum(1 for item in trades if item.get("status") == "OPEN")
     overall["total_slippage_r"] = round(sum(float(item.get("slippage_r") or 0) for item in closed), 6)
     overall["total_transaction_cost_r"] = round(sum(float(item.get("transaction_cost_r") or 0) for item in closed), 6)
-    overall["total_costs_inr"] = round(sum(float(item.get("slippage_inr") or 0) + float(item.get("brokerage_inr") or 0) + float(item.get("other_costs_inr") or 0) for item in closed), 2)
+    cost_keys = ("slippage_inr", "brokerage_inr", "other_costs_inr")
+    costs_complete = bool(closed) and all(all(_number(item.get(key)) is not None for key in cost_keys) for item in closed)
+    overall["total_costs_inr"] = round(sum(sum(float(item[key]) for key in cost_keys) for item in closed), 2) if costs_complete else None
+    overall["total_costs_status"] = "RECORDED" if costs_complete else "NOT_AVAILABLE_FOR_ALL_TRADES"
     return {
         "trade_count": len(closed),
         "metrics": overall,
