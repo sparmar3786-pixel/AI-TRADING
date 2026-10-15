@@ -17,6 +17,7 @@ class PerformancePage extends StatefulWidget {
 
 class _PerformancePageState extends State<PerformancePage> {
   Map<String, dynamic> _report = <String, dynamic>{};
+  Map<String, dynamic> _signalReport = <String, dynamic>{};
   bool _loading = false;
   String? _error;
 
@@ -29,13 +30,20 @@ class _PerformancePageState extends State<PerformancePage> {
       _error = null;
     });
     try {
-      final response = await FreshApi(
+      final api = FreshApi(
         widget.backendUrl,
         null,
         widget.signalBackendUrl,
-      ).getJson('/v1/paper/report', timeout: const Duration(seconds: 15));
+      );
+      final responses = await Future.wait<Map<String, dynamic>>([
+        api.getJson('/v1/paper/report', timeout: const Duration(seconds: 15)),
+        api.getJson('/v1/signals/performance', timeout: const Duration(seconds: 15)),
+      ]);
       if (!mounted) return;
-      setState(() => _report = response);
+      setState(() {
+        _report = responses[0];
+        _signalReport = responses[1];
+      });
     } catch (error) {
       if (!mounted) return;
       setState(() => _error = error.toString());
@@ -97,6 +105,9 @@ class _PerformancePageState extends State<PerformancePage> {
   Widget build(BuildContext context) {
     final metrics = _map(_report['metrics']);
     final byInstrument = _map(_report['by_instrument']);
+    final signalMetrics = _map(_signalReport['metrics']);
+    final signalByInstrument = _map(_signalReport['by_instrument']);
+    final hasSignalOutcomes = (_signalReport['metrics'] is Map ? (_signalReport['metrics'] as Map)['closed_count'] as num? ?? 0 : 0) > 0;
     final hasClosedTrades = (_report['trade_count'] as num? ?? 0) > 0;
 
     return RefreshIndicator(
@@ -118,7 +129,7 @@ class _PerformancePageState extends State<PerformancePage> {
                 Row(
                   children: [
                     const Expanded(
-                      child: Text('TRADE PERFORMANCE', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900, letterSpacing: 1)),
+                      child: Text('PAPER TRADE PERFORMANCE', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900, letterSpacing: 1)),
                     ),
                     IconButton(
                       tooltip: 'Refresh performance',
@@ -171,6 +182,101 @@ class _PerformancePageState extends State<PerformancePage> {
                 ]),
                 Text(
                   'P&L status: ${metrics['pnl_status'] ?? 'NOT_AVAILABLE_FOR_ALL_TRADES'} • Costs: ${metrics['total_costs_status'] ?? 'NOT_AVAILABLE_FOR_ALL_TRADES'}',
+                  style: const TextStyle(color: Colors.white54, fontSize: 10),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFF101827),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFF263449)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('LIVE SIGNAL SHADOW OUTCOMES', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900, letterSpacing: 0.7)),
+                const SizedBox(height: 6),
+                const Text(
+                  'Confirmed signals are tracked against fresh Angel One option quotes. These are observed quote outcomes, not broker executions; fast target/SL touches between refreshes can be missed.',
+                  style: TextStyle(color: Colors.white60, fontSize: 11),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: hasSignalOutcomes ? const Color(0xFF123026) : const Color(0xFF352916),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    hasSignalOutcomes
+                        ? 'OBSERVED OUTCOMES • ${_count(signalMetrics['closed_count'])} closed signals'
+                        : 'LIVE ACCURACY UNVERIFIED • Waiting for confirmed signals to reach target or stop-loss',
+                    style: TextStyle(color: hasSignalOutcomes ? Colors.greenAccent : Colors.orangeAccent, fontWeight: FontWeight.w800, fontSize: 12),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _metricRow([
+                  _metric('Win rate', _rate(signalMetrics['win_rate'])),
+                  _metric('Loss rate', _rate(signalMetrics['loss_rate'])),
+                ]),
+                _metricRow([
+                  _metric('Target hits', _count(signalMetrics['target_hits'])),
+                  _metric('Stop-loss hits', _count(signalMetrics['stop_loss_hits'])),
+                ]),
+                _metricRow([
+                  _metric('Open signals', _count(signalMetrics['open_count'])),
+                  _metric('Closed signals', _count(signalMetrics['closed_count'])),
+                ]),
+                _metricRow([
+                  _metric('Gross points', _number(signalMetrics['gross_points_total'])),
+                  _metric('Net P&L (₹)', _rupees(signalMetrics['net_pnl_inr'])),
+                ]),
+                const SizedBox(height: 8),
+                const Text('INSTRUMENT-WISE SIGNAL OUTCOMES', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900)),
+                const SizedBox(height: 8),
+                if (signalByInstrument.isEmpty)
+                  const Text('No confirmed signal outcomes recorded yet.', style: TextStyle(color: Colors.white54, fontSize: 11)),
+                for (final entry in signalByInstrument.entries.toList()..sort((a, b) => a.key.compareTo(b.key)))
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0A111D),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFF263449)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(child: Text(entry.key, style: const TextStyle(fontWeight: FontWeight.w900))),
+                            Text('${_count(_map(entry.value)['closed_count'])} closed', style: const TextStyle(color: Colors.white60, fontSize: 11)),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        _metricRow([
+                          _metric('Win', _rate(_map(entry.value)['win_rate'])),
+                          _metric('Loss', _rate(_map(entry.value)['loss_rate'])),
+                        ]),
+                        _metricRow([
+                          _metric('Targets', _count(_map(entry.value)['target_hits'])),
+                          _metric('Stop-loss', _count(_map(entry.value)['stop_loss_hits'])),
+                        ]),
+                        _metricRow([
+                          _metric('Gross points', _number(_map(entry.value)['gross_points_total'])),
+                          _metric('Net ₹ P&L', _rupees(_map(entry.value)['net_pnl_inr'])),
+                        ]),
+                      ],
+                    ),
+                  ),
+                Text(
+                  'Tracking: ${_signalReport['tracking_method'] ?? 'fresh quotes required'} • Net INR P&L is withheld unless quantity, lot size and all rupee costs are explicitly configured.',
                   style: const TextStyle(color: Colors.white54, fontSize: 10),
                 ),
               ],

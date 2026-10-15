@@ -2895,6 +2895,7 @@ def _get_signals_uncached(force: bool = False) -> dict[str, Any]:
             "generated_at": _utc_now().isoformat(), "signal_only": True,
             "order_placement_enabled": False,
         }
+        result["signal_performance"] = _update_signal_outcomes(signals, market)
         with _lock:
             _signal_cache = result
             _signal_cache_at = time.monotonic()
@@ -3760,6 +3761,235 @@ def portfolio(_: str = Depends(_device)) -> dict[str, Any]:
         }
 
 
+_signal_outcomes_memory: list[dict[str, Any]] = []
+SIGNAL_OUTCOMES_MAX_ROWS = 5000
+
+
+def _signal_outcome_path() -> Path:
+    return Path(os.getenv("SIGNAL_OUTCOMES_FILE", "/data/signal_outcomes.json"))
+
+
+def _load_signal_outcomes() -> list[dict[str, Any]]:
+    with _lock:
+        path = _signal_outcome_path()
+        try:
+            if path.is_file():
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(raw, list):
+                    _signal_outcomes_memory.clear()
+                    _signal_outcomes_memory.extend(
+                        dict(item) for item in raw
+                        if isinstance(item, dict) and item.get("outcome_id")
+                    )
+        except (OSError, ValueError, TypeError):
+            # Keep the last in-memory ledger if the persistent volume is temporarily unavailable.
+            pass
+        return [dict(item) for item in _signal_outcomes_memory]
+
+
+def _save_signal_outcomes(rows: list[dict[str, Any]]) -> bool:
+    bounded = rows[-SIGNAL_OUTCOMES_MAX_ROWS:]
+    with _lock:
+        _signal_outcomes_memory.clear()
+        _signal_outcomes_memory.extend(dict(item) for item in bounded)
+        path = _signal_outcome_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_suffix(path.suffix + ".tmp")
+            temporary.write_text(json.dumps(bounded, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+            temporary.replace(path)
+            return True
+        except OSError:
+            return False
+
+
+def _signal_option_quote(index: str, signal: dict[str, Any], market: dict[str, Any]) -> dict[str, Any] | None:
+    market_row = market.get(index)
+    if not isinstance(market_row, dict) or market_row.get("live") is not True or market_row.get("cached") is True:
+        return None
+    strike = _number(signal.get("strike"))
+    expiry = str(signal.get("expiry") or "")[:10]
+    option_type = str(signal.get("option_type") or "").upper()
+    if option_type not in {"CALL", "PUT"}:
+        decision = str(signal.get("decision") or "").upper()
+        option_type = "CALL" if "CALL" in decision else "PUT" if "PUT" in decision else ""
+    if strike is None or not expiry or not option_type:
+        return None
+    chain = market_row.get("option_chain")
+    if not isinstance(chain, list):
+        return None
+    for row in chain:
+        if not isinstance(row, dict):
+            continue
+        row_strike = _number(row.get("strike"))
+        row_type = str(row.get("option_type") or "").upper()
+        row_expiry = str(row.get("expiry") or "")[:10]
+        ltp = _number(row.get("ltp"))
+        age = _number(row.get("age_seconds"))
+        if (
+            row_strike is not None and abs(row_strike - strike) < 0.001
+            and row_type == option_type and row_expiry == expiry
+            and ltp is not None and ltp > 0 and row.get("live") is True
+            and age is not None and 0 <= age <= 60
+        ):
+            return row
+    return None
+
+
+def _signal_outcome_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    closed = [row for row in rows if row.get("status") == "CLOSED" and row.get("exit_reason") in {"TARGET", "STOP_LOSS"}]
+    targets = sum(1 for row in closed if row.get("exit_reason") == "TARGET")
+    stops = sum(1 for row in closed if row.get("exit_reason") == "STOP_LOSS")
+    count = len(closed)
+    net_pnl = [_number(row.get("net_pnl_inr")) for row in closed]
+    net_pnl_complete = bool(closed) and all(value is not None for value in net_pnl)
+    gross_points = [
+        float(row["exit_price"]) - float(row["entry_price"])
+        for row in closed
+        if _number(row.get("exit_price")) is not None and _number(row.get("entry_price")) is not None
+    ]
+    return {
+        "closed_count": count,
+        "open_count": sum(1 for row in rows if row.get("status") == "OPEN"),
+        "target_hits": targets,
+        "stop_loss_hits": stops,
+        "win_rate": targets / count if count else None,
+        "loss_rate": stops / count if count else None,
+        "target_hit_rate": targets / count if count else None,
+        "stop_loss_rate": stops / count if count else None,
+        "gross_points_total": round(sum(gross_points), 4) if gross_points else None,
+        "net_pnl_inr": round(sum(float(value) for value in net_pnl if value is not None), 2) if net_pnl_complete else None,
+        "pnl_status": "RECORDED" if net_pnl_complete else "NOT_AVAILABLE_WITHOUT_QUANTITY_AND_ALL_COSTS",
+    }
+
+
+def _signal_outcome_report(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    by_instrument: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        by_instrument.setdefault(str(row.get("index") or "UNKNOWN").upper(), []).append(row)
+    closed = sum(1 for row in rows if row.get("status") == "CLOSED" and row.get("exit_reason") in {"TARGET", "STOP_LOSS"})
+    return {
+        "status": "ok",
+        "mode": "LIVE_SIGNAL_SHADOW_TRACKING",
+        "accuracy_status": "UNVERIFIED_NO_CLOSED_SIGNAL_OUTCOMES" if closed == 0 else "OBSERVED_QUOTE_OUTCOMES",
+        "metrics": _signal_outcome_metrics(rows),
+        "by_instrument": {key: _signal_outcome_metrics(value) for key, value in sorted(by_instrument.items())},
+        "outcomes": rows,
+        "tracking_method": "fresh Angel One option quotes observed during background signal refresh; intra-refresh touches can be missed",
+        "message": "Shadow tracking only; target/stop counts reflect observed fresh quotes, not broker executions. INR net P&L is withheld unless explicit quantity, lot size and all rupee costs are recorded.",
+        "order_placement_enabled": False,
+    }
+
+
+def _update_signal_outcomes(signals: dict[str, Any], market: dict[str, Any]) -> dict[str, Any]:
+    rows = _load_signal_outcomes()
+    changed = False
+    now = _utc_now().isoformat()
+    # Resolve open shadow records only from a fresh quote for the exact option contract.
+    for outcome in rows:
+        if outcome.get("status") != "OPEN":
+            continue
+        index = str(outcome.get("index") or "").upper()
+        quote = _signal_option_quote(index, {
+            "strike": outcome.get("strike"), "expiry": outcome.get("expiry"),
+            "option_type": outcome.get("option_type"), "decision": outcome.get("decision"),
+        }, market)
+        if quote is None:
+            continue
+        price = _number(quote.get("ltp"))
+        if price is None:
+            continue
+        outcome["last_price"] = price
+        outcome["last_price_at"] = quote.get("source_timestamp") or quote.get("timestamp")
+        outcome["last_observed_at"] = now
+        outcome["max_seen_price"] = max(float(outcome.get("max_seen_price") or price), price)
+        outcome["min_seen_price"] = min(float(outcome.get("min_seen_price") or price), price)
+        entry = _number(outcome.get("entry_price"))
+        stop = _number(outcome.get("stop_loss"))
+        target = _number(outcome.get("target"))
+        exit_reason = "TARGET" if target is not None and price >= target else "STOP_LOSS" if stop is not None and price <= stop else None
+        changed = True
+        if exit_reason is None:
+            continue
+        outcome["status"] = "CLOSED"
+        outcome["exit_reason"] = exit_reason
+        outcome["exit_price"] = price
+        outcome["closed_at"] = now
+        outcome["gross_points"] = round(price - entry, 4) if entry is not None else None
+        risk_distance = abs(entry - stop) if entry is not None and stop is not None else None
+        outcome["gross_r"] = round((price - entry) / risk_distance, 6) if entry is not None and risk_distance else None
+        quantity = _number(outcome.get("quantity"))
+        lot_size = _number(outcome.get("lot_size"))
+        if entry is not None and quantity is not None and quantity > 0 and lot_size is not None and lot_size > 0:
+            outcome["gross_pnl_inr"] = round((price - entry) * quantity * lot_size, 2)
+        costs = {
+            "brokerage_inr": _number(os.getenv("PAPER_BROKERAGE_INR_PER_ROUND_TRIP")),
+            "slippage_inr": _number(os.getenv("PAPER_SLIPPAGE_INR_PER_ROUND_TRIP")),
+            "other_costs_inr": _number(os.getenv("PAPER_OTHER_COSTS_INR_PER_ROUND_TRIP")),
+        }
+        if _number(outcome.get("gross_pnl_inr")) is not None and all(value is not None and value >= 0 for value in costs.values()):
+            outcome["costs_inr"] = costs
+            outcome["net_pnl_inr"] = round(float(outcome["gross_pnl_inr"]) - sum(float(value) for value in costs.values()), 2)
+            outcome["pnl_status"] = "RECORDED"
+        else:
+            outcome["net_pnl_inr"] = None
+            outcome["pnl_status"] = "NOT_AVAILABLE_WITHOUT_QUANTITY_AND_ALL_COSTS"
+    # Only add signals that passed every gate and have a fresh matching option quote.
+    for index, signal in signals.items():
+        if not isinstance(signal, dict):
+            continue
+        decision = str(signal.get("decision") or "").upper()
+        stability = signal.get("signal_stability") if isinstance(signal.get("signal_stability"), dict) else {}
+        validation = signal.get("live_validation") if isinstance(signal.get("live_validation"), dict) else {}
+        if (
+            decision not in {"CALL BUY", "PUT BUY"}
+            or signal.get("data_fresh") is not True
+            or validation.get("verdict") != "PASS"
+            or stability.get("state") != "CONFIRMED"
+        ):
+            continue
+        entry, stop, target = (_number(signal.get(key)) for key in ("entry", "stop_loss", "target"))
+        strike = _number(signal.get("strike"))
+        expiry = str(signal.get("expiry") or "")[:10]
+        if entry is None or stop is None or target is None or strike is None or not expiry or not 0 < stop < entry < target:
+            continue
+        quote = _signal_option_quote(str(index).upper(), signal, market)
+        if quote is None:
+            continue
+        confirmation = signal.get("confirmation_state") if isinstance(signal.get("confirmation_state"), dict) else {}
+        signature_payload = {
+            "index": str(index).upper(), "decision": decision, "strike": strike,
+            "expiry": expiry, "entry": entry,
+            "since": str(stability.get("since_utc") or confirmation.get("since_utc") or ""),
+        }
+        signature = hashlib.sha256(json.dumps(signature_payload, sort_keys=True).encode()).hexdigest()
+        if any(str(row.get("signature") or "") == signature for row in rows):
+            continue
+        trade_plan = signal.get("trade_plan") if isinstance(signal.get("trade_plan"), dict) else {}
+        quantity = _number(trade_plan.get("quantity") or signal.get("quantity"))
+        lot_size = _number(trade_plan.get("lot_size") or signal.get("lot_size"))
+        rows.append({
+            "outcome_id": f"sig-{uuid.uuid4().hex}",
+            "signature": signature, "index": str(index).upper(),
+            "decision": decision, "option_type": "CALL" if decision == "CALL BUY" else "PUT",
+            "strike": strike, "expiry": expiry, "entry_price": entry,
+            "stop_loss": stop, "target": target, "quantity": quantity, "lot_size": lot_size,
+            "status": "OPEN", "exit_reason": None, "exit_price": None,
+            "gross_points": None, "gross_pnl_inr": None, "net_pnl_inr": None,
+            "pnl_status": "OPEN", "opened_at": now,
+            "last_price": _number(quote.get("ltp")),
+            "last_price_at": quote.get("source_timestamp") or quote.get("timestamp"),
+            "last_observed_at": now, "max_seen_price": _number(quote.get("ltp")),
+            "min_seen_price": _number(quote.get("ltp")),
+            "source": "angelone_smartapi_fresh_option_quote",
+            "paper_only": True, "order_placement_enabled": False,
+        })
+        changed = True
+    if changed:
+        _save_signal_outcomes(rows)
+    return _signal_outcome_report(rows)
+
+
 _paper_trades_memory: dict[str, dict[str, Any]] = {}
 
 
@@ -4073,6 +4303,11 @@ def evaluate_strategies(body: dict[str, Any], _: str = Depends(_device)) -> dict
         "strategy_trace": strategy_trace,
         "order_placement_enabled": False,
     }
+
+
+@app.get("/v1/signals/performance")
+def signal_performance(_: str = Depends(_device)) -> dict[str, Any]:
+    return _signal_outcome_report(_load_signal_outcomes())
 
 
 @app.get("/v1/signals")
