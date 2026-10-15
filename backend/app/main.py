@@ -2895,6 +2895,7 @@ def _get_signals_uncached(force: bool = False) -> dict[str, Any]:
             "generated_at": _utc_now().isoformat(), "signal_only": True,
             "order_placement_enabled": False,
         }
+        result["signal_performance"] = _update_signal_outcomes(signals, market)
         with _lock:
             _signal_cache = result
             _signal_cache_at = time.monotonic()
@@ -4301,6 +4302,11 @@ def evaluate_strategies(body: dict[str, Any], _: str = Depends(_device)) -> dict
         "strategy_trace": strategy_trace,
         "order_placement_enabled": False,
     }
+
+
+@app.get("/v1/signals/performance")
+def signal_performance(_: str = Depends(_device)) -> dict[str, Any]:
+    return _signal_outcome_report(_load_signal_outcomes())
 
 
 @app.get("/v1/signals")
