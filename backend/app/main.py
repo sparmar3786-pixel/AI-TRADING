@@ -117,6 +117,7 @@ _market_data_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="ma
 # Signal gates independently enforce freshness and never treat cache age as a live tick.
 OPTION_CHAIN_CACHE_TTL_SECONDS = max(0.0, min(float(os.getenv("OPTION_CHAIN_CACHE_TTL_SECONDS", "2.0")), 5.0))
 OPTION_CHAIN_UPSTREAM_TIMEOUT_SECONDS = max(1.0, min(float(os.getenv("OPTION_CHAIN_UPSTREAM_TIMEOUT_SECONDS", "4.0")), 10.0))
+OPTION_CHAIN_STALE_MAX_SECONDS = 300.0  # stale display-only fallback; never actionable
 _option_chain_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
 _signal_cache: dict[str, Any] | None = None
@@ -2316,7 +2317,37 @@ def option_chain(index: str = Query(default="NIFTY"), _: str = Depends(_device))
                 "cache": {"hit": True, "age_ms": round(cache_age * 1000, 1)},
                 "request_elapsed_ms": round((time.monotonic() - request_started) * 1000, 1),
             }
-        _option_chain_cache.pop(index, None)
+        # Retain the expired snapshot briefly for an explicit WAIT-only fallback
+        # if Angel One cannot provide a fresh underlying quote on this request.
+
+    def stale_fallback(reason: str) -> dict[str, Any] | None:
+        if not cached:
+            return None
+        cached_at, cached_payload = cached
+        age_seconds = time.monotonic() - cached_at
+        if age_seconds > OPTION_CHAIN_STALE_MAX_SECONDS:
+            return None
+        snapshot = json.loads(json.dumps(cached_payload, default=str))
+        snapshot.update({
+            "status": "WAIT",
+            "live": False,
+            "actionable": False,
+            "stale": True,
+            "served_at": _utc_now().isoformat(),
+            "reason": f"{reason} Showing the last verified snapshot as stale display-only data; no trade may be qualified from it.",
+            "cache": {"hit": True, "stale": True, "age_ms": round(age_seconds * 1000, 1), "stale_max_age_seconds": OPTION_CHAIN_STALE_MAX_SECONDS},
+            "request_elapsed_ms": round((time.monotonic() - request_started) * 1000, 1),
+        })
+        for field in ("contracts", "option_chain"):
+            values = snapshot.get(field)
+            if isinstance(values, list):
+                snapshot[field] = [
+                    {**item, "live": False, "stale": True, "freshness": "STALE", "actionable": False}
+                    if isinstance(item, dict) else item
+                    for item in values
+                ]
+        return snapshot
+
     adapter = _require_adapter()
     rows = _load_master()
     commodity = index in COMMODITY_NAMES
@@ -2344,8 +2375,11 @@ def option_chain(index: str = Query(default="NIFTY"), _: str = Depends(_device))
             spot_quote = spot_future.result(timeout=OPTION_CHAIN_UPSTREAM_TIMEOUT_SECONDS).get(future_token)
         except FutureTimeoutError:
             spot_future.cancel()
+            fallback = stale_fallback("Angel One underlying quote timed out.")
+            if fallback is not None:
+                return fallback
             raise HTTPException(status_code=504, detail={
-                "message": "Angel One underlying quote timed out; no cached or fabricated spot was used.",
+                "message": "Angel One underlying quote timed out; no fresh quote or eligible cached snapshot is available.",
                 "stage": "option_chain_underlying_quote", "timeout_seconds": OPTION_CHAIN_UPSTREAM_TIMEOUT_SECONDS,
                 "retryable": True,
             })
@@ -2360,8 +2394,11 @@ def option_chain(index: str = Query(default="NIFTY"), _: str = Depends(_device))
             spot_quote = spot_future.result(timeout=OPTION_CHAIN_UPSTREAM_TIMEOUT_SECONDS).get(config["token"])
         except FutureTimeoutError:
             spot_future.cancel()
+            fallback = stale_fallback("Angel One underlying quote timed out.")
+            if fallback is not None:
+                return fallback
             raise HTTPException(status_code=504, detail={
-                "message": "Angel One underlying quote timed out; no cached or fabricated spot was used.",
+                "message": "Angel One underlying quote timed out; no fresh quote or eligible cached snapshot is available.",
                 "stage": "option_chain_underlying_quote", "timeout_seconds": OPTION_CHAIN_UPSTREAM_TIMEOUT_SECONDS,
                 "retryable": True,
             })
@@ -2370,7 +2407,10 @@ def option_chain(index: str = Query(default="NIFTY"), _: str = Depends(_device))
         option_instrument = "OPTIDX"
         option_name = index
     if spot is None or spot <= 0:
-        raise HTTPException(status_code=502, detail=f"Angel One underlying quote is missing for {index}; no option signal can be qualified.")
+        fallback = stale_fallback(f"Angel One underlying quote is missing for {index}.")
+        if fallback is not None:
+            return fallback
+        raise HTTPException(status_code=502, detail=f"Angel One underlying quote is missing for {index}; no fresh quote or eligible cached snapshot is available.")
 
     contracts = [
         row for row in rows
