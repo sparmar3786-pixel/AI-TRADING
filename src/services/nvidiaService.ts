@@ -45,12 +45,44 @@ class NvidiaService {
     // Intentionally disabled: configure NVIDIA credentials in Railway environment variables.
   }
 
+  private lastStatus: { configured: boolean; active: boolean; checkedAt: number } | null = null;
+  private readonly STATUS_TTL_MS = 30_000;
+
+  public async refreshNvidiaStatus(): Promise<{ configured: boolean; active: boolean }> {
+    const { apiService } = await import('./api');
+    const backendUrl = apiService.getSignalBackend().replace(/\\/+$/, '');
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    try {
+      const response = await fetch(`${backendUrl}/v1/system/diagnostics`, {
+        headers: { Accept: 'application/json', 'X-Device-Id': apiService.getDeviceId() },
+        signal: controller.signal,
+        cache: 'no-store',
+      });
+      if (!response.ok) throw new Error(`Diagnostics HTTP ${response.status}`);
+      const data = await response.json();
+      const ai = data?.ai_provider ?? {};
+      const status = String(ai.nvidia_status ?? '').toLowerCase();
+      const configured = Boolean(ai.configured) &&
+        !['', 'unavailable', 'not_configured', 'disabled', 'error', 'failed'].includes(status);
+      const active = configured &&
+        ['active', 'ok', 'connected', 'ready', 'healthy', 'operational'].includes(status);
+      this.lastStatus = { configured, active, checkedAt: Date.now() };
+      return { configured, active };
+    } catch {
+      this.lastStatus = { configured: false, active: false, checkedAt: Date.now() };
+      return { configured: false, active: false };
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
   public isNvidiaConfigured(): boolean {
-    return false; // Configuration is verified by server status/inference, not browser-held keys.
+    return Boolean(this.lastStatus?.configured && Date.now() - this.lastStatus.checkedAt <= this.STATUS_TTL_MS);
   }
 
   public isNvidiaActive(): boolean {
-    return false; // Do not mark active until a real backend inference has succeeded.
+    return Boolean(this.lastStatus?.active && Date.now() - this.lastStatus.checkedAt <= this.STATUS_TTL_MS);
   }
 
   public getEngineStatusLabel(): { label: string; isDirectKey: boolean } {
@@ -99,7 +131,7 @@ class NvidiaService {
     modelOverride?: string
   ): Promise<{ answer: string; model: string; provider: string } | null> {
     const { apiService } = await import('./api');
-    const backendUrl = apiService.getSignalBackend();
+    const backendUrl = apiService.getSignalBackend().replace(/\\/+$/, '');
     const response = await fetch(`${backendUrl}/v1/ai/nvidia-chat`, {
       method: 'POST',
       headers: {
@@ -128,6 +160,7 @@ class NvidiaService {
         ['deterministic_fallback', 'none', 'template', 'offline'].includes(provider.toLowerCase())) {
       throw new Error('Backend did not confirm a real NVIDIA model inference.');
     }
+    this.lastStatus = { configured: true, active: true, checkedAt: Date.now() };
     return { answer, model, provider: provider || 'NVIDIA NIM' };
   }
 
