@@ -3778,10 +3778,27 @@ def open_paper_trade(body: dict[str, Any], _: str = Depends(_device)) -> dict[st
     side = str(body.get("side") or "").strip().upper()
     if not trade_id or len(trade_id) > 128:
         raise HTTPException(status_code=422, detail="trade_id is required and must be at most 128 characters.")
-    if index not in INDEXES:
-        raise HTTPException(status_code=422, detail="Unsupported index.")
+    supported_instruments = set(INDEXES) | set(COMMODITY_NAMES)
+    if index not in supported_instruments:
+        raise HTTPException(status_code=422, detail=f"Unsupported instrument. Choose from {', '.join(sorted(supported_instruments))}.")
     if side not in {"CALL", "PUT", "CALL BUY", "PUT BUY", "LONG", "SHORT"}:
         raise HTTPException(status_code=422, detail="Unsupported paper-trade side.")
+    entry_price = _number(body.get("entry_price"))
+    stop_loss = _number(body.get("stop_loss"))
+    target = _number(body.get("target"))
+    quantity = _number(body.get("quantity"))
+    lot_size = _number(body.get("lot_size"))
+    for field, value in (("entry_price", entry_price), ("stop_loss", stop_loss), ("target", target), ("quantity", quantity), ("lot_size", lot_size)):
+        if body.get(field) is not None and (value is None or value <= 0):
+            raise HTTPException(status_code=422, detail=f"{field} must be a finite positive number.")
+    slippage_inr = _number(body.get("slippage_inr"))
+    brokerage_inr = _number(body.get("brokerage_inr"))
+    other_costs_inr = _number(body.get("other_costs_inr"))
+    slippage_inr = 0.0 if slippage_inr is None else slippage_inr
+    brokerage_inr = 0.0 if brokerage_inr is None else brokerage_inr
+    other_costs_inr = 0.0 if other_costs_inr is None else other_costs_inr
+    if min(slippage_inr, brokerage_inr, other_costs_inr) < 0:
+        raise HTTPException(status_code=422, detail="Rupee-denominated costs cannot be negative.")
     slippage_r = _number(body.get("slippage_r"))
     transaction_cost_r = _number(body.get("transaction_cost_r"))
     slippage_r = 0.02 if slippage_r is None else slippage_r
@@ -3793,9 +3810,18 @@ def open_paper_trade(body: dict[str, Any], _: str = Depends(_device)) -> dict[st
         raise HTTPException(status_code=409, detail="A paper trade with this trade_id already exists.")
     trade = {
         "trade_id": trade_id, "strategy_id": str(body.get("strategy_id") or "manual-paper")[:128],
-        "index": index, "side": side, "regime": str(body.get("regime") or "UNVERIFIED")[:64],
+        "index": index, "instrument": index,
+        "instrument_type": "MCX" if index in COMMODITY_NAMES else "INDEX",
+        "side": side, "regime": str(body.get("regime") or "UNVERIFIED")[:64],
+        "option_type": str(body.get("option_type") or "").upper()[:8] or None,
+        "strike": _number(body.get("strike")), "expiry": str(body.get("expiry") or "")[:32] or None,
+        "entry_price": entry_price, "stop_loss": stop_loss, "target": target,
+        "quantity": quantity, "lot_size": lot_size,
         "status": "OPEN", "slippage_r": slippage_r, "transaction_cost_r": transaction_cost_r,
-        "gross_r": None, "net_r": None, "notes": str(body.get("notes") or "")[:1000],
+        "slippage_inr": slippage_inr, "brokerage_inr": brokerage_inr, "other_costs_inr": other_costs_inr,
+        "gross_r": None, "net_r": None, "gross_pnl_inr": None, "net_pnl_inr": None,
+        "exit_price": None, "exit_reason": None,
+        "notes": str(body.get("notes") or "")[:1000],
         "opened_at": _utc_now().isoformat(), "closed_at": None, "paper_only": True,
     }
     rows.append(trade)
@@ -3809,17 +3835,44 @@ def open_paper_trade(body: dict[str, Any], _: str = Depends(_device)) -> dict[st
 @app.post("/v1/paper/trades/{trade_id}/close")
 def close_paper_trade(trade_id: str, body: dict[str, Any], _: str = Depends(_device)) -> dict[str, Any]:
     gross_r = _number(body.get("gross_r"))
-    if gross_r is None:
-        raise HTTPException(status_code=422, detail="gross_r must be a finite number.")
+    exit_price = _number(body.get("exit_price"))
+    exit_reason = str(body.get("exit_reason") or "MANUAL").strip().upper().replace(" ", "_")[:40]
+    if exit_reason not in {"TARGET", "TARGET_HIT", "TAKE_PROFIT", "STOP_LOSS", "SL", "STOP_FIRST_BOTH_TOUCHED", "MANUAL", "MAX_HOLD", "SIGNAL_EXIT", "END_OF_DATA"}:
+        raise HTTPException(status_code=422, detail="Unsupported exit_reason.")
     rows = _load_paper_trades()
     trade = next((item for item in rows if str(item.get("trade_id")) == trade_id), None)
     if trade is None:
         raise HTTPException(status_code=404, detail="Paper trade not found.")
     if trade.get("status") == "CLOSED":
         raise HTTPException(status_code=409, detail="Paper trade is already closed.")
+    entry_price = _number(trade.get("entry_price"))
+    stop_loss = _number(trade.get("stop_loss"))
+    quantity = _number(trade.get("quantity"))
+    lot_size = _number(trade.get("lot_size")) or 1.0
+    is_short = str(trade.get("side") or "").upper() == "SHORT"
+    if gross_r is None and exit_price is not None and entry_price is not None and stop_loss is not None and abs(entry_price - stop_loss) > 0:
+        gross_r = ((entry_price - exit_price) if is_short else (exit_price - entry_price)) / abs(entry_price - stop_loss)
+    if gross_r is None:
+        raise HTTPException(status_code=422, detail="Provide gross_r, or provide exit_price for a trade with entry_price and stop_loss.")
     net_r = gross_r - float(trade.get("slippage_r") or 0) - float(trade.get("transaction_cost_r") or 0)
+    gross_pnl_inr = None
+    net_pnl_inr = None
+    if exit_price is not None and entry_price is not None and quantity is not None and quantity > 0:
+        gross_pnl_inr = ((entry_price - exit_price) if is_short else (exit_price - entry_price)) * quantity * lot_size
+        total_cost_inr = sum(float(trade.get(key) or 0) for key in ("slippage_inr", "brokerage_inr", "other_costs_inr"))
+        # Optional close-time costs can override/add to the costs saved when the paper trade opened.
+        for key in ("slippage_inr", "brokerage_inr", "other_costs_inr"):
+            extra = _number(body.get(key))
+            if extra is not None:
+                if extra < 0:
+                    raise HTTPException(status_code=422, detail=f"{key} cannot be negative.")
+                total_cost_inr += extra
+        net_pnl_inr = gross_pnl_inr - total_cost_inr
     trade.update({
         "status": "CLOSED", "gross_r": round(gross_r, 6), "net_r": round(net_r, 6),
+        "exit_price": exit_price, "exit_reason": exit_reason,
+        "gross_pnl_inr": round(gross_pnl_inr, 2) if gross_pnl_inr is not None else None,
+        "net_pnl_inr": round(net_pnl_inr, 2) if net_pnl_inr is not None else None,
         "closed_at": _utc_now().isoformat(),
         "notes": (str(trade.get("notes") or "") + (" | " if trade.get("notes") and body.get("notes") else "") + str(body.get("notes") or ""))[:1500],
     })
@@ -3830,28 +3883,78 @@ def close_paper_trade(trade_id: str, body: dict[str, Any], _: str = Depends(_dev
     }
 
 
+def _paper_performance_summary(trades: list[dict[str, Any]]) -> dict[str, Any]:
+    closed = [item for item in trades if item.get("status") == "CLOSED" and _number(item.get("net_r")) is not None]
+    net_values = [float(item["net_r"]) for item in closed]
+    gross_values = [_number(item.get("gross_r")) for item in closed]
+    wins = [value for value in net_values if value > 0]
+    losses = [value for value in net_values if value < 0]
+    flats = [value for value in net_values if value == 0]
+    reasons = [str(item.get("exit_reason") or "").upper() for item in closed]
+    target_reasons = {"TARGET", "TARGET_HIT", "TAKE_PROFIT"}
+    stop_reasons = {"STOP_LOSS", "SL", "STOP_FIRST_BOTH_TOUCHED"}
+    pnl_values = [_number(item.get("net_pnl_inr")) for item in closed]
+    has_complete_inr_pnl = bool(closed) and all(value is not None for value in pnl_values)
+
+    def metrics_for(items: list[dict[str, Any]]) -> dict[str, Any]:
+        values = [float(item["net_r"]) for item in items if _number(item.get("net_r")) is not None]
+        item_wins = [value for value in values if value > 0]
+        item_losses = [value for value in values if value < 0]
+        item_flats = [value for value in values if value == 0]
+        item_reasons = [str(item.get("exit_reason") or "").upper() for item in items]
+        gross = [_number(item.get("gross_r")) for item in items]
+        rupee_values = [_number(item.get("net_pnl_inr")) for item in items]
+        complete_rupees = bool(items) and all(value is not None for value in rupee_values)
+        count = len(values)
+        return {
+            "trade_count": count,
+            "win_count": len(item_wins),
+            "loss_count": len(item_losses),
+            "breakeven_count": len(item_flats),
+            "win_rate": len(item_wins) / count if count else None,
+            "loss_rate": len(item_losses) / count if count else None,
+            "target_hits": sum(1 for reason in item_reasons if reason in target_reasons),
+            "stop_loss_hits": sum(1 for reason in item_reasons if reason in stop_reasons),
+            "target_hit_rate": sum(1 for reason in item_reasons if reason in target_reasons) / count if count else None,
+            "stop_loss_rate": sum(1 for reason in item_reasons if reason in stop_reasons) / count if count else None,
+            "gross_total_r": round(sum(value for value in gross if value is not None), 6),
+            "net_total_r": round(sum(values), 6),
+            "net_pnl_inr": round(sum(value for value in rupee_values if value is not None), 2) if complete_rupees else None,
+            "profit_factor": round(sum(item_wins) / abs(sum(item_losses)), 6) if item_losses else (None if not item_wins else None),
+            "pnl_status": "RECORDED" if complete_rupees else "NOT_AVAILABLE_FOR_ALL_TRADES",
+        }
+
+    by_instrument: dict[str, list[dict[str, Any]]] = {}
+    for item in closed:
+        instrument = str(item.get("instrument") or item.get("index") or "UNKNOWN").upper()
+        by_instrument.setdefault(instrument, []).append(item)
+    overall = metrics_for(closed)
+    overall["open_trade_count"] = sum(1 for item in trades if item.get("status") == "OPEN")
+    overall["total_slippage_r"] = round(sum(float(item.get("slippage_r") or 0) for item in closed), 6)
+    overall["total_transaction_cost_r"] = round(sum(float(item.get("transaction_cost_r") or 0) for item in closed), 6)
+    overall["total_costs_inr"] = round(sum(float(item.get("slippage_inr") or 0) + float(item.get("brokerage_inr") or 0) + float(item.get("other_costs_inr") or 0) for item in closed), 2)
+    return {
+        "trade_count": len(closed),
+        "metrics": overall,
+        "by_instrument": {key: metrics_for(value) for key, value in sorted(by_instrument.items())},
+        "trades": closed,
+        "mode": "PAPER_ONLY",
+        "accuracy_status": "UNVERIFIED_NO_CLOSED_TRADES" if not closed else "RECORDED_PAPER_OUTCOMES",
+        "message": "Only closed, explicitly recorded paper outcomes are counted. INR net P&L is shown only when every closed trade has entry/exit price, quantity and cost data; this is not live broker P&L.",
+    }
+
+
 @app.get("/v1/paper/report")
 def paper_report(_: str = Depends(_device)) -> dict[str, Any]:
     rows = _load_paper_trades()
-    closed = [item for item in rows if item.get("status") == "CLOSED" and _number(item.get("net_r")) is not None]
-    values = [float(item["net_r"]) for item in closed]
-    wins = [value for value in values if value > 0]
-    losses = [value for value in values if value < 0]
-    metrics = {
-        "trade_count": len(closed),
-        "win_rate": len(wins) / len(closed) if closed else None,
-        "expectancy_r": round(sum(values) / len(values), 6) if values else None,
-        "net_total_r": round(sum(values), 6),
-        "profit_factor": round(sum(wins) / abs(sum(losses)), 6) if losses else (None if not wins else None),
-        "open_trade_count": sum(1 for item in rows if item.get("status") == "OPEN"),
-        "total_slippage_r": round(sum(float(item.get("slippage_r") or 0) for item in closed), 6),
-        "total_transaction_cost_r": round(sum(float(item.get("transaction_cost_r") or 0) for item in closed), 6),
-    }
-    return {
-        "status": "ok", "trade_count": len(closed), "metrics": metrics,
-        "trades": closed, "mode": "PAPER_ONLY",
-        "message": "Metrics are computed only from recorded closed paper trades; they are not a forecast or live P&L.",
-    }
+    report = _paper_performance_summary(rows)
+    report.update({
+        "status": "ok",
+        "persistence": "persistent" if _paper_trade_path().is_file() else "memory_or_empty",
+        "signal_only": True,
+        "order_placement_enabled": False,
+    })
+    return report
 
 
 @app.post("/v1/strategies/evaluate")
