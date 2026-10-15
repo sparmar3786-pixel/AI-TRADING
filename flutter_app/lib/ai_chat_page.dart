@@ -182,7 +182,7 @@ class _AiChatPageState extends State<AiChatPage> {
                 const Text('Cloud AI • Market Q&A', textAlign: TextAlign.center, style: TextStyle(color: Color(0xFF32D583), fontWeight: FontWeight.w700, fontSize: 12)),
                 const SizedBox(height: 8),
                 const Text(
-                  'Load a local GGUF model for offline inference. When the backend is reachable, local Qwen receives the selected index snapshot, deterministic strategy, cloud AI status and search evidence. Without backend access it must report that live context is unavailable.',
+                  'Cloud AI uses the Railway backend for market Q&A. Search evidence is shown only when returned by the backend.',
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 20),
