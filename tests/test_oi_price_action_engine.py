@@ -47,7 +47,7 @@ class OIPriceActionEngineTests(unittest.TestCase):
 
     def test_rejection_wicks_and_two_candle_structure(self):
         engine = OIPriceActionEngine()
-        bullish = {"open": 10.0, "high": 10.5, "low": 5.0, "close": 10.2}
+        bullish = {"open": 10.0, "high": 10.3, "low": 5.0, "close": 10.2}
         bearish = {"open": 10.5, "high": 15.0, "low": 10.3, "close": 10.4}
         self.assertTrue(engine._rejection_wick(bullish, "bull"))
         self.assertTrue(engine._rejection_wick(bearish, "bear"))
