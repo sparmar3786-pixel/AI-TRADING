@@ -201,8 +201,10 @@ class OIPriceActionEngine:
         if last.close < last.open and (last.close-last.low) / max(last.high-last.low, 1e-9) <= .25:
             bear += 1; tags.append("Strong close near low")
         if "volume" in df and len(df) >= 12:
-            avg = float(df.volume.iloc[-12:-1].mean())
-            if self._number(avg) and avg > 0 and float(df.volume.iloc[-1]) > avg * self.volume_mult:
+            volume = pd.to_numeric(df["volume"], errors="coerce")
+            avg = float(volume.iloc[-12:-1].mean())
+            latest_volume = float(volume.iloc[-1]) if self._number(volume.iloc[-1]) else 0.0
+            if self._number(avg) and avg > 0 and latest_volume > avg * self.volume_mult:
                 if (last.close-last.low)/max(last.high-last.low, 1e-9) >= .7: bull += 1
                 elif (last.close-last.low)/max(last.high-last.low, 1e-9) <= .3: bear += 1
         if bias == "BULLISH": bull += 2
