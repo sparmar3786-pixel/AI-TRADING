@@ -55,6 +55,13 @@ jobs:
           grep -n 'uses-permission' "$MANIFEST"
       - name: Install dependencies
         run: flutter pub get
+      - name: Verify removed chart pages are absent from Flutter source
+        run: |
+          set -euo pipefail
+          if grep -RniE 'SMC Pro Chart|SMC Chart|Order Flow & Footprint|FOOTPRINT CHART|class OrderFlowPage' lib; then
+            echo "Removed SMC/Order Flow chart UI is still present in Flutter source."
+            exit 1
+          fi
       - name: Analyze Dart
         run: flutter analyze --no-fatal-infos
       - name: Widget and API tests
@@ -69,6 +76,10 @@ jobs:
           mapfile -t CODE_FILES < <(unzip -Z1 "$APK" | grep -E '(^classes[0-9]*[.]dex$|^lib/[^/]+/libapp[.]so$)' || true)
           test "${#CODE_FILES[@]}" -gt 0
           COMPILED_STRINGS=$(for file in "${CODE_FILES[@]}"; do unzip -p "$APK" "$file" | strings; done)
+          if printf '%s\\n' "$COMPILED_STRINGS" | grep -Ei 'SMC Pro Chart|SMC Chart|Order Flow & Footprint|FOOTPRINT CHART' >/dev/null; then
+            echo "Removed SMC/Order Flow chart label found in the compiled APK"
+            exit 1
+          fi
           if printf '%s\n' "$COMPILED_STRINGS" | grep -E 'http://10[.]0[.]2[.]2:8000|http://localhost:8000|http://127[.]0[.]0[.]1:8000' >/dev/null; then
             echo "Forbidden local/emulator backend URL found"
             exit 1
