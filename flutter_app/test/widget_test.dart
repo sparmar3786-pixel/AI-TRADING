@@ -14,6 +14,28 @@ void main() {
   });
 
 
+  testWidgets('SMC and Order Flow chart pages are absent from the Android app', (tester) async {
+    const removedChartLabels = <String>[
+      'SMC Pro Chart',
+      'SMC Chart',
+      'Order Flow & Footprint',
+      'FOOTPRINT CHART',
+    ];
+    expect(tabs, isNot(contains('SMC Pro Chart')));
+    expect(tabs, isNot(contains('SMC Chart')));
+    expect(tabs, isNot(contains('Order Flow & Footprint')));
+
+    await tester.pumpWidget(const FreshApp());
+    for (final label in removedChartLabels) {
+      expect(find.text(label), findsNothing, reason: '$label must not be visible in the APK');
+    }
+    await tester.tap(find.byKey(const ValueKey('open-navigation-menu')));
+    await tester.pumpAndSettle();
+    for (final label in removedChartLabels) {
+      expect(find.text(label), findsNothing, reason: '$label must not appear in the APK navigation');
+    }
+  });
+
   testWidgets('Quant Research Hub lists the requested research repositories', (tester) async {
     await tester.pumpWidget(const FreshApp());
     final tabBarContext = tester.element(find.byType(TabBar).first);
@@ -223,9 +245,11 @@ void main() {
       expect(target, findsOneWidget);
     }
 
-    await scrollToText(find.text('RISK & 10-MINUTE STABILITY'));
+    // Scroll in visual order; scrolling down to Layer 5 first makes the
+    // earlier Layer 3 widget unreachable in a lazy ListView.
     await scrollToText(find.text('TREND & SENTIMENT'));
     await scrollToText(find.text('OPTION CHAIN & ORDER FLOW'));
+    await scrollToText(find.text('RISK & 10-MINUTE STABILITY'));
     await scrollToText(find.text('READ-ONLY BROKER MONITOR'));
     await scrollToText(find.text('LOAD / REFRESH ANGEL ONE ORDER BOOK'));
   });
