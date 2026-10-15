@@ -45,7 +45,7 @@ class ApiService {
     try {
       return new URL(trimmed).origin;
     } catch {
-      return trimmed.replace(/\\/+$/, '');
+      return trimmed.replace(/\/+$/, '');
     }
   }
 
