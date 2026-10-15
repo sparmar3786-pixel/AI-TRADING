@@ -112,7 +112,7 @@ export const DashboardPage: React.FC = () => {
                     ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
                     : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
                 }`}>
-                  {nvidiaService.isNvidiaConfigured() ? 'NVIDIA NIM (KEY)' : 'NVIDIA NIM (70B)'}
+                  {nvidiaService.isNvidiaConfigured() ? 'NVIDIA KEY CONFIGURED' : 'NVIDIA CLOUD NOT VERIFIED'}
                 </span>
               </div>
               <p className="text-[10px] text-slate-300 mt-0.5 line-clamp-1 font-sans">
