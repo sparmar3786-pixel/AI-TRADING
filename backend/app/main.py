@@ -3956,10 +3956,11 @@ def _update_signal_outcomes(signals: dict[str, Any], market: dict[str, Any]) -> 
         quote = _signal_option_quote(str(index).upper(), signal, market)
         if quote is None:
             continue
+        confirmation = signal.get("confirmation_state") if isinstance(signal.get("confirmation_state"), dict) else {}
         signature_payload = {
             "index": str(index).upper(), "decision": decision, "strike": strike,
             "expiry": expiry, "entry": entry,
-            "since": str(stability.get("since_utc") or signal.get("confirmation_state") or ""),
+            "since": str(stability.get("since_utc") or confirmation.get("since_utc") or ""),
         }
         signature = hashlib.sha256(json.dumps(signature_payload, sort_keys=True).encode()).hexdigest()
         if any(str(row.get("signature") or "") == signature for row in rows):
