@@ -2273,8 +2273,12 @@ def _storage_diagnostics() -> dict[str, Any]:
     paper_file = _paper_trade_path()
     outcomes_count = _safe_json_list_count(outcomes_file) if outcomes_file.is_file() else 0
     paper_count = _safe_json_list_count(paper_file) if paper_file.is_file() else 0
-    outcomes_parity = not outcomes_file.is_file() or (outcomes_ok and isinstance(outcomes, list) and len(outcomes) >= (outcomes_count or 0))
-    paper_parity = not paper_file.is_file() or (paper_ok and isinstance(paper, list) and len(paper) >= (paper_count or 0))
+    outcomes_parity = not outcomes_file.is_file() or (
+        outcomes_count is not None and outcomes_ok and isinstance(outcomes, list) and len(outcomes) >= outcomes_count
+    )
+    paper_parity = not paper_file.is_file() or (
+        paper_count is not None and paper_ok and isinstance(paper, list) and len(paper) >= paper_count
+    )
     credentials_parity = not credential_file or (creds_ok and isinstance(creds, dict) and isinstance(creds.get("blob"), str))
     ready = database_configured() and db_ok and outcomes_parity and paper_parity and credentials_parity
     return {
