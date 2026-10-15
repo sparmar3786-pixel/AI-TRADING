@@ -30,9 +30,23 @@ class ApiService {
   private deviceId: string = '';
 
   constructor() {
-    this.signalBackendUrl = localStorage.getItem('fresh_signal_backend_url') || DEFAULT_SIGNAL_BACKEND;
-    this.legacyBackendUrl = localStorage.getItem('fresh_legacy_backend_url') || DEFAULT_LEGACY_BACKEND;
+    this.signalBackendUrl = this.normalizeBaseUrl(
+      localStorage.getItem('fresh_signal_backend_url') || DEFAULT_SIGNAL_BACKEND,
+    );
+    this.legacyBackendUrl = this.normalizeBaseUrl(
+      localStorage.getItem('fresh_legacy_backend_url') || DEFAULT_LEGACY_BACKEND,
+    );
     this.deviceId = this.getOrCreateDeviceId();
+  }
+
+  private normalizeBaseUrl(url: string): string {
+    const trimmed = (url || '').trim();
+    if (!trimmed) return DEFAULT_SIGNAL_BACKEND;
+    try {
+      return new URL(trimmed).origin;
+    } catch {
+      return trimmed.replace(/\\/+$/, '');
+    }
   }
 
   private getOrCreateDeviceId(): string {
@@ -57,8 +71,8 @@ class ApiService {
   }
 
   public setSignalBackend(url: string) {
-    this.signalBackendUrl = url;
-    localStorage.setItem('fresh_signal_backend_url', url);
+    this.signalBackendUrl = this.normalizeBaseUrl(url);
+    localStorage.setItem('fresh_signal_backend_url', this.signalBackendUrl);
   }
 
   public getLegacyBackend(): string {
@@ -66,8 +80,8 @@ class ApiService {
   }
 
   public setLegacyBackend(url: string) {
-    this.legacyBackendUrl = url;
-    localStorage.setItem('fresh_legacy_backend_url', url);
+    this.legacyBackendUrl = this.normalizeBaseUrl(url);
+    localStorage.setItem('fresh_legacy_backend_url', this.legacyBackendUrl);
   }
 
   // Check whether the Indian equity market is open right now in IST
@@ -100,7 +114,11 @@ class ApiService {
       const index = key.toUpperCase();
       const updatedSignal = { ...signal };
       const decision = (updatedSignal.decision || 'WAIT').toUpperCase();
-      const validation = updatedSignal.live_validation || { verdict: 'PASS', decision: 'WAIT', blocks: [] };
+      const validation = updatedSignal.live_validation ?? {
+        verdict: 'FAIL' as const,
+        decision: 'WAIT',
+        blocks: ['Live validation missing; signal is not actionable.'],
+      };
       const guards = updatedSignal.guards || [];
 
       const isCandidate = (decision === 'CALL BUY' || decision === 'PUT BUY') &&
@@ -292,7 +310,7 @@ class ApiService {
         trend: change >= 0 ? 'BULLISH' : 'BEARISH',
         option_chain,
         timestamp: new Date().toISOString(),
-        live: true,
+        live: false, // Synthetic preview data is never live.
       };
     });
 
@@ -396,47 +414,13 @@ class ApiService {
   }
 
   public getQuantLayers(): QuantLayerResult[] {
+    const detail = 'Live quant calculation unavailable. Waiting for verified backend results.';
     return [
-      {
-        layer: 1,
-        name: 'Trend Alignment & Moving Averages',
-        status: 'PASS',
-        score: 92,
-        weight: 25,
-        detail: 'EMA 8 > 13 > 21 stack bullish aligned. Supertrend (10,3) green buy mode.',
-      },
-      {
-        layer: 2,
-        name: 'Momentum & Volatility Filter',
-        status: 'PASS',
-        score: 85,
-        weight: 20,
-        detail: 'RSI(14) at 58.4 holding above 50 midpoint. MACD histogram expanding positive.',
-      },
-      {
-        layer: 3,
-        name: 'Price Action & Breakout Volume',
-        status: 'PASS',
-        score: 88,
-        weight: 25,
-        detail: 'Candlestick confirmation above VWAP. Heavy institutional volume expansion.',
-      },
-      {
-        layer: 4,
-        name: 'Options Open Interest & PCR Flow',
-        status: 'PASS',
-        score: 90,
-        weight: 20,
-        detail: 'PCR 1.18 indicates solid put writing floor. Max Pain above current price.',
-      },
-      {
-        layer: 5,
-        name: 'Execution Guard & Slippage Filter',
-        status: 'PASS',
-        score: 95,
-        weight: 10,
-        detail: 'Bid-Ask spread 0.25 pts within tight tolerance. Volatility circuit safe.',
-      },
+      { layer: 1, name: 'Trend Alignment & Moving Averages', status: 'UNAVAILABLE', score: null, weight: 25, detail },
+      { layer: 2, name: 'Momentum & Volatility Filter', status: 'UNAVAILABLE', score: null, weight: 20, detail },
+      { layer: 3, name: 'Price Action & Breakout Volume', status: 'UNAVAILABLE', score: null, weight: 25, detail },
+      { layer: 4, name: 'Options Open Interest & PCR Flow', status: 'UNAVAILABLE', score: null, weight: 20, detail },
+      { layer: 5, name: 'Execution Guard & Slippage Filter', status: 'UNAVAILABLE', score: null, weight: 10, detail },
     ];
   }
 
