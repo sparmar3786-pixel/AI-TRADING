@@ -27,7 +27,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(find.byKey(const ValueKey('open-navigation-menu')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Strategy Library').last);
+    await tester.tap(find.byKey(const ValueKey('drawer-tab-Strategy Library')));
     await tester.pumpAndSettle();
 
     expect(find.text('STRATEGY LIBRARY'), findsOneWidget);
