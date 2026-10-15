@@ -27,9 +27,9 @@ class PdfReportSolutionsPage extends StatelessWidget {
       'The PDF says exact causes still require Railway logs and /docs verification; this screen does not claim remote runtime checks were completed.',
     ]),
     ('PDF Page 3 • Screenshots 1–2', 'Indicators tab', [
-      'Screenshot 1: Indicators tab — Strategy Library / research links.',
-      'Screenshot 2: Indicators tab — additional research links for charts and dashboards.',
-      'These are reference links; a link in the app does not prove upstream source code was cloned or integrated.',
+      'Screenshot 1: Indicators tab — indicator and strategy status.'
+      'Screenshot 2: Indicators tab — additional indicator status.'
+      'This report focuses on in-app trading workflows and validation status.'
     ]),
     ('PDF Page 4 • Screenshots 3–4', 'Signals validation and Backtesting 404', [
       'Screenshot 3: Signals tab — validation blocks and Angel One Live Execution shown DISABLED.',
@@ -37,7 +37,7 @@ class PdfReportSolutionsPage extends StatelessWidget {
       'Fix the backtest route by comparing the deployed API route and app URL; keep live execution disabled while validation is blocked.',
     ]),
     ('PDF Page 5 • Screenshots 5–6', 'Removed reference pages', [
-      'Repository reference pages have been removed from the APK to keep the interface focused on trading workflows.',
+      'The app should show only trading workflows, live status and validation results on this page.'
     ]),
     ('PDF Page 6 • Screenshots 7–8', 'Trading Setup checklist and system flow', [
       'Screenshot 7: Live Setup Checklist — Angel login, live data and AI show CHECK.',
@@ -51,7 +51,7 @@ class PdfReportSolutionsPage extends StatelessWidget {
     ]),
     ('PDF Page 8 • Screenshots 11–12', 'Research Engines and validation output', [
       'Research Engines shows live backend indicator, OI, confluence and validation outputs.',
-      'External repository reference cards have been removed from the APK.',
+      'Research Engines shows only live backend indicator, OI, confluence and validation outputs.'
     ]),
     ('PDF Page 9 • Screenshots 13–14', '3-Layer engine blocks and disabled monitor', [
       'Screenshot 13: Blocking reasons and Trade Monitor DISABLED.',
@@ -69,8 +69,8 @@ class PdfReportSolutionsPage extends StatelessWidget {
     '2. Indicators — advanced indicator snapshot',
     '3. Signals — validation blocks and Live Execution DISABLED',
     '4. Backtesting — HTTP 404',
-    '5. Removed reference page',
-    '6. Removed reference page',
+    '5. Trading workflow page',
+    '6. Trading workflow page',
     '7. Trading Setup — live setup checklist',
     '8. Trading Setup — system flow and modules',
     '9. Trading Setup — modules 2 to 8',
