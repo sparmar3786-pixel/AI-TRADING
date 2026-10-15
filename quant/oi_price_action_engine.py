@@ -202,6 +202,8 @@ class OIPriceActionEngine:
             now = now.astimezone(IST)
         if not (self.valid_from <= now.time() <= self.valid_until):
             return _wait("Outside OI-PA trade window")
+        if option_chain is None or option_chain.empty:
+            return _wait("Option chain missing")
         if option_chain_timestamp is None:
             return _wait("Option-chain timestamp missing", guards=["QUOTE_TIMESTAMP_MISSING"])
         try:
