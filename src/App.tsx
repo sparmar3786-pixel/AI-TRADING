@@ -17,6 +17,7 @@ import { OILabPage } from './pages/OILabPage';
 import { RiskPage } from './pages/RiskPage';
 import { BacktestingPage } from './pages/BacktestingPage';
 import { DataHealthPage } from './pages/DataHealthPage';
+import { DayHLPage } from './pages/DayHLPage';
 import { SettingsPage } from './pages/SettingsPage';
 
 const MainContent: React.FC = () => {
@@ -36,6 +37,7 @@ const MainContent: React.FC = () => {
       case 'Backtesting':
       case 'Strategy Library': return <BacktestingPage />;
       case 'Data Health': return <DataHealthPage />;
+      case 'DAY HL': return <DayHLPage />;
       case 'Settings':
       case 'API Settings': return <SettingsPage />;
       // Legacy AI tabs are intentionally routed away from AI screens.
