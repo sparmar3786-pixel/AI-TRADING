@@ -1333,6 +1333,10 @@ class SignalPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = Map<String, dynamic>.from(signals[index] as Map? ?? const {});
     final marketRow = Map<String, dynamic>.from(market[index] as Map? ?? const {});
+    final heroZero = Map<String, dynamic>.from(s['hero_zero'] as Map? ?? const {});
+    final heroZeroValidation = Map<String, dynamic>.from(heroZero['live_validation'] as Map? ?? const {});
+    final heroZeroReasons = (heroZero['reasons'] as List?) ?? const <dynamic>[];
+    final heroZeroGuards = (heroZero['guards'] as List?) ?? const <dynamic>[];
     final reasons = (s['reason'] as List?) ?? const <dynamic>[];
     final guards = (s['guards'] as List?) ?? const <dynamic>[];
     final validation = Map<String, dynamic>.from(s['live_validation'] as Map? ?? const {});
@@ -1378,6 +1382,43 @@ class SignalPage extends StatelessWidget {
               const Text('Why qualified / why rejected', style: TextStyle(fontWeight: FontWeight.w800)),
               ...reasons.map((r) => Text('• ' + r.toString())),
               ...guards.map((g) => Text('⚠ ' + g.toString())),
+            ],
+          ),
+        ),
+      ),
+      const Section('Hero Zero — Expiry Only'),
+      Card(
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                const Expanded(child: Text('HERO ZERO CANDIDATE', style: TextStyle(fontWeight: FontWeight.w900))),
+                Chip(
+                  label: Text((heroZero['candidate_decision'] ?? 'WAIT').toString()),
+                  backgroundColor: heroZero['candidate_decision'] == 'CALL BUY' || heroZero['candidate_decision'] == 'PUT BUY'
+                      ? Colors.amber.withOpacity(.18) : Colors.grey.withOpacity(.15),
+                ),
+              ]),
+              const Text('Expiry day only • 13:30–14:45 IST • candidate only, not an order',
+                  style: TextStyle(fontSize: 11, color: Colors.white70)),
+              const Divider(),
+              InfoRow('Engine', (heroZero['engine_source'] ?? 'HERO_ZERO').toString()),
+              InfoRow('Decision', (heroZero['decision'] ?? 'WAIT').toString()),
+              InfoRow('Strike / side', '${_val(heroZero['strike'])} / ${heroZero['option_side'] ?? '—'}'),
+              InfoRow('Option premium entry', _val(heroZero['entry'])),
+              InfoRow('Soft stop loss', _val(heroZero['stop_loss'])),
+              InfoRow('Premium target', _val(heroZero['target'])),
+              InfoRow('Trigger', (heroZero['trigger'] ?? '—').toString()),
+              InfoRow('Validation', (heroZeroValidation['verdict'] ?? 'FAIL').toString()),
+              ...heroZeroReasons.map((r) => Text('• ' + r.toString(), style: const TextStyle(fontSize: 11))),
+              ...heroZeroGuards.map((g) => Text('⚠ ' + g.toString(), style: const TextStyle(fontSize: 11, color: Colors.orangeAccent))),
+              const SizedBox(height: 6),
+              const Text(
+                'High-risk premium strategy. Full premium loss is possible. Soft SL/target are not guaranteed fills. Downstream stability and rupee-risk gates must pass; no broker order is submitted.',
+                style: TextStyle(fontSize: 10, color: Colors.white70),
+              ),
             ],
           ),
         ),
