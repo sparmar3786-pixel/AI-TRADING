@@ -1986,8 +1986,51 @@ class SignalPage extends StatelessWidget {
     final specialists = Map<String, dynamic>.from(agentAnalysis['specialists'] as Map? ?? const {});
     final decision = s['decision']?.toString() ?? '';
     final finalDecision = (validation['decision'] ?? 'WAIT').toString();
+    final perfMetrics = Map<String, dynamic>.from(signalPerformance['metrics'] as Map? ?? const {});
+    final perInstrumentPerf = Map<String, dynamic>.from(signalPerformance['by_instrument'] as Map? ?? const {});
+    final mcxPerf = Map<String, dynamic>.from(signalPerformance['mcx'] as Map? ?? const {});
+    String perfRate(dynamic value) => value is num ? '${(value * 100).toStringAsFixed(1)}%' : 'Not verified';
+    String perfMoney(dynamic value) => value is num ? '₹${value.toStringAsFixed(2)}' : 'Not available';
+    Widget instrumentPerformance(String name, Map<String, dynamic> metrics) => Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(name, style: const TextStyle(fontWeight: FontWeight.w800)),
+          InfoRow('Closed / open', '${metrics['closed_count'] ?? 0} / ${metrics['open_count'] ?? 0}'),
+          InfoRow('Target hits / SL hits', '${metrics['target_hits'] ?? 0} / ${metrics['stop_loss_hits'] ?? 0}'),
+          InfoRow('Target rate / SL rate', '${perfRate(metrics['target_hit_rate'])} / ${perfRate(metrics['stop_loss_rate'])}'),
+          InfoRow('Net win / loss rate', '${perfRate(metrics['win_rate'])} / ${perfRate(metrics['loss_rate'])}'),
+          InfoRow('Net P&L', metrics['net_pnl_inr'] is num ? perfMoney(metrics['net_pnl_inr']) : 'Not available'),
+          InfoRow('P&L coverage', '${metrics['net_pnl_coverage_count'] ?? 0} / ${metrics['closed_count'] ?? 0} closed outcomes'),
+        ]),
+      ),
+    );
     final children = <Widget>[
       IndexPicker(selected: index, onChanged: onChanged),
+      const Section('Observed Signal Performance'),
+      Card(child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          InfoRow('Tracker status', (signalPerformance['accuracy_status'] ?? 'UNVERIFIED — WAITING FOR OUTCOMES').toString()),
+          InfoRow('Ledger persistence', ((signalPerformance['persistence'] as Map?)?['status'] ?? 'UNKNOWN').toString()),
+          InfoRow('Closed / open', '${perfMetrics['closed_count'] ?? 0} / ${perfMetrics['open_count'] ?? 0}'),
+          InfoRow('Targets / stop-losses', '${perfMetrics['target_hits'] ?? 0} / ${perfMetrics['stop_loss_hits'] ?? 0}'),
+          InfoRow('Target hit / SL hit rate', '${perfRate(perfMetrics['target_hit_rate'])} / ${perfRate(perfMetrics['stop_loss_rate'])}'),
+          InfoRow('Fee-adjusted win / loss', '${perfRate(perfMetrics['win_rate'])} / ${perfRate(perfMetrics['loss_rate'])}'),
+          InfoRow('Net P&L estimate', perfMetrics['net_pnl_inr'] is num ? perfMoney(perfMetrics['net_pnl_inr']) : 'Not available — fees/quantity data incomplete'),
+          const SizedBox(height: 6),
+          const Text('Shadow/paper results only. Fresh quotes can miss intrabar touches; target hits are assumed at target level. This is not broker-filled or realized P&L.', style: TextStyle(fontSize: 11, color: Colors.white70)),
+        ]),
+      )),
+      instrumentPerformance('NIFTY', Map<String, dynamic>.from(perInstrumentPerf['NIFTY'] as Map? ?? const {})),
+      instrumentPerformance('BANKNIFTY', Map<String, dynamic>.from(perInstrumentPerf['BANKNIFTY'] as Map? ?? const {})),
+      if (mcxPerf['metrics'] is Map)
+        instrumentPerformance('MCX — all tracked commodities', Map<String, dynamic>.from(mcxPerf['metrics'] as Map))
+      else
+        Card(child: Padding(padding: const EdgeInsets.all(12), child: Text((mcxPerf['message'] ?? 'MCX accuracy has not been verified yet.').toString()))),
+      ...perInstrumentPerf.entries
+        .where((entry) => entry.key != 'NIFTY' && entry.key != 'BANKNIFTY')
+        .map((entry) => instrumentPerformance(entry.key, Map<String, dynamic>.from(entry.value as Map? ?? const {}))),
       const Section('Signal'),
       Card(
         child: Padding(
