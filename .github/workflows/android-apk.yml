@@ -145,7 +145,7 @@ jobs:
         working-directory: flutter_app
         run: |
           set -euo pipefail
-          if grep -RniE 'SMC Pro Chart|SMC Chart|Order Flow & Footprint|FOOTPRINT CHART|class OrderFlowPage|MCX|CRUDEOIL|NATURALGAS|CommodityPage' lib; then
+          if grep -RniE 'SMC Pro Chart|SMC Chart|Smart Money Concepts Chart|Order Flow & Footprint|Order Flow Chart|Footprint Chart|FOOTPRINT CHART|class OrderFlowPage|MCX|Commodities|CRUDEOIL|NATURALGAS|CommodityPage' lib; then
             echo "Removed SMC, Order Flow, or MCX UI is still present in Flutter source."
             exit 1
           fi
@@ -182,7 +182,7 @@ jobs:
             mapfile -t CODE_FILES < <(unzip -Z1 "$APK" | grep -E '(^classes[0-9]*[.]dex$|^lib/[^/]+/libapp[.]so$)' || true)
             test "${#CODE_FILES[@]}" -gt 0
             COMPILED_STRINGS=$(for file in "${CODE_FILES[@]}"; do unzip -p "$APK" "$file" | strings; done)
-            if printf '%s\n' "$COMPILED_STRINGS" | grep -Ei 'SMC Pro Chart|SMC Chart|Order Flow & Footprint|FOOTPRINT CHART|MCX Commodities|MCX Commodity Exchange|CRUDEOIL|NATURALGAS|CommodityPage' >/dev/null; then
+            if printf '%s\n' "$COMPILED_STRINGS" | grep -Ei 'SMC Pro Chart|SMC Chart|Smart Money Concepts Chart|Order Flow & Footprint|Order Flow Chart|Footprint Chart|FOOTPRINT CHART|MCX|Commodities|CRUDEOIL|NATURALGAS|CommodityPage' >/dev/null; then
               echo "Removed SMC, Order Flow, or MCX UI found in $APK"
               exit 1
             fi
