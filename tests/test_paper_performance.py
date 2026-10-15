@@ -1,6 +1,9 @@
+import os
+import tempfile
 import unittest
+from unittest.mock import patch
 
-from backend.app.main import _paper_performance_summary
+from backend.app.main import _paper_performance_summary, _signal_outcomes_memory, _update_signal_outcomes
 
 
 class PaperPerformanceSummaryTests(unittest.TestCase):
