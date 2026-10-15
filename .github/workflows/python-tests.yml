@@ -2,7 +2,7 @@ name: AI-TRADING CI
 
 on:
   push:
-    branches: [main, integrate-trading-research-v2-20261010, fix/commodity-footprint-ai-provider-ui, fix/enable-python-ci-and-audit]
+    branches: [main, integrate-trading-research-v2-20261010, fix/commodity-footprint-ai-provider-ui, fix/enable-python-ci-and-audit, fix/python-ci-discover-existing-tests]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
         run: npm run build
 
   python-tests:
-    name: Python research-engine tests
+    name: Python repository regression tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -46,21 +46,21 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Detect Python test suite
+      - name: Detect Python regression tests
         id: detect
         shell: bash
         run: |
-          if [ -d tests ] && find tests -maxdepth 1 -type f \( -name 'test_*.py' -o -name '*_test.py' \) -print -quit | grep -q .; then
+          if [ -d .github/scripts ] && find .github/scripts -maxdepth 1 -type f -name 'test*.py' -print -quit | grep -q .; then
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
             echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "No root-level Python unit-test files were found."
+            echo "No .github/scripts Python regression tests were found."
           fi
-      - name: Run Python unit tests
+      - name: Run Python regression tests
         if: steps.detect.outputs.available == 'true'
-        run: python -m unittest discover -s tests -p 'test*.py' -v
+        run: python -m unittest discover -s .github/scripts -p 'test*.py' -v
       - name: Fail if expected Python tests are missing
         if: steps.detect.outputs.available != 'true'
         run: |
-          echo "::error::Python tests were not discovered; refusing to report the backend/research test job as a successful skip."
+          echo "::error::Python regression tests were not discovered; refusing to report a successful skip."
           exit 1
