@@ -9,7 +9,6 @@ import 'config.dart';
 import 'trade_engine_page.dart';
 import 'broker_home_prototype_page.dart';
 import 'quant_engine_lab_page.dart';
-import 'order_flow_page.dart';
 import 'strategy_library_page.dart';
 import 'flow_monitor_page.dart';
 import 'risk_calculator_page.dart';
@@ -17,11 +16,10 @@ import 'nvidia_signal_review.dart';
 import 'background_monitor.dart';
 import 'daily_ai_memory.dart';
 import 'daily_ai_memory_page.dart';
-import 'smc_chart_page.dart';
 import 'market_intelligence_page.dart';
 import 'performance_page.dart';
 
-const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Market Diagnostics','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','Market Intelligence','Order Flow','Quant Engine Lab','Strategy Library','Flow Monitor','AI Memory','SMC Pro Chart','Performance'];
+const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Backtesting','API','AI Access','Data Health','API & Railway','Market Diagnostics','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','Market Intelligence','Quant Engine Lab','Strategy Library','Flow Monitor','AI Memory','Performance'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
 const commodityOptionUnderlyings = ['CRUDEOIL','CRUDEOILM','NATURALGAS','NATGASMINI','GOLD','GOLDM','SILVER','SILVERM','COPPER','ZINC','ALUMINIUM','LEAD','NICKEL'];
 const optionUnderlyings = [...indexes, ...commodityOptionUnderlyings];
@@ -773,7 +771,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         IndicatorsPage(selected:selectedIndex,signal:_signal(selectedIndex),fast:emaFast,slow:emaSlow,onChanged:(f,s){setState((){emaFast=f;emaSlow=s;});refresh();},onIndex:(v)=>setState(()=>selectedIndex=v)),
         SignalPage(backendUrl:backendUrl,liveStatus:liveTrading,index:selectedIndex,signals:signals,signalPerformance:signalPerformance,ai:ai,aiProviders:aiProviderStatus,tradePlans:tradePlans,market:market,onChanged:(v)=>setState(()=>selectedIndex=v)),
         RiskPage(index:selectedIndex,signal:_signal(selectedIndex),plans:tradePlans,market:market,commodities:commodities),
-        CommodityPage(items:commodities),
         BacktestingPage(backendUrl: backendUrl),
         ApiPage(backendUrl:backendUrl,signalBackendUrl:signalBackendUrl,feed:feed,storeDiagnostics:storeDiagnostics,market:market,onSaved:(url){setState(()=>backendUrl=url);refresh();}),
         AiAccessPage(backendUrl:backendUrl),
@@ -815,7 +812,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           onIndexSelected: (value) => setState(() => selectedIndex = value),
         ),
         MarketIntelligencePage(backendUrl: backendUrl, signalBackendUrl: signalBackendUrl),
-        OrderFlowPage(signalBackendUrl: signalBackendUrl),
         Builder(
           builder: (tabContext) => QuantEngineLabPage(
             backendUrl: backendUrl,
@@ -828,7 +824,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         StrategyLibraryPage(market: market, signals: signals, selectedIndex: selectedIndex),
         FlowMonitorPage(signalBackendUrl: signalBackendUrl),
         const DailyAiMemoryPage(),
-        SmcChartPage(index: selectedIndex, market: _market(selectedIndex), signal: _signal(selectedIndex), ai: ai, onIndexChanged: (value) => setState(() => selectedIndex = value)),
         PerformancePage(backendUrl: backendUrl, signalBackendUrl: signalBackendUrl),
       ]),
     ),
@@ -843,26 +838,24 @@ IconData _tabIcon(int index) => switch (index) {
   4 => Icons.tune,
   5 => Icons.bolt,
   6 => Icons.shield_outlined,
-  7 => Icons.public,
-  8 => Icons.query_stats,
-  9 => Icons.settings_ethernet,
-  10 => Icons.psychology_alt_outlined,
-  11 => Icons.monitor_heart_outlined,
-  12 => Icons.cloud_outlined,
-  13 => Icons.menu_book_outlined,
-  14 => Icons.account_tree_outlined,
-  15 => Icons.auto_awesome_outlined,
-  16 => Icons.layers_outlined,
-  17 => Icons.account_balance_wallet_outlined,
-  18 => Icons.newspaper_outlined,
-  19 => Icons.swap_vert_circle_outlined,
-  20 => Icons.show_chart,
-  21 => Icons.library_books_outlined,
+  7 => Icons.query_stats,
+  8 => Icons.settings_ethernet,
+  9 => Icons.psychology_alt_outlined,
+  10 => Icons.monitor_heart_outlined,
+  11 => Icons.cloud_outlined,
+  12 => Icons.menu_book_outlined,
+  13 => Icons.account_tree_outlined,
+  14 => Icons.auto_awesome_outlined,
+  15 => Icons.layers_outlined,
+  16 => Icons.account_balance_wallet_outlined,
+  17 => Icons.newspaper_outlined,
+  18 => Icons.show_chart,
+  19 => Icons.library_books_outlined,
+  20 => Icons.layers_outlined,
+  21 => Icons.speed,
   22 => Icons.layers_outlined,
-  23 => Icons.speed,
-  24 => Icons.candlestick_chart,
   _ => Icons.layers_outlined,
-};
+}
 
 class DataHealthPage extends StatelessWidget {
   const DataHealthPage({
