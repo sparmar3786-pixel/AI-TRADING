@@ -433,11 +433,11 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           final chainRows = (chainResponse['option_chain'] as List?) ?? const <dynamic>[];
           if (chainRows.isNotEmpty) {
             final chainIsStale = chainResponse['stale'] == true ||
-          (chainResponse['status'] == 'WAIT' && chainResponse['live'] == false);
-      optionChainsByIndex[selectedIndex] = _markOptionRowsFresh(
-        chainRows,
-        forceStale: chainIsStale,
-      );
+                (chainResponse['status'] == 'WAIT' && chainResponse['live'] == false);
+            optionChainsByIndex[selectedIndex] = _markOptionRowsFresh(
+              chainRows,
+              forceStale: chainIsStale,
+            );
             optionChainError = null;
           } else {
             optionChainError = (chainResponse['reason'] ?? 'Broker returned no option-chain quotes yet.').toString();
@@ -667,7 +667,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       option['stale'] = forceStale || explicitlyStale || !freshTimestamp;
       option['freshness'] = option['stale'] == true ? 'STALE' : 'FRESH';
       option['live'] = !forceStale && !explicitlyStale && freshTimestamp;
-      option['actionable'] = option['live'] == true && option['actionable'] != false;
+      if (option['stale'] == true) option['actionable'] = false;
       return option;
     }).toList();
   }
