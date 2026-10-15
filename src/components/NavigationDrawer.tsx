@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   X, LayoutDashboard, TrendingUp, Table2, BarChart3, Sliders, Zap,
-  ShieldAlert, Activity, Cpu, Wallet, Settings, History, FileSpreadsheet,
+  ShieldAlert, Activity, Cpu, Wallet, Settings, History, FileSpreadsheet, ChartNoAxesCombined,
 } from 'lucide-react';
 import { useTrading } from '../context/TradingContext';
 
@@ -18,6 +18,7 @@ export const NavigationDrawer: React.FC = () => {
     { title: 'MARKET & INSTRUMENTS', items: [
       { id: 'Dashboard', label: 'Dashboard Overview', icon: LayoutDashboard },
       { id: 'Market', label: 'Spot & Market Depth', icon: TrendingUp },
+      { id: 'DAY HL', label: 'DAY HL — Day High / Low', icon: ChartNoAxesCombined },
       { id: 'Option Chain', label: 'Option Chain & Greeks', icon: Table2 },
       { id: 'OI Lab', label: 'OI Lab & PCR Analysis', icon: BarChart3 },
       { id: 'Indicators', label: 'Technical Indicators', icon: Sliders },
