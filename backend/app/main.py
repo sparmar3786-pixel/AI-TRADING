@@ -525,7 +525,13 @@ def _start_market_intelligence_scheduler_on_startup() -> None:
             _load_credentials()
             _load_signal_outcomes()
             _load_paper_trades()
-            logger.info("persistent state migration checked; credential payloads remain encrypted")
+            storage = _storage_diagnostics()
+            logger.info(
+                "persistent state migration status: postgres=%s outcomes=%s paper_trades=%s encrypted_credentials=%s volume_detach_ready=%s",
+                storage.get("postgres_reachable"), storage.get("signal_outcomes_in_postgres"),
+                storage.get("paper_trades_in_postgres"), storage.get("encrypted_credentials_in_postgres"),
+                storage.get("ready_to_detach_volume"),
+            )
         except Exception:
             logger.warning("persistent state migration deferred; volume fallback remains enabled")
     enabled = os.getenv("MARKET_INTELLIGENCE_AUTO_REFRESH", "true").strip().lower()
