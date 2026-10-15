@@ -96,7 +96,7 @@ class _AiChatPageState extends State<AiChatPage> {
       var displayAnswer = answer;
       final rawEvidence = response['search_evidence'];
       final evidence = rawEvidence is List
-          ? rawEvidence.whereType<Map>().toList(growable: false)
+          ? rawEvidence.whereType<Map>().where((source) => !(source['url'] ?? '').toString().toLowerCase().contains('github.com')).toList(growable: false)
           : <Map>[];
       if (evidence.isNotEmpty) {
         final sourceLines = <String>[];
@@ -179,10 +179,10 @@ class _AiChatPageState extends State<AiChatPage> {
                 const SizedBox(height: 12),
                 const Text('Ask Fresh AI', textAlign: TextAlign.center, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
                 const SizedBox(height: 6),
-                const Text('Cloud AI + optional local offline Qwen • Market Q&A', textAlign: TextAlign.center, style: TextStyle(color: Color(0xFF32D583), fontWeight: FontWeight.w700, fontSize: 12)),
+                const Text('Cloud AI • Market Q&A', textAlign: TextAlign.center, style: TextStyle(color: Color(0xFF32D583), fontWeight: FontWeight.w700, fontSize: 12)),
                 const SizedBox(height: 8),
                 const Text(
-                  'Load a local GGUF model for offline inference. When the backend is reachable, local Qwen receives the selected index snapshot, deterministic strategy, cloud AI status and search evidence. Without backend access it must report that live context is unavailable.',
+                  'Ask market questions and validate the selected index using the cloud backend. If the backend is unreachable, live context cannot be confirmed.',
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 20),
