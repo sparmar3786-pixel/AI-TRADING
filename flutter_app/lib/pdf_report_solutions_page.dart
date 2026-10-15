@@ -82,21 +82,6 @@ class PdfReportSolutionsPage extends StatelessWidget {
     '15. 3-Layer Trade Engine — Risk & Validation FAIL / WAIT',
   ];
 
-  static const repositories = <(String, String, String)>[
-    ('Fresh-Apk • current app/backend repository', 'https://github.com/sparmar3786-pixel/Fresh-Apk/tree/fresh-platform-v1', 'Current target branch; contains the app, API client and backend integration.'),
-    ('Angel One SmartAPI Python SDK', 'https://github.com/angel-one/smartapi-python', 'Broker API reference; use backend-side credentials only.'),
-    ('Systematic trading strategies', 'https://github.com/paperswithbacktest/awesome-systematic-trading', 'Strategy research collection.'),
-    ('Algorithmic trading collection', 'https://github.com/joelowj/awesome-algorithmic-trading', 'Algorithmic trading tools and references.'),
-    ('Quant finance resources', 'https://github.com/wilsonfreitas/awesome-quant', 'Quantitative finance libraries and learning.'),
-    ('Deep trading research', 'https://github.com/cbailes/awesome-deep-trading', 'Deep-learning and trading references.'),
-    ('Trading strategy topic', 'https://github.com/topics/trading-strategies', 'Additional strategy repositories.'),
-    ('KLineChart', 'https://github.com/klinecharts/KLineChart', 'Candlestick chart library reference.'),
-    ('TradingView Lightweight Charts', 'https://github.com/tradingview/lightweight-charts', 'Lightweight charting library reference.'),
-    ('Railway FastAPI templates', 'https://github.com/railwayapp-templates/fastapi', 'Deployment template reference.'),
-    ('Railway dashboard', 'https://railway.com/dashboard', 'Inspect deployment status, variables and logs.'),
-    ('FastAPI documentation', 'https://fastapi.tiangolo.com', 'API routing and OpenAPI documentation.'),
-  ];
-
   @override
   Widget build(BuildContext context) => ListView(
     padding: const EdgeInsets.all(12),
@@ -150,7 +135,6 @@ class PdfReportSolutionsPage extends StatelessWidget {
             title: Text(screenshotCaptions[i], style: const TextStyle(fontSize: 12)),
           ),
       ])),
-      const SizedBox(height: 8),
       const SizedBox(height: 8),
       const Text('SAFETY STATUS FROM THE PDF', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
       const Card(child: Column(children: [
