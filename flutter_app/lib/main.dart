@@ -109,7 +109,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           row['strike'] != null && row['option_side'] != null &&
           row['entry'] != null && row['stop_loss'] != null && row['target'] != null &&
           validation['verdict'] == 'PASS' && guards.isEmpty;
-      final storageKey = 'ai_trading_signal_gate_$index';
+      final storageKey = 'trading_signal_gate_$index';
       if (!isCandidate) {
         await prefs.remove(storageKey);
         row['signal_stability'] = <String, dynamic>{'state': 'NOT_ACTIONABLE', 'required_minutes': 10};
@@ -468,22 +468,12 @@ IconData _tabIcon(int index) => switch (index) {
   4 => Icons.tune,
   5 => Icons.bolt,
   6 => Icons.shield_outlined,
-  7 => Icons.public,
-  8 => Icons.query_stats,
-  9 => Icons.settings_ethernet,
-  10 => Icons.psychology_alt_outlined,
-  11 => Icons.monitor_heart_outlined,
-  12 => Icons.cloud_outlined,
-  13 => Icons.menu_book_outlined,
-  14 => Icons.account_tree_outlined,
-  15 => Icons.auto_awesome_outlined,
-  16 => Icons.layers_outlined,
-  17 => Icons.library_books_outlined,
-  18 => Icons.account_balance_wallet_outlined,
-  19 => Icons.picture_as_pdf_outlined,
-  20 => Icons.science_outlined,
-  21 => Icons.library_books_outlined,
-  22 => Icons.chat_bubble_outline,
+  7 => Icons.science_outlined,
+  8 => Icons.settings_ethernet,
+  9 => Icons.monitor_heart_outlined,
+  10 => Icons.cloud_outlined,
+  11 => Icons.account_balance_wallet_outlined,
+  12 => Icons.library_books_outlined,
   _ => Icons.layers_outlined,
 };
 
@@ -543,9 +533,6 @@ class DataHealthPage extends StatelessWidget {
         ),
         ListTile(
           leading: const Icon(Icons.psychology_outlined),
-          title: const Text('AI provider'),
-          subtitle: Text('Configured: ${_diagValue(diagnostics, 'ai', 'configured')} • Model: ${_diagValue(diagnostics, 'ai', 'model')} • Error indexes: ${_diagValue(diagnostics, 'ai', 'error_indexes', fallback: 'none')}'),
-        ),
         if (_diagValue(diagnostics, 'angel_one', 'last_error', fallback: '') != '')
           ListTile(leading: const Icon(Icons.warning_amber), title: const Text('Angel One error'), subtitle: Text(_diagValue(diagnostics, 'angel_one', 'last_error', fallback: ''))),
         if (_diagValue(diagnostics, 'angel_one', 'stream_error', fallback: '') != '')
@@ -1221,8 +1208,8 @@ class SignalPage extends StatelessWidget {
           InfoRow('Validation verdict',(validation['verdict'] ?? 'WAITING').toString()),
           InfoRow('Market direction',(validation['market_direction'] ?? 'WAIT').toString()),
           InfoRow('F&O action',(validation['decision'] ?? 'WAIT').toString()),
-          InfoRow('Market tick age',validation['market_age_seconds'] == null ? '—' : '${validation['market_age_seconds']} sec'),
-          InfoRow('Option quote age',validation['option_age_seconds'] == null ? '—' : '${validation['option_age_seconds']} sec'),
+          InfoRow('Market tick age',validation['market_age_seconds'] == null ? '—' : '${validation['market_age_seconds']} sec'),
+          InfoRow('Option quote age',validation['option_age_seconds'] == null ? '—' : '${validation['option_age_seconds']} sec'),
           InfoRow('Reward / risk',validation['reward_risk']?.toString() ?? '—'),
           if (validationBlocks.isNotEmpty) ...[
             const Divider(),
