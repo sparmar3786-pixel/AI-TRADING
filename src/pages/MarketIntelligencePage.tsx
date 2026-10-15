@@ -238,7 +238,7 @@ export const MarketIntelligencePage: React.FC = () => {
                 </span>
               </div>
               <p className="text-xs text-slate-400 font-mono mt-0.5">
-                {selectedIndex} Confluence • Llama 3.1 Nemotron 70B • 5-Layer Quant Synthesis
+                {selectedIndex} Confluence • NVIDIA Cloud AI • 5-Layer Quant Context
               </p>
             </div>
           </div>
@@ -272,7 +272,7 @@ export const MarketIntelligencePage: React.FC = () => {
             </div>
 
             <p className="text-[11px] text-slate-300 leading-relaxed">
-              NVIDIA NIM API Key (<code className="text-cyan-300 font-mono">nvapi-...</code>) डालने पर सीधे NVIDIA के 70B पैरामीटर वाले Nemotron मॉडल से लाइव मार्केट एनालिसिस मिलता है। (की नहीं है तो भी हमारा बिल्ट-इन क्वांट इंजन 100% काम करेगा!)
+              NVIDIA key is stored in this browser for direct requests. The key check verifies model-catalog access only; the UI reports AI as connected only after a real response. Without a direct key, server-side NVIDIA/OpenRouter inference is attempted; no synthetic AI answer is substituted.
             </p>
 
             <div className="space-y-2">
