@@ -26,6 +26,7 @@ import { nvidiaService, SUPPORTED_NVIDIA_MODELS } from '../services/nvidiaServic
 
 export const SettingsPage: React.FC = () => {
   const { refresh, resetPaperAccount, paperBalance } = useTrading();
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   // Active section tab
   const [activeSection, setActiveSection] = useState<'keys' | 'trading' | 'signals' | 'system'>('keys');
