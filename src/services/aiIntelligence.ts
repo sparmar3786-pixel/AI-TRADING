@@ -1,5 +1,6 @@
 import { IndexSymbol, MarketRow, SignalData } from '../types/market';
 import { apiService } from './api';
+import { nvidiaService } from './nvidiaService';
 import { stripRepositoryLinks } from './repositoryLinkFilter';
 
 export interface AIResponse {
@@ -78,9 +79,12 @@ export async function generateMarketIntelligenceAnswer(params: {
     throw new Error(String(body.error || body.detail ||
       'Railway responded, but did not confirm a real NVIDIA model inference (answer/provider/model missing).'));
   }
+  const responseProvider = String(body.provider || '');
+  const responseModel = String(body.model);
+  nvidiaService.recordInferenceResult(responseProvider, responseModel);
   return {
     answer: stripRepositoryLinks(answer),
-    provider: String(body.provider || 'NVIDIA NIM'),
-    model: String(body.model),
+    provider: responseProvider || 'Unknown provider',
+    model: responseModel,
   };
 }
