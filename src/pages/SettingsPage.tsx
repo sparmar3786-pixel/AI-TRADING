@@ -20,9 +20,7 @@ import {
   RotateCcw,
   Wallet,
   Zap,
-  BrainCircuit,
 } from 'lucide-react';
-import { nvidiaService, SUPPORTED_NVIDIA_MODELS } from '../services/nvidiaService';
 
 export const SettingsPage: React.FC = () => {
   const { refresh, resetPaperAccount, paperBalance } = useTrading();
@@ -55,36 +53,6 @@ export const SettingsPage: React.FC = () => {
   const [savedSuccess, setSavedSuccess] = useState<boolean>(false);
   const credentialNotice = 'Provider secrets must be configured on the secured backend; this browser does not generate or store API keys.';
   const deviceId = apiService.getDeviceId();
-
-  // NVIDIA NIM state
-  const [nvidiaKey, setNvidiaKey] = useState<string>(() => nvidiaService.getNvidiaApiKey());
-  const [nvidiaModel, setNvidiaModel] = useState<string>(() => nvidiaService.getSelectedModel());
-  const [nvidiaTesting, setNvidiaTesting] = useState<boolean>(false);
-  const [nvidiaStatus, setNvidiaStatus] = useState<{ text: string; ok: boolean } | null>(null);
-  const [nvidiaBackendStatus, setNvidiaBackendStatus] = useState<{ configured: boolean; active: boolean }>({ configured: false, active: false });
-
-  useEffect(() => {
-    void nvidiaService.refreshNvidiaStatus().then(setNvidiaBackendStatus);
-  }, []);
-
-  const handleTestAndSaveNvidiaKey = async () => {
-    if (!nvidiaKey.trim()) {
-      nvidiaService.setNvidiaApiKey('');
-      setNvidiaStatus({ text: 'Direct NVIDIA key cleared. Cloud AI requires a successful server-side inference.', ok: true });
-      return;
-    }
-    setNvidiaTesting(true);
-    setNvidiaStatus(null);
-    const res = await nvidiaService.validateNvidiaKey(nvidiaKey);
-    setNvidiaTesting(false);
-    if (res.valid) {
-      nvidiaService.setNvidiaApiKey(nvidiaKey);
-      nvidiaService.setSelectedModel(nvidiaModel);
-      setNvidiaStatus({ text: 'NVIDIA key authenticated at the model catalog. Actual inference is not yet verified.', ok: true });
-    } else {
-      setNvidiaStatus({ text: `❌ ${res.message}`, ok: false });
-    }
-  };
 
   // Save all settings
   const handleSave = (e?: React.FormEvent) => {
@@ -267,87 +235,6 @@ export const SettingsPage: React.FC = () => {
             <p className="text-[11px] text-slate-400 leading-relaxed">
               ऐप में सभी डेटा, टेक्निकल इंडिकेटर्स, प्राइस एक्शन और 10-Minute Signal Gate पूरी तरह ऑटोमैटिक रूप से काम कर रहे हैं।
             </p>
-          </div>
-
-          {/* NVIDIA NIM AI API Card */}
-          <div className="card-base p-4 border border-cyan-500/30 bg-[#101726] rounded-xl space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2 text-cyan-400">
-                <BrainCircuit className="w-4 h-4" />
-                <span className="text-xs font-bold uppercase font-mono">
-                  NVIDIA NIM AI API (build.nvidia.com)
-                </span>
-              </div>
-              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold font-mono border flex items-center gap-1 ${
-                nvidiaBackendStatus.active
-                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                  : nvidiaBackendStatus.configured
-                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                    : 'bg-rose-500/15 text-rose-300 border-rose-500/30'
-              }`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${nvidiaBackendStatus.active ? "bg-emerald-400" : nvidiaBackendStatus.configured ? "bg-amber-400" : "bg-rose-400"}`}></span>
-                {nvidiaBackendStatus.active ? 'NVIDIA INFERENCE ACTIVE' : nvidiaBackendStatus.configured ? 'NVIDIA CONFIGURED • INFERENCE UNVERIFIED' : 'NVIDIA CLOUD NOT VERIFIED'}
-              </span>
-            </div>
-
-            <p className="text-[11px] text-slate-300 leading-relaxed">
-              NVIDIA Cloud AI is not marked active just because a key exists. A key can be stored here for direct requests, or configured securely as NVIDIA_API_KEY in Railway. The model-catalog check verifies key access only; a successful chat response is required to verify inference.
-            </p>
-
-            <div className="space-y-2">
-              <div className="flex gap-2">
-                <input
-                  type="password"
-                  value={nvidiaKey}
-                  onChange={e => setNvidiaKey(e.target.value)}
-                  placeholder="nvapi-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                  className="flex-1 p-2.5 rounded-xl bg-[#070B12] border border-[#1C2740] text-cyan-400 font-mono text-xs focus:outline-none focus:border-cyan-400"
-                />
-                <button
-                  type="button"
-                  onClick={handleTestAndSaveNvidiaKey}
-                  disabled={nvidiaTesting}
-                  className="px-3.5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-[#070B12] font-black text-xs font-mono flex items-center justify-center gap-1.5 disabled:opacity-50"
-                >
-                  {nvidiaTesting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-                  {nvidiaTesting ? 'Checking...' : 'Test & Save'}
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <select
-                  value={nvidiaModel}
-                  onChange={e => {
-                    setNvidiaModel(e.target.value);
-                    nvidiaService.setSelectedModel(e.target.value);
-                  }}
-                  className="p-1.5 rounded-lg bg-[#070B12] border border-[#1C2740] text-slate-200 text-[11px] font-mono focus:outline-none focus:border-cyan-400"
-                >
-                  {SUPPORTED_NVIDIA_MODELS.map(m => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
-                </select>
-
-                <a
-                  href="https://build.nvidia.com"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-[11px] text-cyan-400 hover:underline flex items-center gap-1 font-mono"
-                >
-                  Get Key <ExternalLink className="w-3 h-3" />
-                </a>
-              </div>
-
-              {nvidiaStatus && (
-                <div className={`p-2 rounded-lg text-xs font-mono ${
-                  nvidiaStatus.ok ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-300 border border-rose-500/30'
-                }`}>
-                  {nvidiaStatus.text}
-                </div>
-              )}
-            </div>
           </div>
 
           {/* Guide: How Angel One Key Works */}
