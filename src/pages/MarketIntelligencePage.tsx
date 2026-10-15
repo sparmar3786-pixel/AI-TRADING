@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTrading } from '../context/TradingContext';
 import { apiService } from '../services/api';
+import { sanitizeRepositoryLinks } from '../services/repositoryLinkFilter';
 import { generateMarketIntelligenceAnswer } from '../services/aiIntelligence';
 import {
   nvidiaService,
@@ -73,60 +74,52 @@ export const MarketIntelligencePage: React.FC = () => {
 
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 4000);
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-        const response = await fetch(`${backendUrl}/v1/market-intelligence`, {
-          headers: {
-            Accept: 'application/json',
-            'X-Device-Id': apiService.getDeviceId(),
-          },
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
+        let response: Response;
+        try {
+          response = await fetch(`${backendUrl}/v1/market-intelligence`, {
+            headers: {
+              Accept: 'application/json',
+              'X-Device-Id': apiService.getDeviceId(),
+            },
+            signal: controller.signal,
+            cache: 'no-store',
+          });
+        } finally {
+          clearTimeout(timeoutId);
+        }
 
-        if (response.ok) {
-          const body = await response.json();
-          if (body && body.summary && typeof body.summary === 'string' && body.summary.trim()) {
-            setSummary(body.summary);
-            setSummaryProvider(body.summary_provider || 'NVIDIA NIM');
-            setSummaryModel(body.summary_model || 'nvidia/llama-3.1-nemotron-70b-instruct');
-            setUpdatedAt(body.updated_at || new Date().toISOString());
-            setNextRefreshAt(body.next_refresh_at || new Date(Date.now() + 15 * 60000).toISOString());
-            if (Array.isArray(body.articles) && body.articles.length > 0) {
-              setArticles(body.articles);
-            }
-            backendLoaded = true;
-          }
+        if (!response.ok) {
+          throw new Error(`Market intelligence API returned HTTP ${response.status}.`);
+        }
+        const body = sanitizeRepositoryLinks(await response.json()) as any;
+        if (body && typeof body.summary === 'string' && body.summary.trim() &&
+            body.summary_provider && body.summary_model && body.updated_at) {
+          setSummary(body.summary);
+          setSummaryProvider(String(body.summary_provider));
+          setSummaryModel(String(body.summary_model));
+          setUpdatedAt(String(body.updated_at));
+          setNextRefreshAt(body.next_refresh_at || '');
+          setArticles(Array.isArray(body.articles) ? body.articles : []);
+          backendLoaded = true;
+        } else {
+          throw new Error('Backend has no verified market-intelligence result yet; refresh after the cloud inference finishes.');
         }
       } catch (_) {
         // Backend offline or rate limited
       }
 
-      // 2. If backend brief is not available or failed, generate high-fidelity brief
+      // Never replace a failed cloud request with synthetic prices, fabricated news,
+      // or a template falsely labelled NVIDIA inference.
       if (!backendLoaded) {
-        const ltp = currentMarket?.ltp || 24865;
-        const trend = currentMarket?.trend || 'BULLISH';
-        const pcr = currentMarket?.pcr || 1.12;
-        const maxPain = currentMarket?.max_pain || ltp;
-        const decision = currentSignal?.decision || 'CALL BUY';
-        const confidence = currentSignal?.confidence || 85;
-
-        const brief = nvidiaService.generateBrief(
-          selectedIndex,
-          ltp,
-          trend,
-          pcr,
-          maxPain,
-          decision,
-          confidence
-        );
-
-        setSummary(brief.summary);
-        setSummaryProvider(brief.provider);
-        setSummaryModel(brief.model);
-        setUpdatedAt(brief.updated_at);
-        setNextRefreshAt(brief.next_refresh_at);
-        setArticles(brief.articles);
+        setSummary('');
+        setSummaryProvider('');
+        setSummaryModel('');
+        setUpdatedAt('');
+        setNextRefreshAt('');
+        setArticles([]);
+        throw new Error('Cloud market intelligence is not verified. Check the backend CORS/AI provider status and retry.');
       }
 
       setError(null);
@@ -135,7 +128,7 @@ export const MarketIntelligencePage: React.FC = () => {
     } finally {
       setRefreshing(false);
     }
-  }, [selectedIndex, currentMarket, currentSignal]);
+  }, [selectedIndex]);
 
   // Initial load and periodic refresh
   useEffect(() => {
@@ -150,7 +143,7 @@ export const MarketIntelligencePage: React.FC = () => {
   const handleTestAndSaveKey = async () => {
     if (!nvidiaKey.trim()) {
       nvidiaService.setNvidiaApiKey('');
-      setKeyStatusMessage({ text: 'NVIDIA API Key cleared. Using built-in AI quant engine.', ok: true });
+      setKeyStatusMessage({ text: 'Direct NVIDIA key removed. Cloud AI status will depend on a verified server response.', ok: true });
       void loadIntelligence(true);
       return;
     }
@@ -164,7 +157,7 @@ export const MarketIntelligencePage: React.FC = () => {
     if (result.valid) {
       nvidiaService.setNvidiaApiKey(nvidiaKey);
       nvidiaService.setSelectedModel(selectedModel);
-      setKeyStatusMessage({ text: '✅ NVIDIA NIM API Key connected and verified successfully!', ok: true });
+      setKeyStatusMessage({ text: 'NVIDIA key authenticated at the models endpoint. Actual chat inference is verified only after a successful AI response.', ok: true });
       void loadIntelligence(true);
       setTimeout(() => setShowConfig(false), 2000);
     } else {
@@ -172,7 +165,7 @@ export const MarketIntelligencePage: React.FC = () => {
     }
   };
 
-  // Submit Question to AI (NVIDIA NIM / Gemini / Quant)
+  // Submit Question to NVIDIA cloud AI; backend OpenRouter fallback is server-side.
   const handleAskAI = async (e?: React.FormEvent, presetPrompt?: string) => {
     if (e) e.preventDefault();
     const prompt = (presetPrompt || question).trim();
@@ -236,16 +229,16 @@ export const MarketIntelligencePage: React.FC = () => {
                   NVIDIA AI Market Intelligence
                 </h2>
                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold font-mono border flex items-center gap-1 ${
-                  isDirectKey
+                  summaryProvider && updatedAt && !error
                     ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                    : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                    : 'bg-rose-500/15 text-rose-300 border-rose-500/30'
                 }`}>
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                  {isDirectKey ? 'NVIDIA NIM DIRECT KEY ACTIVE' : 'NVIDIA NIM ACTIVE (NEMOTRON 70B)'}
+                  <span className={`w-1.5 h-1.5 rounded-full ${summaryProvider && updatedAt && !error ? 'bg-emerald-400' : 'bg-rose-400'}`}></span>
+                  {summaryProvider && updatedAt && !error ? `INFERENCE RESULT: ${summaryProvider}` : isDirectKey ? 'NVIDIA KEY CONFIGURED • NOT VERIFIED' : 'CLOUD AI NOT VERIFIED'}
                 </span>
               </div>
               <p className="text-xs text-slate-400 font-mono mt-0.5">
-                {selectedIndex} Confluence • Llama 3.1 Nemotron 70B • 5-Layer Quant Synthesis
+                {selectedIndex} Confluence • NVIDIA Cloud AI • 5-Layer Quant Context
               </p>
             </div>
           </div>
@@ -279,7 +272,7 @@ export const MarketIntelligencePage: React.FC = () => {
             </div>
 
             <p className="text-[11px] text-slate-300 leading-relaxed">
-              NVIDIA NIM API Key (<code className="text-cyan-300 font-mono">nvapi-...</code>) डालने पर सीधे NVIDIA के 70B पैरामीटर वाले Nemotron मॉडल से लाइव मार्केट एनालिसिस मिलता है। (की नहीं है तो भी हमारा बिल्ट-इन क्वांट इंजन 100% काम करेगा!)
+              NVIDIA key is stored in this browser for direct requests. The key check verifies model-catalog access only; the UI reports AI as connected only after a real response. Without a direct key, server-side NVIDIA/OpenRouter inference is attempted; no synthetic AI answer is substituted.
             </p>
 
             <div className="space-y-2">
@@ -358,25 +351,25 @@ export const MarketIntelligencePage: React.FC = () => {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] font-mono">
           <div className="p-2.5 rounded-xl bg-[#070B12] border border-[#1C2740]">
             <div className="text-slate-500">AI ENGINE</div>
-            <div className="text-cyan-400 font-bold mt-1 truncate">{summaryProvider || 'NVIDIA NIM'}</div>
+            <div className="text-cyan-400 font-bold mt-1 truncate">{summaryProvider || 'NOT VERIFIED'}</div>
           </div>
           <div className="p-2.5 rounded-xl bg-[#070B12] border border-[#1C2740]">
             <div className="text-slate-500">ACTIVE MODEL</div>
-            <div className="text-white font-bold mt-1 truncate">{summaryModel || 'Nemotron-70B'}</div>
+            <div className="text-white font-bold mt-1 truncate">{summaryModel || 'NOT VERIFIED'}</div>
           </div>
           <div className="p-2.5 rounded-xl bg-[#070B12] border border-[#1C2740]">
             <div className="text-slate-500">LAST INFERENCE</div>
-            <div className="text-white font-bold mt-1">{updatedAt ? new Date(updatedAt).toLocaleTimeString('en-IN') : 'Live Now'}</div>
+            <div className="text-white font-bold mt-1">{updatedAt ? new Date(updatedAt).toLocaleTimeString('en-IN') : 'No inference yet'}</div>
           </div>
           <div className="p-2.5 rounded-xl bg-[#070B12] border border-[#1C2740]">
             <div className="text-slate-500">{selectedIndex} SPOT</div>
-            <div className="text-emerald-300 font-bold mt-1">₹{(currentMarket?.ltp || 24865).toLocaleString('en-IN')}</div>
+            <div className="text-emerald-300 font-bold mt-1">{typeof currentMarket?.ltp === 'number' ? `₹${currentMarket.ltp.toLocaleString('en-IN')}` : 'Unavailable'}</div>
           </div>
         </div>
 
         {/* Brief Text */}
         <div className="p-3.5 rounded-xl bg-[#070B12] border border-[#1C2740] text-xs text-slate-200 leading-relaxed whitespace-pre-wrap font-sans">
-          {summary || 'Generating real-time market intelligence brief...'}
+          {summary || error || 'Waiting for a verified cloud inference result...'}
         </div>
       </div>
 
@@ -387,8 +380,8 @@ export const MarketIntelligencePage: React.FC = () => {
             <Newspaper className="w-4 h-4 text-cyan-400" />
             <span>REAL-TIME MARKET CATALYSTS & NEWS ({articles.length})</span>
           </div>
-          <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 text-[10px] font-bold font-mono">
-            VERIFIED EVIDENCE
+          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold font-mono ${articles.length ? 'bg-emerald-500/10 text-emerald-300' : 'bg-rose-500/10 text-rose-300'}`}>
+            {articles.length ? 'BACKEND EVIDENCE' : 'NO VERIFIED EVIDENCE'}
           </span>
         </div>
 
@@ -437,7 +430,7 @@ export const MarketIntelligencePage: React.FC = () => {
             </div>
           </div>
           <span className="text-[10px] text-cyan-400 font-mono font-semibold">
-            {isDirectKey ? 'NVIDIA Nemotron 70B (Direct Key)' : 'NVIDIA Nemotron 70B (Active)'}
+            {isDirectKey ? 'NVIDIA direct key • not verified' : 'NVIDIA cloud • not verified'}
           </span>
         </div>
 

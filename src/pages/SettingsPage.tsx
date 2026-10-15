@@ -65,7 +65,7 @@ export const SettingsPage: React.FC = () => {
   const handleTestAndSaveNvidiaKey = async () => {
     if (!nvidiaKey.trim()) {
       nvidiaService.setNvidiaApiKey('');
-      setNvidiaStatus({ text: 'NVIDIA API Key cleared. AI section will use Built-in Quant Engine.', ok: true });
+      setNvidiaStatus({ text: 'Direct NVIDIA key cleared. Cloud AI requires a successful server-side inference.', ok: true });
       return;
     }
     setNvidiaTesting(true);
@@ -75,7 +75,7 @@ export const SettingsPage: React.FC = () => {
     if (res.valid) {
       nvidiaService.setNvidiaApiKey(nvidiaKey);
       nvidiaService.setSelectedModel(nvidiaModel);
-      setNvidiaStatus({ text: '✅ NVIDIA NIM API Key connected and verified successfully!', ok: true });
+      setNvidiaStatus({ text: 'NVIDIA key authenticated at the model catalog. Actual inference is not yet verified.', ok: true });
     } else {
       setNvidiaStatus({ text: `❌ ${res.message}`, ok: false });
     }
@@ -276,16 +276,16 @@ export const SettingsPage: React.FC = () => {
               </div>
               <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold font-mono border flex items-center gap-1 ${
                 nvidiaService.isNvidiaConfigured()
-                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                  : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                  : 'bg-rose-500/15 text-rose-300 border-rose-500/30'
               }`}>
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                {nvidiaService.isNvidiaConfigured() ? 'NVIDIA NIM DIRECT KEY' : 'NVIDIA NIM ACTIVE (70B)'}
+                <span className={`w-1.5 h-1.5 rounded-full ${nvidiaService.isNvidiaConfigured() ? "bg-amber-400" : "bg-rose-400"}`}></span>
+                {nvidiaService.isNvidiaConfigured() ? 'NVIDIA KEY CONFIGURED • NOT VERIFIED' : 'NVIDIA CLOUD NOT VERIFIED'}
               </span>
             </div>
 
             <p className="text-[11px] text-slate-300 leading-relaxed">
-              NVIDIA AI Market Intelligence (Nemotron 70B) सीधे एक्टिव है। यदि आपके पास पर्सनल NVIDIA API Key (<code className="text-cyan-300 font-mono">nvapi-...</code>) है, तो यहाँ सेव करें अथवा अपने Railway प्रोजेक्ट में <code className="text-cyan-300 font-mono">NVIDIA_API_KEY</code> वेरिएबल जोड़ें।
+              NVIDIA Cloud AI is not marked active just because a key exists. A key can be stored here for direct requests, or configured securely as NVIDIA_API_KEY in Railway. The model-catalog check verifies key access only; a successful chat response is required to verify inference.
             </p>
 
             <div className="space-y-2">

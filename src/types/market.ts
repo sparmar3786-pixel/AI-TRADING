@@ -123,14 +123,14 @@ export interface PaperTrade {
 
 export interface SystemDiagnostics {
   backend_worker: {
-    cycle_age_seconds: number;
+    cycle_age_seconds: number | null;
     cycle_fresh: boolean;
-    uptime_hours: number;
+    uptime_hours: number | null;
   };
   angel_one: {
     authenticated: boolean;
     stream_open: boolean;
-    last_tick_age_seconds: number;
+    last_tick_age_seconds: number | null;
     client_code: string;
   };
   market_data: {

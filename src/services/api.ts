@@ -7,6 +7,7 @@ import {
   TechnicalIndicators,
   QuantLayerResult,
 } from '../types/market';
+import { sanitizeRepositoryLinks } from './repositoryLinkFilter';
 
 export const DEFAULT_SIGNAL_BACKEND = 'https://ai-trading-signals-api-production.up.railway.app';
 export const DEFAULT_LEGACY_BACKEND = 'https://nse-algo-backend-final-production.up.railway.app';
@@ -211,7 +212,7 @@ class ApiService {
       clearTimeout(timeoutId);
 
       if (resp.ok) {
-        const data = await resp.json();
+        const data = sanitizeRepositoryLinks(await resp.json()) as any;
         const rows = data.market && typeof data.market === 'object'
           ? Object.values(data.market) as MarketRow[]
           : [];
@@ -232,18 +233,29 @@ class ApiService {
           };
         }
       }
-    } catch (e: any) {
-      // Railway backend is cold or sleeping, use local high-fidelity generator
+    } catch {
+      // Never describe locally generated preview values as live market data.
+      const fallbackMarket = this.generateFallbackMarket();
+      const safeMarket = Object.fromEntries(
+        Object.entries(fallbackMarket).map(([key, row]) => [key, { ...row, live: false }]),
+      ) as Record<string, MarketRow>;
+      return {
+        signals: this.generateFallbackSignals(safeMarket),
+        market: safeMarket,
+        isLive: false,
+        error: 'Live backend unavailable. Display values are offline preview only; all trade signals are WAIT.',
+      };
     }
 
     const fallbackMarket = this.generateFallbackMarket();
-    const rawFallbackSignals = this.generateFallbackSignals(fallbackMarket);
-    const gatedFallbackSignals = this.applyTenMinuteSignalGate(rawFallbackSignals);
-
+    const safeMarket = Object.fromEntries(
+      Object.entries(fallbackMarket).map(([key, row]) => [key, { ...row, live: false }]),
+    ) as Record<string, MarketRow>;
     return {
-      signals: gatedFallbackSignals,
-      market: fallbackMarket,
-      isLive: true,
+      signals: this.generateFallbackSignals(safeMarket),
+      market: safeMarket,
+      isLive: false,
+      error: 'Live backend returned no fresh exchange-timestamped market snapshot. Trade signals are WAIT.',
     };
   }
 
@@ -333,84 +345,27 @@ class ApiService {
   }
 
   public generateFallbackSignals(market: Record<string, MarketRow>): Record<string, SignalData> {
-    const signals: Record<string, SignalData> = {};
-
-    Object.entries(market).forEach(([key, row]) => {
-      const cfg = INDEX_CONFIG[key as IndexSymbol];
-      const strikeStep = cfg.strikeStep;
-      const atmStrike = Math.round(row.ltp / strikeStep) * strikeStep;
-
-      if (key === 'NIFTY') {
-        const targetStrike = atmStrike + strikeStep;
-        signals[key] = {
-          index: key,
-          decision: 'CALL BUY',
-          candidate_decision: 'CALL BUY',
-          strike: targetStrike,
-          option_side: 'CE',
-          entry: 142.50,
-          stop_loss: 112.00,
-          target: 205.00,
-          risk_reward: '1 : 2.05',
-          confidence: 88,
-          regime: 'TRENDING_BULLISH',
-          guards: [],
-          live_validation: {
-            verdict: 'PASS',
-            decision: 'CALL BUY',
-            blocks: [],
-            reasons: ['EMA 8 > 13 > 21 confluence confirmed', 'Supertrend bullish green', 'PCR > 1.15 strong put support'],
-          },
-          reasons: ['5-Layer Quant Engine confluence 88%', 'Support breakout confirmed above 24,820', 'Open Interest unwinding on Calls'],
-          timestamp: new Date().toISOString(),
-          data_fresh: true,
-        };
-      } else if (key === 'BANKNIFTY') {
-        const targetStrike = atmStrike - strikeStep;
-        signals[key] = {
-          index: key,
-          decision: 'PUT BUY',
-          candidate_decision: 'PUT BUY',
-          strike: targetStrike,
-          option_side: 'PE',
-          entry: 285.00,
-          stop_loss: 235.00,
-          target: 395.00,
-          risk_reward: '1 : 2.20',
-          confidence: 82,
-          regime: 'BREAKDOWN_BEARISH',
-          guards: [],
-          live_validation: {
-            verdict: 'PASS',
-            decision: 'PUT BUY',
-            blocks: [],
-            reasons: ['Breakdown candle confirmed on 5-minute interval', 'Heavy Call OI addition at 51,500'],
-          },
-          reasons: ['Key resistance rejection at 51,550', 'VWAP breakdown with volume surge'],
-          timestamp: new Date().toISOString(),
-          data_fresh: true,
-        };
-      } else {
-        signals[key] = {
-          index: key,
+    // Offline preview data must never create a synthetic CALL/PUT recommendation.
+    const generatedAt = new Date().toISOString();
+    return Object.fromEntries(
+      Object.keys(market).map(key => [key, {
+        index: key,
+        decision: 'WAIT',
+        candidate_decision: 'WAIT',
+        regime: 'OFFLINE_UNVERIFIED',
+        confidence: 0,
+        guards: ['LIVE_BACKEND_UNAVAILABLE', 'MARKET_DATA_NOT_VERIFIED'],
+        live_validation: {
+          verdict: 'WARN',
           decision: 'WAIT',
-          candidate_decision: 'WAIT',
-          regime: 'RANGE_BOUND',
-          confidence: 50,
-          guards: ['ADX < 20 Sideways Market', 'Spread > 2.5 pts'],
-          live_validation: {
-            verdict: 'WARN',
-            decision: 'WAIT',
-            blocks: ['Market in tight consolidation range - waiting for range breakout'],
-          },
-          reasons: ['No high probability 5-layer quant confluence currently active'],
-          timestamp: new Date().toISOString(),
-          data_fresh: true,
-        };
-      }
-    });
-
-    return signals;
+          blocks: ['Live market data and cloud validation are unavailable; no trade is actionable.'],
+          reasons: ['Offline preview values are not exchange quotes.'],
+        },
+        reasons: ['Backend unavailable or snapshot stale. Reconnect before reviewing any trade.'],
+        timestamp: generatedAt,
+        data_fresh: false,
+      } as SignalData]),
+    );
   }
 
   public getTechnicalIndicators(ltp: number): TechnicalIndicators {
@@ -490,32 +445,32 @@ class ApiService {
       const resp = await fetch(`${this.signalBackendUrl}/v1/system/diagnostics`, {
         headers: { 'X-Device-Id': this.deviceId },
       });
-      if (resp.ok) return await resp.json();
+      if (resp.ok) return sanitizeRepositoryLinks(await resp.json()) as SystemDiagnostics;
     } catch (_) {}
 
     return {
       backend_worker: {
-        cycle_age_seconds: 3,
-        cycle_fresh: true,
-        uptime_hours: 148.5,
+        cycle_age_seconds: null,
+        cycle_fresh: false,
+        uptime_hours: null,
       },
       angel_one: {
-        authenticated: true,
-        stream_open: true,
-        last_tick_age_seconds: 1,
-        client_code: 'P584920 (Connected)',
+        authenticated: false,
+        stream_open: false,
+        last_tick_age_seconds: null,
+        client_code: 'Not verified',
       },
       market_data: {
-        snapshot_count: 8640,
-        fresh_snapshot_count: 8640,
-        live_snapshot_count: 8632,
-        ticks_per_second: 38,
+        snapshot_count: 0,
+        fresh_snapshot_count: 0,
+        live_snapshot_count: 0,
+        ticks_per_second: 0,
       },
       ai_provider: {
-        configured: true,
-        nvidia_status: 'online',
-        openrouter_status: 'standby',
-        model: 'nvidia/llama-3.1-nemotron-70b-instruct',
+        configured: false,
+        nvidia_status: 'unavailable',
+        openrouter_status: 'unavailable',
+        model: 'unavailable',
       },
     };
   }
