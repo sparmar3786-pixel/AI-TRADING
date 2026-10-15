@@ -69,7 +69,7 @@ class NvidiaService {
 
   public getEngineStatusLabel(): { label: string; isDirectKey: boolean } {
     if (this.isNvidiaConfigured()) {
-      return { label: 'NVIDIA NIM DIRECT KEY ACTIVE', isDirectKey: true };
+      return { label: 'NVIDIA KEY CONFIGURED • NOT VERIFIED', isDirectKey: true };
     }
     return { label: 'NVIDIA CLOUD NOT VERIFIED', isDirectKey: false };
   }
