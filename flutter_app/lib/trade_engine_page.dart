@@ -68,7 +68,6 @@ class _TradeEnginePageState extends State<TradeEnginePage> {
     final checks = _map(validation['checks']);
     final quant = _map(s['quant_engine'] ?? s['five_layer_engine']);
     final quantLayers = _map(quant['layers']);
-    final orderFlow = _map(quantLayers['order_flow'] ?? s['order_flow']);
     final trendLayer = _map(quantLayers['trend_sentiment'] ?? s['trend_sentiment']);
     final optionLayer = _map(quantLayers['option_selection'] ?? s['option_validation']);
     final riskLayer = _map(quantLayers['risk_levels'] ?? s['risk_validation']);
@@ -219,7 +218,7 @@ class _TradeEnginePageState extends State<TradeEnginePage> {
           ),
         ),
         const SizedBox(height: 8),
-        _layerHeader('04', 'OPTION CHAIN & ORDER FLOW', 'Strike liquidity, bid/ask spread, OI and flow • Layer 4', (optionLayer['pass'] == true && orderFlow['pass'] == true) ? 'PASS' : 'DATA REQUIRED', (optionLayer['pass'] == true && orderFlow['pass'] == true) ? Colors.greenAccent : Colors.orangeAccent),
+        _layerHeader('04', 'OPTION CHAIN & LIQUIDITY', 'Strike liquidity, bid/ask spread and open interest • Layer 4', optionLayer['pass'] == true ? 'PASS' : 'DATA REQUIRED', optionLayer['pass'] == true ? Colors.greenAccent : Colors.orangeAccent),
         Card(
           child: Padding(
             padding: const EdgeInsets.all(14),
@@ -230,8 +229,6 @@ class _TradeEnginePageState extends State<TradeEnginePage> {
                   ('Selected strike', _value(optionLayer['strike'] ?? s['strike'])),
                   ('Expiry', (optionLayer['expiry'] ?? s['expiry'] ?? '—').toString()),
                   ('Option spread %', _value(optionLayer['spread_pct'] ?? s['option_spread_pct'])),
-                  ('Flow direction', (orderFlow['direction'] ?? s['order_flow_direction'] ?? 'NOT PROVIDED').toString()),
-                  ('Flow imbalance', _value(orderFlow['imbalance'] ?? s['order_flow_imbalance'])),
                   ('OI context', (s['oi_context'] ?? 'NOT PROVIDED').toString()),
                 ]),
                 const SizedBox(height: 8),
