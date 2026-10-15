@@ -285,7 +285,7 @@ export const SettingsPage: React.FC = () => {
             </div>
 
             <p className="text-[11px] text-slate-300 leading-relaxed">
-              NVIDIA AI Market Intelligence (Nemotron 70B) सीधे एक्टिव है। यदि आपके पास पर्सनल NVIDIA API Key (<code className="text-cyan-300 font-mono">nvapi-...</code>) है, तो यहाँ सेव करें अथवा अपने Railway प्रोजेक्ट में <code className="text-cyan-300 font-mono">NVIDIA_API_KEY</code> वेरिएबल जोड़ें।
+              NVIDIA Cloud AI is not marked active just because a key exists. A key can be stored here for direct requests, or configured securely as NVIDIA_API_KEY in Railway. The model-catalog check verifies key access only; a successful chat response is required to verify inference.
             </p>
 
             <div className="space-y-2">
