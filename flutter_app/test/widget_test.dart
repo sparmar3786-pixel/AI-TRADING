@@ -56,5 +56,19 @@ void main() {
       expect(find.text(label), findsNothing, reason: '$label must not appear in navigation');
     }
   });
+  testWidgets('AI Access is cloud-only with no on-device model controls', (tester) async {
+    await tester.pumpWidget(const FreshApp());
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tap(find.byKey(const ValueKey('open-navigation-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('AI Access').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('ADD OFFLINE GGUF MODELS'), findsNothing);
+    expect(find.text('TEST ALL OFFLINE MODELS'), findsNothing);
+    expect(find.text('Offline AI — On-device GGUF Models'), findsNothing);
+    expect(find.text('OPEN AI CHAT • LOAD SELECTED OFFLINE MODEL'), findsNothing);
+  });
+
 }
 
