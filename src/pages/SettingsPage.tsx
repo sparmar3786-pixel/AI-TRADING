@@ -101,7 +101,6 @@ export const SettingsPage: React.FC = () => {
   // Remove only known demo placeholders; real provider secrets remain server-side.
   const handle1ClickAutoConfigure = () => {
     const demoValues: Record<string, string> = {
-      ai_trading_gemini_key: 'AIzaSy_GEMINI_AI_DEMO_KEY_SECURE',
       angel_client_id: 'DEMO_ANGEL_CLIENT_001',
       angel_api_key: 'DEMO_SMART_API_KEY_LIVE',
       alpaca_paper_key: 'PKDEMO_SIMULATION_KEY_001',
