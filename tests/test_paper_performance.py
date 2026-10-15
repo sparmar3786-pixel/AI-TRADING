@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from backend.app.main import _paper_performance_summary, _signal_outcomes_memory, _update_signal_outcomes
+from backend.app.main import _paper_performance_summary, _signal_outcome_report, _signal_outcomes_memory, _update_signal_outcomes
 
 
 class PaperPerformanceSummaryTests(unittest.TestCase):
@@ -66,6 +66,28 @@ class PaperPerformanceSummaryTests(unittest.TestCase):
                 self.assertIsNone(second["metrics"]["net_pnl_inr"])
                 self.assertEqual(second["accuracy_status"], "OBSERVED_QUOTE_OUTCOMES")
                 _signal_outcomes_memory.clear()
+
+    def test_signal_win_rate_requires_explicit_fee_adjusted_pnl(self):
+        rows = [
+            {"outcome_id": "1", "index": "NIFTY", "status": "CLOSED", "exit_reason": "TARGET",
+             "entry_price": 100, "exit_price": 120, "net_pnl_inr": 900,
+             "pnl_status": "RECORDED", "costs_inr": {"brokerage_inr": 50, "slippage_inr": 30, "other_costs_inr": 20}},
+            {"outcome_id": "2", "index": "NIFTY", "status": "CLOSED", "exit_reason": "STOP_LOSS",
+             "entry_price": 100, "exit_price": 90, "net_pnl_inr": None,
+             "pnl_status": "NOT_AVAILABLE_WITHOUT_QUANTITY_AND_ALL_COSTS"},
+        ]
+        report = _signal_outcome_report(rows, {"status": "OK"})
+        metrics = report["metrics"]
+        self.assertEqual(metrics["target_hits"], 1)
+        self.assertEqual(metrics["stop_loss_hits"], 1)
+        self.assertIsNone(metrics["win_rate"])
+        self.assertIsNone(metrics["loss_rate"])
+        self.assertIsNone(metrics["net_pnl_inr"])
+        self.assertEqual(metrics["net_pnl_coverage_count"], 1)
+        self.assertEqual(report["by_instrument"]["NIFTY"]["closed_count"], 2)
+        self.assertIn("BANKNIFTY", report["by_instrument"])
+        self.assertEqual(report["mcx"]["status"], "NOT_TRACKED_BY_INDEX_OPTION_SIGNAL_ENGINE")
+        self.assertEqual(report["persistence"]["status"], "OK")
 
     def test_empty_history_is_explicitly_unverified(self):
         report = _paper_performance_summary([])
