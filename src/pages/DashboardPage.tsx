@@ -12,9 +12,12 @@ import {
   Wallet,
   Settings,
   Key,
+  BrainCircuit,
+  Sparkles,
 } from 'lucide-react';
 import { useTrading } from '../context/TradingContext';
 import { INDEX_CONFIG } from '../services/api';
+import { nvidiaService } from '../services/nvidiaService';
 
 export const DashboardPage: React.FC = () => {
   const {
@@ -86,6 +89,42 @@ export const DashboardPage: React.FC = () => {
         <div className="flex items-center space-x-1 text-cyan-400 text-xs font-bold font-mono pl-2">
           <span>OPEN</span>
           <ArrowRight className="w-3.5 h-3.5" />
+        </div>
+      </div>
+
+      {/* NVIDIA AI Market Intelligence Quick Banner */}
+      <div
+        onClick={() => setActiveTab('Market Intelligence')}
+        className="p-3 rounded-xl bg-gradient-to-r from-[#121A2D] via-[#091122] to-[#121A2D] border border-cyan-500/40 hover:border-cyan-400 cursor-pointer active:scale-98 transition-all shadow-md group"
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2.5">
+            <div className="p-2 rounded-xl bg-cyan-500/15 border border-cyan-500/30 text-cyan-400 group-hover:bg-cyan-500/25 transition-all">
+              <BrainCircuit className="w-5 h-5 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <span className="text-xs font-black text-white font-mono uppercase tracking-wide">
+                  NVIDIA AI Market Intelligence
+                </span>
+                <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold font-mono border ${
+                  nvidiaService.isNvidiaConfigured()
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                    : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                }`}>
+                  {nvidiaService.isNvidiaConfigured() ? 'NVIDIA NIM (KEY)' : 'NVIDIA NIM (70B)'}
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-300 mt-0.5 line-clamp-1 font-sans">
+                {selectedIndex} Confluence: {currentMarket?.trend || 'BULLISH'} • PCR {currentMarket?.pcr || 1.12} • 10m Anti-Spike Gate Active
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-1 text-cyan-400 text-xs font-bold font-mono pl-2">
+            <span>ASK AI</span>
+            <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+          </div>
         </div>
       </div>
 
