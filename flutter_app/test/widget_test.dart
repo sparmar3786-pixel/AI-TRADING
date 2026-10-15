@@ -25,6 +25,12 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(find.byKey(const ValueKey('open-navigation-menu')));
     await tester.pumpAndSettle();
+    final drawerScroll = find.descendant(of: find.byType(Drawer), matching: find.byType(Scrollable)).first;
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('drawer-tab-Strategies')),
+      250,
+      scrollable: drawerScroll,
+    );
     await tester.tap(find.byKey(const ValueKey('drawer-tab-Strategies')));
     await tester.pumpAndSettle();
 
