@@ -267,7 +267,6 @@ class FreshApi {
       });
 
   /// Gemini + configured cloud fallback can take longer than a normal JSON call.
-  /// Keep this separate from offline Qwen, which runs directly on the handset.
   Future<Map<String, dynamic>> aiChat({
     required String index,
     required String question,
