@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta, timezone
+from enum import Enum
 from typing import Any, Optional
 import math
 
@@ -15,6 +16,12 @@ import numpy as np
 import pandas as pd
 
 IST = timezone(timedelta(hours=5, minutes=30))
+
+
+class OIBias(str, Enum):
+    BULLISH = "BULLISH"
+    BEARISH = "BEARISH"
+    NEUTRAL = "NEUTRAL"
 
 
 @dataclass
@@ -36,9 +43,13 @@ class QuantSignal:
     )
     engine_source: str = "OI_PA"
     pcr: Optional[float] = None
+    total_ce_oi: Optional[float] = None
+    total_pe_oi: Optional[float] = None
     ce_oi_change: Optional[float] = None
     pe_oi_change: Optional[float] = None
     oi_bias: Optional[str] = None
+    price_oi_structure: Optional[str] = None
+    pressure: Optional[str] = None
     support_strike: Optional[float] = None
     resistance_strike: Optional[float] = None
     atr_value: Optional[float] = None
@@ -63,6 +74,7 @@ class OIPriceActionEngine:
         volume_mult: float = 1.3, min_score: int = 5,
         skip_first_minutes: int = 10, valid_from: str = "09:25",
         valid_until: str = "15:10", drop_forming_candle: bool = True,
+        hold_bars: int = 1, wick_ratio: float = 2.0, use_depth_pressure: bool = True,
     ):
         if atr_period < 2 or atr_sl_mult <= 0 or risk_reward <= 0 or min_score < 1:
             raise ValueError("Invalid engine risk/scoring configuration")
@@ -72,6 +84,10 @@ class OIPriceActionEngine:
         self.min_oi_change_pct = min_oi_change_pct
         self.pcr_bull, self.pcr_bear = pcr_bull, pcr_bear
         self.volume_mult, self.min_score = volume_mult, min_score
+        if hold_bars < 1 or wick_ratio <= 0:
+            raise ValueError("Invalid price-action configuration")
+        self.hold_bars, self.wick_ratio = hold_bars, wick_ratio
+        self.use_depth_pressure = use_depth_pressure
         self.skip_first_minutes = skip_first_minutes
         self.valid_from = time.fromisoformat(valid_from)
         self.valid_until = time.fromisoformat(valid_until)
@@ -116,11 +132,59 @@ class OIPriceActionEngine:
             raise ValueError("option-chain OI values are invalid")
         return df
 
+    def _pressure(self, df: pd.DataFrame, depth: Optional[dict[str, Any]] = None) -> str:
+        pressure = "NONE"
+        if len(df) >= 3 and {"open", "high", "low", "close"}.issubset(df.columns):
+            last = df.iloc[-1]
+            rng = max(float(last.high) - float(last.low), 1e-9)
+            close_pos = (float(last.close) - float(last.low)) / rng
+            vol_spike = False
+            if "volume" in df.columns and len(df) >= 12:
+                volumes = pd.to_numeric(df.volume, errors="coerce")
+                avg = float(volumes.iloc[-12:-1].mean())
+                latest = float(volumes.iloc[-1]) if self._number(volumes.iloc[-1]) else 0.0
+                vol_spike = math.isfinite(avg) and avg > 0 and latest > avg * self.volume_mult
+            if vol_spike and close_pos >= 0.7:
+                pressure = "BUY_PRESSURE"
+            elif vol_spike and close_pos <= 0.3:
+                pressure = "SELL_PRESSURE"
+        if self.use_depth_pressure and depth:
+            try:
+                bid = float(depth.get("total_buy_qty") or depth.get("bid_qty") or 0)
+                ask = float(depth.get("total_sell_qty") or depth.get("ask_qty") or 0)
+                if all(math.isfinite(x) and x >= 0 for x in (bid, ask)) and bid + ask > 0:
+                    imbalance = (bid - ask) / (bid + ask)
+                    if imbalance > 0.25:
+                        pressure = "BUY_PRESSURE"
+                    elif imbalance < -0.25:
+                        pressure = "SELL_PRESSURE"
+            except (TypeError, ValueError):
+                pass
+        return pressure
+
+    def _rejection_wick(self, row: Any, side: str) -> bool:
+        o, h, l, c = (float(row[k]) for k in ("open", "high", "low", "close"))
+        body = max(abs(c - o), 1e-6)
+        upper, lower = h - max(o, c), min(o, c) - l
+        if side == "bull":
+            return lower >= self.wick_ratio * body and upper <= body
+        return upper >= self.wick_ratio * body and lower <= body
+
+    def _two_candle_structure(self, df: pd.DataFrame) -> tuple[bool, bool, list[str]]:
+        if len(df) < 2:
+            return False, False, []
+        a, b = df.iloc[-2], df.iloc[-1]
+        bull = float(b.high) > float(a.high) and float(b.low) > float(a.low)
+        bear = float(b.high) < float(a.high) and float(b.low) < float(a.low)
+        tags = (["2-candle HH-HL structure"] if bull else []) + (["2-candle LH-LL structure"] if bear else [])
+        return bull, bear, tags
+
     def generate(
         self, intraday_df: pd.DataFrame, option_chain: pd.DataFrame,
         current_spot: float, current_time: Optional[datetime] = None,
         strike_step: int = 50, fut_oi_now: Optional[float] = None,
         fut_oi_prev: Optional[float] = None, spot_ref: Optional[float] = None,
+        market_depth: Optional[dict[str, Any]] = None,
     ) -> QuantSignal:
         if not self._number(current_spot) or float(current_spot) <= 0:
             return _wait("Invalid spot price")
@@ -190,8 +254,21 @@ class OIPriceActionEngine:
         if pcr is not None and pcr <= self.pcr_bear: bear += 1
         bias = "BULLISH" if bull >= 2 and bull > bear else "BEARISH" if bear >= 2 and bear > bull else "NEUTRAL"
         prev, last = df.iloc[-2], df.iloc[-1]
-        if last.close > df.high.iloc[:-1].max(): bull += 2; reasons.append("PA: break above prior high")
-        if last.close < df.low.iloc[:-1].min(): bear += 2; reasons.append("PA: break below prior low")
+        pressure = self._pressure(df, market_depth)
+        prior_high = float(df.high.iloc[:-1].max())
+        prior_low = float(df.low.iloc[:-1].min())
+        if last.close > prior_high and bool(np.all(df.close.iloc[-self.hold_bars:] >= prior_high * 0.999)):
+            bull += 2; reasons.append("PA: break & hold above prior high")
+        if last.close < prior_low and bool(np.all(df.close.iloc[-self.hold_bars:] <= prior_low * 1.001)):
+            bear += 2; reasons.append("PA: break & hold below prior low")
+        bull_structure, bear_structure, structure_tags = self._two_candle_structure(df)
+        if bull_structure: bull += 1
+        if bear_structure: bear += 1
+        tags.extend(structure_tags)
+        if self._rejection_wick(last, "bull"):
+            bull += 2; tags.append("Bullish rejection wick")
+        if self._rejection_wick(last, "bear"):
+            bear += 2; tags.append("Bearish rejection wick")
         if prev.close < prev.open and last.close > last.open and last.close >= prev.open and last.open <= prev.close:
             bull += 2; tags.append("Bullish engulfing")
         if prev.close > prev.open and last.close < last.open and last.close <= prev.open and last.open >= prev.close:
@@ -207,6 +284,12 @@ class OIPriceActionEngine:
             if self._number(avg) and avg > 0 and latest_volume > avg * self.volume_mult:
                 if (last.close-last.low)/max(last.high-last.low, 1e-9) >= .7: bull += 1
                 elif (last.close-last.low)/max(last.high-last.low, 1e-9) <= .3: bear += 1
+        if pressure == "BUY_PRESSURE": bull += 1; reasons.append("Buy pressure (volume/depth)")
+        elif pressure == "SELL_PRESSURE": bear += 1; reasons.append("Sell pressure (volume/depth)")
+        if float(current_spot) <= support + strike_step and pch > 0 and abs(pe_pct) >= self.min_oi_change_pct:
+            bull += 1; reasons.append(f"Near put-wall support {support}")
+        if float(current_spot) >= resistance - strike_step and cch > 0 and abs(ce_pct) >= self.min_oi_change_pct:
+            bear += 1; reasons.append(f"Near call-wall resistance {resistance}")
         if bias == "BULLISH": bull += 2
         elif bias == "BEARISH": bear += 2
         structure = "UNKNOWN"
@@ -217,7 +300,7 @@ class OIPriceActionEngine:
             else: bear += 1
         if bull >= self.min_score and bull > bear: decision, side = "CALL BUY", "CE"
         elif bear >= self.min_score and bear > bull: decision, side = "PUT BUY", "PE"
-        else: return _wait("Weak OI + price-action confluence", pcr=pcr, oi_bias=bias, support_strike=support, resistance_strike=resistance, atr_value=round(atr, 2), pa_tags=tags, reasons=reasons + [f"Scores bull={bull} bear={bear}"])
+        else: return _wait("Weak OI + price-action confluence", pcr=pcr, total_ce_oi=ce, total_pe_oi=pe, ce_oi_change=cch, pe_oi_change=pch, oi_bias=bias, price_oi_structure=structure, pressure=pressure, support_strike=support, resistance_strike=resistance, atr_value=round(atr, 2), pa_tags=tags, reasons=reasons + [f"Scores bull={bull} bear={bear}"])
         entry = float(current_spot)
         if decision == "CALL BUY":
             sl = min(float(last.low), entry - self.atr_sl_mult * atr)
@@ -236,8 +319,9 @@ class OIPriceActionEngine:
             regime=f"OI_PA_{bias}", reasons=reasons + tags + [f"Scores bull={bull} bear={bear}"],
             guards=["DOWNSTREAM_RISK_AND_STABILITY_GATE_REQUIRED"],
             live_validation={"verdict": "PENDING", "decision": "WAIT", "blocks": ["Await downstream freshness, risk and 10-minute stability validation"]},
-            pcr=round(pcr, 3) if pcr is not None else None, ce_oi_change=cch, pe_oi_change=pch,
-            oi_bias=bias, support_strike=support, resistance_strike=resistance, atr_value=round(atr, 2),
+            pcr=round(pcr, 3) if pcr is not None else None, total_ce_oi=ce, total_pe_oi=pe,
+            ce_oi_change=cch, pe_oi_change=pch, oi_bias=bias, price_oi_structure=structure,
+            pressure=pressure, support_strike=support, resistance_strike=resistance, atr_value=round(atr, 2),
             pa_tags=tags,
         )
 
@@ -253,8 +337,10 @@ def to_signal_data(q: QuantSignal, index: str = "", timestamp: str = "", data_fr
         "target": None if wait else q.target, "risk_reward": None if wait else q.risk_reward,
         "confidence": 0.0 if wait else q.confidence, "regime": q.regime,
         "reasons": q.reasons, "guards": q.guards, "live_validation": q.live_validation,
-        "engine_source": "OI_PA", "pcr": q.pcr, "ce_oi_change": q.ce_oi_change,
+        "engine_source": "OI_PA", "pcr": q.pcr, "total_ce_oi": q.total_ce_oi, "total_pe_oi": q.total_pe_oi,
+        "ce_oi_change": q.ce_oi_change,
         "pe_oi_change": q.pe_oi_change, "oi_bias": q.oi_bias,
+        "price_oi_structure": q.price_oi_structure, "pressure": q.pressure,
         "support_strike": q.support_strike, "resistance_strike": q.resistance_strike,
         "atr_value": q.atr_value, "pa_tags": q.pa_tags, "timestamp": timestamp,
         "data_fresh": data_fresh,
