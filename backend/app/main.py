@@ -28,6 +28,7 @@ from zoneinfo import ZoneInfo
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
@@ -62,6 +63,22 @@ except ModuleNotFoundError:
     from backend.app.kumo_nim_api import router as kumo_router
 
 app = FastAPI(title="AI-TRADING Read-only Signals API", version="1.0.0")
+# The web dashboard sends X-Device-Id and JSON requests from a browser, which
+# triggers CORS preflight. Without this middleware OPTIONS is answered as 405,
+# so Cloud AI and market-intelligence requests fail before reaching their routes.
+_cors_origins = [
+    origin.strip()
+    for origin in os.getenv("CORS_ALLOW_ORIGINS", "*").split(",")
+    if origin.strip()
+] or ["*"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Accept", "Content-Type", "X-Device-Id", "Authorization"],
+    max_age=600,
+)
 app.include_router(smc_router)
 app.include_router(kumo_router)
 try:
