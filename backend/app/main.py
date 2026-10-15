@@ -4145,13 +4145,10 @@ def _save_paper_trades(rows: list[dict[str, Any]]) -> bool:
 def paper_trades(_: str = Depends(_device)) -> dict[str, Any]:
     rows = _load_paper_trades()
     rows.sort(key=lambda item: str(item.get("opened_at") or ""), reverse=True)
+    db_ok, db_value = get_state("paper_trades")
     return {
         "status": "ok", "trades": rows, "trade_count": len(rows),
-        "persistence": (
-            "postgresql" if get_state("paper_trades")[0] and get_state("paper_trades")[1] is not None
-            else "volume" if _paper_trade_path().is_file()
-            else "memory_or_empty"
-        ),
+        "persistence": "postgresql" if db_ok and isinstance(db_value, list) else "volume" if _paper_trade_path().is_file() else "memory_or_empty",
         "signal_only": True, "order_placement_enabled": False,
     }
 
