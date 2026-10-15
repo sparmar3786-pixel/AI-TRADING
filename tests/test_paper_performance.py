@@ -89,6 +89,36 @@ class PaperPerformanceSummaryTests(unittest.TestCase):
         self.assertEqual(report["mcx"]["status"], "NOT_TRACKED_BY_INDEX_OPTION_SIGNAL_ENGINE")
         self.assertEqual(report["persistence"]["status"], "OK")
 
+    def test_mcx_short_future_target_uses_direction_and_explicit_costs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ledger_path = os.path.join(directory, "signal_outcomes.json")
+            costs = {
+                "SIGNAL_OUTCOMES_FILE": ledger_path,
+                "PAPER_BROKERAGE_INR_PER_ROUND_TRIP": "10",
+                "PAPER_SLIPPAGE_INR_PER_ROUND_TRIP": "5",
+                "PAPER_OTHER_COSTS_INR_PER_ROUND_TRIP": "5",
+            }
+            with patch.dict(os.environ, costs, clear=False):
+                _signal_outcomes_memory.clear()
+                commodity = {
+                    "name": "CRUDEOIL", "symbol": "CRUDEOIL", "contract": "CRUDEOIL24NOVFUT",
+                    "expiry": "2026-11-24", "decision": "SELL FUTURE", "entry": 100.0,
+                    "stop_loss": 110.0, "target": 80.0, "ltp": 100.0, "live": True,
+                    "age_seconds": 2.0, "lotsize": 10, "source_timestamp": "2026-10-15T08:00:00+00:00",
+                    "signal_stability": {"state": "CONFIRMED", "required_minutes": 10},
+                    "confirmation_state": {"since_utc": "2026-10-15T07:50:00+00:00"},
+                    "layers": {"contract_selection": {"lot_size": 10}},
+                }
+                first = _update_signal_outcomes({}, {}, [commodity])
+                self.assertEqual(first["mcx"]["metrics"]["open_count"], 1)
+                commodity["ltp"] = 80.0
+                second = _update_signal_outcomes({}, {}, [commodity])
+                self.assertEqual(second["mcx"]["metrics"]["target_hits"], 1)
+                self.assertEqual(second["mcx"]["metrics"]["gross_points_total"], 20.0)
+                self.assertEqual(second["mcx"]["metrics"]["net_pnl_inr"], 180.0)
+                self.assertEqual(second["mcx"]["metrics"]["pnl_status"], "RECORDED")
+                _signal_outcomes_memory.clear()
+
     def test_empty_history_is_explicitly_unverified(self):
         report = _paper_performance_summary([])
         self.assertEqual(report["trade_count"], 0)
