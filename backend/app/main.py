@@ -4361,7 +4361,8 @@ def evaluate_strategies(body: dict[str, Any], _: str = Depends(_device)) -> dict
 
 @app.get("/v1/signals/performance")
 def signal_performance(_: str = Depends(_device)) -> dict[str, Any]:
-    rows = _load_signal_outcomes()\n    return _signal_outcome_report(rows, dict(_signal_outcome_persistence))
+    rows = _load_signal_outcomes()
+    return _signal_outcome_report(rows, dict(_signal_outcome_persistence))
 
 
 @app.get("/v1/signals")
