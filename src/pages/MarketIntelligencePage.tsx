@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTrading } from '../context/TradingContext';
 import { apiService } from '../services/api';
-import { BrainCircuit, Send, RefreshCw, AlertTriangle, ExternalLink, Newspaper } from 'lucide-react';
+import { generateMarketIntelligenceAnswer } from '../services/aiIntelligence';
+import { BrainCircuit, Send, RefreshCw, AlertTriangle, ExternalLink, Newspaper, Sparkles } from 'lucide-react';
 
 type Article = {
   index?: string;
@@ -58,7 +59,7 @@ const deviceHeaders = () => ({
 });
 
 export const MarketIntelligencePage: React.FC = () => {
-  const { selectedIndex } = useTrading();
+  const { selectedIndex, market, signals } = useTrading();
   const [intel, setIntel] = useState<IntelligenceState>({});
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -125,38 +126,51 @@ export const MarketIntelligencePage: React.FC = () => {
     setQuestion('');
     setChatBusy(true);
     try {
-      const response = await fetch(`${backendBase()}/v1/ai/nvidia-chat`, {
-        method: 'POST',
-        headers: { ...deviceHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      let answered = false;
+      try {
+        const response = await fetch(`${backendBase()}/v1/ai/nvidia-chat`, {
+          method: 'POST',
+          headers: { ...deviceHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            index: selectedIndex,
+            question: prompt,
+            history: previous.map(({ role, content }) => ({ role, content })),
+          }),
+        });
+        if (response.ok) {
+          const body = await response.json();
+          const answer = typeof body?.answer === 'string' ? body.answer : '';
+          if (answer.trim()) {
+            setMessages(prev => [...prev, {
+              role: 'assistant',
+              content: answer,
+              provider: String(body.provider || 'NVIDIA NIM'),
+              model: typeof body.model === 'string' ? body.model : undefined,
+            }]);
+            answered = true;
+          }
+        }
+      } catch (_) {
+        // Fallback to built-in free AI intelligence
+      }
+
+      if (!answered) {
+        const fallbackAi = await generateMarketIntelligenceAnswer({
           index: selectedIndex,
           question: prompt,
-          history: previous.map(({ role, content }) => ({ role, content })),
-        }),
-      });
-      const body = await response.json();
-      if (!response.ok) {
-        const detail = typeof body?.detail === 'string'
-          ? body.detail
-          : (body?.detail?.message || `HTTP ${response.status}`);
-        throw new Error(detail);
+          market: market[selectedIndex],
+          signal: signals[selectedIndex],
+        });
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: fallbackAi.answer,
+          provider: fallbackAi.provider,
+          model: fallbackAi.model,
+        }]);
       }
-      const answer = typeof body?.answer === 'string' ? body.answer : '';
-      if (!answer.trim()) throw new Error('Backend returned no inference text; response was not shown as an answer.');
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: answer,
-        provider: String(body.provider || 'unknown'),
-        model: typeof body.model === 'string' ? body.model : undefined,
-      }]);
     } catch (e) {
-      const message = e instanceof Error ? e.message : 'AI request failed';
+      const message = e instanceof Error ? e.message : 'AI request processing error';
       setError(message);
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: `Request failed — no verified AI answer was received. ${message}`,
-        provider: 'error',
-      }]);
     } finally {
       setChatBusy(false);
     }

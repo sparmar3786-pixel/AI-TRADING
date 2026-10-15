@@ -90,29 +90,6 @@ export interface TechnicalIndicators {
   vwap: number;
 }
 
-export interface SmcStructure {
-  trend: 'BULLISH' | 'BEARISH' | 'RANGING';
-  last_bos: { price: number; type: 'BULLISH' | 'BEARISH'; time: string };
-  last_choch: { price: number; type: 'BULLISH' | 'BEARISH'; time: string };
-  order_blocks: Array<{
-    type: 'BULLISH_OB' | 'BEARISH_OB';
-    high: number;
-    low: number;
-    mitigated: boolean;
-  }>;
-  fair_value_gaps: Array<{
-    type: 'BULLISH_FVG' | 'BEARISH_FVG';
-    top: number;
-    bottom: number;
-    filled: boolean;
-  }>;
-  liquidity_pools: Array<{
-    type: 'BUY_SIDE' | 'SELL_SIDE';
-    level: number;
-    swept: boolean;
-  }>;
-}
-
 export interface QuantLayerResult {
   layer: number;
   name: string;

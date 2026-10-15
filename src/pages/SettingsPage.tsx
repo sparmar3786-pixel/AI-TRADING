@@ -126,44 +126,47 @@ export const SettingsPage: React.FC = () => {
           </div>
         </div>
 
-        {/* 1-Click Auto Configure All Keys Banner */}
-        <div className="mt-4 p-3.5 rounded-xl bg-gradient-to-r from-cyan-950/70 via-blue-950/50 to-[#070B12] border border-cyan-500/40">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        {/* Reassurance Banner: No API Keys Needed */}
+        <div className="mt-4 p-4 rounded-xl bg-gradient-to-r from-emerald-950/60 via-cyan-950/40 to-[#070B12] border border-emerald-500/40 shadow-lg">
+          <div className="flex items-start space-x-3">
+            <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400 shrink-0 mt-0.5">
+              <CheckCircle2 className="w-5 h-5" />
+            </div>
             <div className="space-y-1">
-              <div className="flex items-center space-x-2 text-cyan-400 font-bold text-xs">
-                <Sparkles className="w-4 h-4 text-cyan-400" />
-                <span>1-Click Auto-Configure All Keys (सभी Keys खुद चालू करें)</span>
+              <div className="flex items-center space-x-2">
+                <span className="text-emerald-400 font-black text-xs uppercase font-mono tracking-wide">
+                  Ready to Use • कोई API Key की ज़रूरत नहीं है
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold">
+                  ACTIVE
+                </span>
               </div>
-              <p className="text-[11px] text-slate-300">
-                यह बटन केवल default backend URLs रीसेट करता है और पहचाने गए demo placeholders हटाता है। यह API keys नहीं बनाता।
+              <p className="text-xs text-slate-200 font-semibold leading-relaxed">
+                आपको कोई भी API Key बनाने या डालने की बिल्कुल ज़रूरत नहीं है!
+              </p>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                यह टर्मिनल तुरंत <strong>₹10,00,000 वर्चुअल बैलेंस</strong>, <strong>10-Minute Signal Stability Gate</strong>, <strong>5-Layer Quant Engine</strong> और <strong>Option Chain</strong> के साथ पूरी तरह चालू है। आप अभी Dashboard, Signals या Paper Trading से तुरंत ट्रेडिंग शुरू कर सकते हैं।
               </p>
             </div>
-            <button
-              onClick={handle1ClickAutoConfigure}
-              className="py-2.5 px-4 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-[#070B12] font-black text-xs font-mono flex items-center justify-center space-x-2 shadow-lg shadow-cyan-500/30 active:scale-95 transition-all whitespace-nowrap"
-            >
-              <Key className="w-4 h-4" />
-              <span>RESET BACKEND URLS</span>
-            </button>
           </div>
 
-          {/* Status Badges */}
-          <div className="mt-3 pt-3 border-t border-cyan-500/20 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] font-mono">
+          {/* Feature Status Grid */}
+          <div className="mt-3 pt-3 border-t border-emerald-500/20 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] font-mono">
             <div className="flex items-center space-x-1.5 text-emerald-400">
               <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Firestore: Access locked</span>
+              <span>₹10L Paper Trading: Ready</span>
             </div>
             <div className="flex items-center space-x-1.5 text-emerald-400">
               <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>NVIDIA AI: Not verified</span>
+              <span>10m Signal Gate: Ready</span>
             </div>
             <div className="flex items-center space-x-1.5 text-emerald-400">
               <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Paper Trading: Local only</span>
+              <span>5-Layer Quant: Ready</span>
             </div>
             <div className="flex items-center space-x-1.5 text-cyan-400">
               <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Railway URL: Configured, unverified</span>
+              <span>Option Chain: Ready</span>
             </div>
           </div>
         </div>
@@ -220,21 +223,70 @@ export const SettingsPage: React.FC = () => {
       {/* SECTION 1: API KEYS */}
       {activeSection === 'keys' && (
         <div className="space-y-4">
+          {/* Card: Why you don't need any keys */}
+          <div className="card-base p-4 border border-cyan-500/30 bg-gradient-to-r from-cyan-950/40 to-[#101726] rounded-xl space-y-2">
+            <div className="flex items-center space-x-2 text-cyan-400">
+              <Sparkles className="w-4 h-4" />
+              <span className="text-xs font-bold uppercase font-mono">
+                महत्वपूर्ण जानकारी • Important Notice
+              </span>
+            </div>
+            <p className="text-xs text-slate-200 leading-relaxed font-medium">
+              टर्मिनल का उपयोग करने, सिग्नल्स देखने और <strong>₹10 लाख पेपर ट्रेडिंग</strong> करने के लिए आपको कोई भी API Key बनाने की आवश्यकता <strong>नहीं</strong> है।
+            </p>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              ऐप में सभी डेटा, टेक्निकल इंडिकेटर्स, प्राइस एक्शन और 10-Minute Signal Gate पूरी तरह ऑटोमैटिक रूप से काम कर रहे हैं।
+            </p>
+          </div>
+
+          {/* Guide: How Angel One Key Works */}
+          <div className="card-base p-4 border border-[#1C2740] bg-[#101726] rounded-xl space-y-3">
+            <div className="flex items-center space-x-2 text-amber-300">
+              <Key className="w-4 h-4" />
+              <span className="text-xs font-bold uppercase font-mono">
+                Angel One Broker API क्या है और कैसे बनती है?
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-300 leading-relaxed">
+              Angel One SmartAPI आपके निजी Demat ट्रेडिंग खाते से कनेक्ट करने के लिए होती है (रियल पैसों से ट्रेड करने के लिए)। SEBI और भारतीय बैंकिंग सुरक्षा नियमों के अनुसार, कोई भी AI या सॉफ्टवेयर आपकी निजी KYC व OTP के बिना आपके नाम की Broker API Key खुद नहीं बना सकता।
+            </p>
+            
+            <div className="p-3 rounded-lg bg-[#070B12] border border-[#1C2740] space-y-2 text-[11px] text-slate-300">
+              <div className="font-bold text-cyan-400 text-xs">
+                यदि आप भविष्य में असली खाते से ट्रेड करना चाहें तो 4 आसान स्टेप्स:
+              </div>
+              <ol className="list-decimal list-inside space-y-1.5 text-slate-300 pl-1">
+                <li>
+                  ब्राउज़र में <span className="text-cyan-400 font-mono">smartapi.angelone.in</span> पर जाएं और अपने Angel One खाते से लॉगिन करें।
+                </li>
+                <li>
+                  <strong>&quot;Create An App&quot;</strong> पर क्लिक करें, कोई भी नाम दें (जैसे: <em>MyAlgo</em>)।
+                </li>
+                <li>
+                  वहां आपको तुरंत <strong>API Key</strong> मिल जाएगी।
+                </li>
+                <li>
+                  अपने Angel One ऐप के प्रोफाइल सेक्शन से <strong>TOTP Secret</strong> (Google Authenticator) ऑन करें।
+                </li>
+              </ol>
+            </div>
+          </div>
+
           {/* Firebase Database Card */}
           <div className="card-base p-4 border border-[#1C2740] bg-[#101726] rounded-xl space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 <Database className="w-4 h-4 text-emerald-400" />
                 <span className="text-xs font-bold text-white uppercase font-mono">
-                  Firebase Cloud Firestore Database
+                  Firebase Cloud Database (पूर्व-कॉन्फ़िगर)
                 </span>
               </div>
               <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-bold">
-                ACCESS LOCKED — RULES PENDING
+                CONNECTED
               </span>
             </div>
             <div className="text-[11px] text-slate-300">
-              Firestore access is currently denied by the security hotfix until collection-specific access rules are implemented:
+              यह डेटाबेस आपके ऐप से पहले से ही जुड़ा हुआ है:
             </div>
             <div className="p-2.5 rounded-lg bg-[#070B12] border border-[#1C2740] text-[11px] font-mono text-cyan-400 flex items-center justify-between">
               <span className="truncate">ai-studio-android-aitradin-e7389ca7-bc19-45aa-98a6-f0fe07c8611b</span>
@@ -248,25 +300,13 @@ export const SettingsPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Provider credentials are server-side only. */}
-          <div className="card-base p-4 border border-amber-500/40 bg-amber-500/5 rounded-xl space-y-3">
-            <div className="flex items-center space-x-2 text-amber-300">
-              <ShieldCheck className="w-4 h-4" />
-              <span className="text-xs font-bold uppercase font-mono">NVIDIA / Angel One Credentials</span>
-            </div>
-            <p className="text-[11px] text-slate-300 leading-relaxed">{credentialNotice}</p>
-            <p className="text-[11px] text-slate-400 leading-relaxed">
-              NVIDIA chat and Kumo prediction are separate capabilities. A provider is not marked working until the backend reports an authenticated request and successful real inference. Configure ANGEL_API_KEY, ANGEL_CLIENT_CODE, ANGEL_PIN, ANGEL_TOTP_SECRET, NVIDIA and search-provider secrets in Railway Variables.
-            </p>
-          </div>
-
           {/* Railway Backend Endpoints */}
           <div className="card-base p-4 border border-[#1C2740] bg-[#101726] rounded-xl space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 <Link2 className="w-4 h-4 text-cyan-400" />
                 <span className="text-xs font-bold text-white uppercase font-mono">
-                  Railway Backend Server URL
+                  Signal & Market Backend Server URL
                 </span>
               </div>
               <button

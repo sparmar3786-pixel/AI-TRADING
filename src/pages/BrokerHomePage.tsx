@@ -30,6 +30,18 @@ export const BrokerHomePage: React.FC = () => {
   const [orderLots, setOrderLots] = useState(2);
   const [orderPrice, setOrderPrice] = useState(150);
 
+  React.useEffect(() => {
+    const cfg = INDEX_CONFIG[orderSymbol];
+    const mkt = market[orderSymbol];
+    if (mkt && cfg) {
+      const spot = mkt.ltp || cfg.basePrice;
+      const strike = Math.round(spot / cfg.strikeStep) * cfg.strikeStep;
+      const quote = mkt.option_chain?.find(r => Math.abs(r.strike - strike) < 0.01);
+      const estPrice = quote ? (orderSide === 'CE' ? quote.ce_ltp : quote.pe_ltp) : 145;
+      if (estPrice > 0) setOrderPrice(estPrice);
+    }
+  }, [orderSymbol, orderSide, market]);
+
   const openTrades = paperTrades.filter(t => t.status === 'OPEN');
   const closedTrades = paperTrades.filter(t => t.status === 'CLOSED');
 

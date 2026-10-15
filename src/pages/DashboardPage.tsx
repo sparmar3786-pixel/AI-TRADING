@@ -43,19 +43,21 @@ export const DashboardPage: React.FC = () => {
   const percentDone = Math.min(100, Math.floor((elapsedSecs / 600) * 100));
 
   const handleQuickPaperTrade = () => {
-    if (!currentSignal || !currentSignal.strike || !currentSignal.option_side) {
-      alert('No actionable strike selected in the current signal.');
-      return;
-    }
+    const strikeStep = cfg.strikeStep;
+    const atmStrike = Math.round(ltp / strikeStep) * strikeStep;
+    const strike = currentSignal?.strike || atmStrike;
+    const side = currentSignal?.option_side || (isPositive ? 'CE' : 'PE');
+    const entryPrice = currentSignal?.entry || 145;
+
     executePaperTrade({
       symbol: selectedIndex,
-      option_name: `${selectedIndex} ${currentSignal.strike} ${currentSignal.option_side}`,
-      side: currentSignal.option_side,
+      option_name: `${selectedIndex} ${strike} ${side}`,
+      side: side,
       action: 'BUY',
       lots: 2,
-      entry_price: currentSignal.entry || 150,
-      stop_loss: currentSignal.stop_loss || 120,
-      target: currentSignal.target || 210,
+      entry_price: entryPrice,
+      stop_loss: currentSignal?.stop_loss || Number((entryPrice * 0.8).toFixed(1)),
+      target: currentSignal?.target || Number((entryPrice * 1.4).toFixed(1)),
     });
     setActiveTab('Paper Trading');
   };
