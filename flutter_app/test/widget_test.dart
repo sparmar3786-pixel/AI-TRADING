@@ -12,6 +12,10 @@ void main() {
     expect(tabs, contains('Signals'));
     expect(tabs, contains('API'));
     expect(tabs, contains('AI Access'));
+    expect(tabs, isNot(contains('Repository Library')));
+    expect(tabs, isNot(contains('Quant Research Hub')));
+    expect(tabs, isNot(contains('Quant & Trading Repositories')));
+    expect(tabs, contains('PDF Reports'));
     expect(find.byKey(const ValueKey('open-navigation-menu')), findsOneWidget);
   });
 
@@ -53,3 +57,4 @@ void main() {
     }
   });
 }
+
