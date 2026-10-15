@@ -3,7 +3,7 @@ name: Build AI-TRADING Android APK
 on:
   # Build a test APK from the reviewed release branch so strategy UI changes are device-testable before merge.
   push:
-    branches: [feat/ai-trading-signal-apk, feat/strategy-tab-no-ai]
+    branches: [main, feat/ai-trading-signal-apk, feat/strategy-tab-no-ai]
     paths:
       - '.github/workflows/android-apk.yml'
       - 'flutter_app/**'
