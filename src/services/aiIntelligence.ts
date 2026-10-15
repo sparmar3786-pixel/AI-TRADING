@@ -1,6 +1,7 @@
 import { IndexSymbol, MarketRow, SignalData } from '../types/market';
 import { nvidiaService } from './nvidiaService';
 import { apiService } from './api';
+import { stripRepositoryLinks } from './repositoryLinkFilter';
 
 export interface AIResponse {
   answer: string;
@@ -55,7 +56,7 @@ Instructions:
       );
       if (nvidiaResult && nvidiaResult.answer.trim().length > 0) {
         return {
-          answer: nvidiaResult.answer,
+          answer: stripRepositoryLinks(nvidiaResult.answer),
           provider: 'NVIDIA NIM',
           model: nvidiaResult.model,
         };
@@ -99,7 +100,7 @@ Instructions:
       if (ans && isRealCloudInference &&
           !ans.toLowerCase().includes('cannot be determined due to unavailable')) {
         return {
-          answer: ans,
+          answer: stripRepositoryLinks(ans),
           provider: body.provider || 'NVIDIA NIM (Cloud AI)',
           model: body.model,
         };
