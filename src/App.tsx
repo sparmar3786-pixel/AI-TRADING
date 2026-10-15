@@ -45,8 +45,10 @@ const MainContent: React.FC = () => {
       case 'Risk Calculator':
         return <RiskPage />;
       case 'Backtesting':
+      case 'Strategy Library':
         return <BacktestingPage />;
       case 'Market Intelligence':
+      case 'AI Memory':
         return <MarketIntelligencePage />;
       case 'Data Health':
         return <DataHealthPage />;
