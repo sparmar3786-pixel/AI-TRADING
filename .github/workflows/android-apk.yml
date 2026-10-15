@@ -1,11 +1,12 @@
 name: Build AI-TRADING Android APK
 
 on:
-  # Also build once when this workflow file is updated on main, so the latest APK can be produced without a manual dispatch.
+  # Build on workflow changes and Flutter source changes so UI updates can produce a fresh APK.
   push:
     branches: [main]
     paths:
       - '.github/workflows/android-apk.yml'
+      - 'flutter_app/**'
   workflow_dispatch:
 
 permissions:
