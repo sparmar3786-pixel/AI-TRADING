@@ -3872,8 +3872,8 @@ def _signal_outcome_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "target_hit_rate": targets / count if count else None,
         "stop_loss_rate": stops / count if count else None,
         # Target/SL outcomes are not the same as fee-adjusted profitable trades.
-        "win_rate": net_wins / len(net_values) if net_values else None,
-        "loss_rate": net_losses / len(net_values) if net_values else None,
+        "win_rate": net_wins / count if net_complete else None,
+        "loss_rate": net_losses / count if net_complete else None,
         "net_break_even_count": net_break_even,
         "net_pnl_coverage_count": len(net_values),
         "gross_points_total": round(sum(gross_points), 4) if gross_points else None,
