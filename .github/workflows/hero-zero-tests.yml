@@ -1,0 +1,39 @@
+name: Hero Zero Engine Regression Tests
+
+on:
+  pull_request:
+    branches: [main, fix/signal-backend-health-status]
+    paths:
+      - "quant/hero_zero.py"
+      - "backend/app/main.py"
+      - "backend/requirements.txt"
+      - "tests/test_hero_zero.py"
+      - ".github/workflows/hero-zero-tests.yml"
+  push:
+    branches: [hero-zero-backend-integration]
+    paths:
+      - "quant/hero_zero.py"
+      - "backend/app/main.py"
+      - "backend/requirements.txt"
+      - "tests/test_hero_zero.py"
+      - ".github/workflows/hero-zero-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hero-zero:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install strategy dependencies
+        run: python -m pip install --disable-pip-version-check "pandas>=2.2,<3.0" "numpy>=1.26,<3.0"
+      - name: Run Hero Zero regression tests
+        run: python -m unittest discover -s tests -p "test_hero_zero.py" -v
+      - name: Compile backend and strategy modules
+        run: python -m py_compile quant/hero_zero.py backend/app/main.py
