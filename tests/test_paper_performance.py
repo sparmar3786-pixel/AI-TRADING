@@ -1,6 +1,7 @@
+import time
 import unittest
 
-from backend.app.main import _paper_performance_summary
+from backend.app.main import _paper_performance_summary, _stale_option_chain_payload
 
 
 class PaperPerformanceSummaryTests(unittest.TestCase):
@@ -32,6 +33,25 @@ class PaperPerformanceSummaryTests(unittest.TestCase):
         ])
         self.assertIsNone(report["metrics"]["net_pnl_inr"])
         self.assertEqual(report["metrics"]["pnl_status"], "NOT_AVAILABLE_FOR_ALL_TRADES")
+
+    def test_broker_outage_fallback_is_stale_and_non_actionable(self):
+        source_time = "2026-10-15T08:00:00+00:00"
+        cached = (time.monotonic() - 10, {
+            "index": "NIFTY", "status": "OK", "live": True, "observed_at": source_time,
+            "contracts": [{"symbol": "NIFTY26OCT25000CE", "ltp": 100.0, "live": True}],
+            "option_chain": [{"strike": 25000, "ltp": 100.0, "live": True}],
+        })
+        payload = _stale_option_chain_payload(cached, "test outage", time.monotonic())
+        self.assertEqual(payload["status"], "WAIT")
+        self.assertFalse(payload["live"])
+        self.assertFalse(payload["actionable"])
+        self.assertTrue(payload["stale"])
+        self.assertEqual(payload["observed_at"], source_time)
+        self.assertFalse(payload["contracts"][0]["live"])
+        self.assertFalse(payload["contracts"][0]["actionable"])
+        self.assertEqual(payload["contracts"][0]["freshness"], "STALE")
+        too_old = (time.monotonic() - 301, cached[1])
+        self.assertIsNone(_stale_option_chain_payload(too_old, "test outage", time.monotonic()))
 
     def test_empty_history_is_explicitly_unverified(self):
         report = _paper_performance_summary([])
