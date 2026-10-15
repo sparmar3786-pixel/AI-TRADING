@@ -55,14 +55,14 @@ export const DashboardPage: React.FC = () => {
 
   const handleQuickPaperTrade = () => {
     if (!marketActionable || !isConfirmed ||
-        !currentSignal || !['CALL BUY', 'PUT BUY'].includes(currentSignal.decision) ||
+        !currentSignal || (currentSignal.decision !== 'CALL BUY' && currentSignal.decision !== 'PUT BUY') ||
         !Number.isFinite(currentSignal.strike) || !Number.isFinite(currentSignal.entry) ||
         !Number.isFinite(currentSignal.stop_loss) || !Number.isFinite(currentSignal.target)) {
       alert('Paper trade blocked: a fresh verified market snapshot and fully validated confirmed signal are required.');
       return;
     }
     const strike = currentSignal.strike!;
-    const side = currentSignal.option_side;
+    const side = currentSignal.option_side as 'CE' | 'PE';
     if ((currentSignal.decision === 'CALL BUY' && side !== 'CE') ||
         (currentSignal.decision === 'PUT BUY' && side !== 'PE')) {
       alert('Paper trade blocked: signal option side does not match the decision.');
