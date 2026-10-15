@@ -27,6 +27,27 @@ void main() {
       );
     });
 
+    test('recursively removes repository links from nested API payloads', () {
+      final result = RepositoryLinkFilter.sanitizeValue(<String, dynamic>{
+        'answer': 'Read https://github.com/org/repo',
+        'evidence': [
+          <String, dynamic>{
+            'title': 'Useful article',
+            'url': 'https://gitlab.com/org/project',
+            'nested': <String, dynamic>{
+              'description': 'See https://example.com/article and https://github.com/org/repo',
+            },
+          },
+        ],
+      }) as Map;
+      expect(result['answer'], 'Read');
+      final evidence = result['evidence'] as List;
+      final item = evidence.single as Map;
+      expect(item['title'], 'Useful article');
+      expect(item['url'], '');
+      expect(item['nested']['description'], 'See https://example.com/article and');
+    });
+
     test('preserves normal source URLs', () {
       expect(
         RepositoryLinkFilter.strip('Read https://example.com/market-news'),
