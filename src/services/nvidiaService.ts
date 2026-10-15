@@ -30,9 +30,6 @@ export interface MarketArticle {
   content: string;
 }
 
-export interface MarketBriefResult {
-  status: 'ACTIVE' | 'REFRESHED';
-  summary: string;
 const STORAGE_KEY_NVIDIA = 'ai_trading_nvidia_key';
 const STORAGE_KEY_SELECTED_MODEL = 'ai_trading_nvidia_model';
 const STORAGE_KEY_AI_PROVIDER = 'ai_trading_preferred_provider';
@@ -63,7 +60,7 @@ class NvidiaService {
   }
 
   /**
-   * NVIDIA NIM is active either via user direct API key or via built-in Nemotron 70B pipeline
+   * A browser-held key is configured; real inference success is checked on each request.
    */
   public isNvidiaActive(): boolean {
     // A key or deterministic local rules do not prove that a cloud inference works.
