@@ -420,7 +420,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         ChainPage(selected:selectedIndex,onChanged:(v)=>setState(()=>selectedIndex=v), market:_market(selectedIndex)),
         OIPage(signals:signals),
         IndicatorsPage(selected:selectedIndex,signal:_signal(selectedIndex),fast:emaFast,slow:emaSlow,onChanged:(f,s){setState((){emaFast=f;emaSlow=s;});refresh();},onIndex:(v)=>setState(()=>selectedIndex=v)),
-        SignalPage(backendUrl:backendUrl,liveStatus:liveTrading,index:selectedIndex,signals:signals,tradePlans:tradePlans,market:market,onChanged:(v)=>setState(()=>selectedIndex=v)),
+        SignalPage(index:selectedIndex,signals:signals,tradePlans:tradePlans,market:market,onChanged:(v)=>setState(()=>selectedIndex=v)),
         RiskPage(index:selectedIndex,signal:_signal(selectedIndex),plans:tradePlans),
         BacktestingPage(backendUrl: backendUrl),
         ApiPage(backendUrl:backendUrl,feed:feed,storeDiagnostics:storeDiagnostics,market:market,onSaved:(url){setState(()=>backendUrl=url);refresh();}),
@@ -1086,9 +1086,7 @@ class _IndicatorsState extends State<IndicatorsPage>{
 }
 
 class SignalPage extends StatelessWidget {
-  const SignalPage({required this.backendUrl, required this.liveStatus, required this.index, required this.signals, required this.tradePlans, required this.market, required this.onChanged, super.key});
-  final String backendUrl;
-  final Map<String, dynamic> liveStatus;
+  const SignalPage({required this.index, required this.signals, required this.tradePlans, required this.market, required this.onChanged, super.key});
   final String index;
   final Map<String, dynamic> signals;
   final List<dynamic> tradePlans;
@@ -1214,7 +1212,7 @@ class SignalPage extends StatelessWidget {
           if (validationBlocks.isNotEmpty) ...[
             const Divider(),
             const Text('Validation blocks',style:TextStyle(fontWeight:FontWeight.w800)),
-            ...validationBlocks.map((b)=>Text('⚠ {b.toString()}')),
+            ...validationBlocks.map((b)=>Text('⚠ ${b.toString()}')),
           ],
           const SizedBox(height:4),
           const Text('PASS requires fresh broker data, a valid option quote and all strategy/risk gates to pass. Missing or stale evidence means WAIT.',style:TextStyle(fontSize:11)),
