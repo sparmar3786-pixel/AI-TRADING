@@ -165,7 +165,7 @@ export const MarketIntelligencePage: React.FC = () => {
     }
   };
 
-  // Submit Question to AI (NVIDIA NIM / Gemini / Quant)
+  // Submit Question to NVIDIA cloud AI; backend OpenRouter fallback is server-side.
   const handleAskAI = async (e?: React.FormEvent, presetPrompt?: string) => {
     if (e) e.preventDefault();
     const prompt = (presetPrompt || question).trim();
