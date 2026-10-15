@@ -73,6 +73,9 @@ export interface MarketRow {
   option_chain?: OptionChainRow[];
   timestamp: string;
   live: boolean;
+  /** Explicit upstream source; required for trading eligibility. */
+  source?: string;
+  data_source?: string;
 }
 
 

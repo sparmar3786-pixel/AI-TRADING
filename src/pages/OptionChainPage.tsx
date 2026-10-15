@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useTrading } from '../context/TradingContext';
 import { OptionChainRow } from '../types/market';
-import { INDEX_CONFIG } from '../services/api';
+import { apiService, INDEX_CONFIG } from '../services/api';
 import { Table2, Wallet, ArrowUpDown } from 'lucide-react';
 
 export const OptionChainPage: React.FC = () => {
@@ -11,6 +11,7 @@ export const OptionChainPage: React.FC = () => {
 
   const strikes = currentMarket?.option_chain || [];
   const ltp = currentMarket?.ltp || cfg.basePrice;
+  const marketActionable = apiService.isFreshLiveMarketRow(currentMarket);
 
   const [selectedStrike, setSelectedStrike] = useState<{
     row: OptionChainRow;
@@ -18,7 +19,15 @@ export const OptionChainPage: React.FC = () => {
   } | null>(null);
 
   const handleOrder = (side: 'CE' | 'PE', row: OptionChainRow) => {
+    if (!marketActionable) {
+      alert('Paper order blocked: live, fresh broker/exchange market data is unavailable. Preview prices cannot be traded.');
+      return;
+    }
     const price = side === 'CE' ? row.ce_ltp : row.pe_ltp;
+    if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(row.strike) || row.strike <= 0) {
+      alert('Paper order blocked: invalid option quote.');
+      return;
+    }
     executePaperTrade({
       symbol: selectedIndex,
       option_name: `${selectedIndex} ${row.strike} ${side}`,
@@ -63,7 +72,7 @@ export const OptionChainPage: React.FC = () => {
 
       {/* Instruction hint */}
       <div className="text-[11px] text-slate-400 px-1 flex items-center justify-between">
-        <span>Tap any CE or PE quote to place a paper order</span>
+        <span>{marketActionable ? 'Tap any CE or PE quote to place a paper order' : 'OFFLINE PREVIEW — orders disabled until live quotes are verified'}</span>
         <span className="text-cyan-400 font-mono">Lot Size: {cfg.lotSize}</span>
       </div>
 
@@ -115,7 +124,8 @@ export const OptionChainPage: React.FC = () => {
                   <td className="py-2 px-2 text-right">
                     <button
                       onClick={() => handleOrder('CE', row)}
-                      className="px-2 py-1 rounded bg-[#101726] hover:bg-emerald-500/20 text-emerald-400 font-bold text-xs transition-all active:scale-95 border border-emerald-500/20"
+                      disabled={!marketActionable}
+                      className="px-2 py-1 rounded bg-[#101726] hover:bg-emerald-500/20 text-emerald-400 font-bold text-xs transition-all active:scale-95 border border-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       ₹{row.ce_ltp}
                     </button>
@@ -141,7 +151,8 @@ export const OptionChainPage: React.FC = () => {
                   <td className="py-2 px-2 text-left">
                     <button
                       onClick={() => handleOrder('PE', row)}
-                      className="px-2 py-1 rounded bg-[#101726] hover:bg-rose-500/20 text-rose-400 font-bold text-xs transition-all active:scale-95 border border-rose-500/20"
+                      disabled={!marketActionable}
+                      className="px-2 py-1 rounded bg-[#101726] hover:bg-rose-500/20 text-rose-400 font-bold text-xs transition-all active:scale-95 border border-rose-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       ₹{row.pe_ltp}
                     </button>

@@ -16,7 +16,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { useTrading } from '../context/TradingContext';
-import { INDEX_CONFIG } from '../services/api';
+import { apiService, INDEX_CONFIG } from '../services/api';
 import { nvidiaService } from '../services/nvidiaService';
 
 export const DashboardPage: React.FC = () => {
@@ -39,6 +39,7 @@ export const DashboardPage: React.FC = () => {
   const currentSignal = signals[selectedIndex];
   const cfg = INDEX_CONFIG[selectedIndex];
 
+  const marketActionable = apiService.isFreshLiveMarketRow(currentMarket);
   const ltp = currentMarket ? currentMarket.ltp : cfg.basePrice;
   const change = currentMarket ? currentMarket.change : 0;
   const changePercent = currentMarket ? currentMarket.change_percent : 0;
@@ -53,11 +54,21 @@ export const DashboardPage: React.FC = () => {
   const percentDone = Math.min(100, Math.floor((elapsedSecs / 600) * 100));
 
   const handleQuickPaperTrade = () => {
-    const strikeStep = cfg.strikeStep;
-    const atmStrike = Math.round(ltp / strikeStep) * strikeStep;
-    const strike = currentSignal?.strike || atmStrike;
-    const side = currentSignal?.option_side || (isPositive ? 'CE' : 'PE');
-    const entryPrice = currentSignal?.entry || 145;
+    if (!marketActionable || !isConfirmed ||
+        !currentSignal || (currentSignal.decision !== 'CALL BUY' && currentSignal.decision !== 'PUT BUY') ||
+        !Number.isFinite(currentSignal.strike) || !Number.isFinite(currentSignal.entry) ||
+        !Number.isFinite(currentSignal.stop_loss) || !Number.isFinite(currentSignal.target)) {
+      alert('Paper trade blocked: a fresh verified market snapshot and fully validated confirmed signal are required.');
+      return;
+    }
+    const strike = currentSignal.strike!;
+    const side = currentSignal.option_side as 'CE' | 'PE';
+    if ((currentSignal.decision === 'CALL BUY' && side !== 'CE') ||
+        (currentSignal.decision === 'PUT BUY' && side !== 'PE')) {
+      alert('Paper trade blocked: signal option side does not match the decision.');
+      return;
+    }
+    const entryPrice = currentSignal.entry!;
 
     executePaperTrade({
       symbol: selectedIndex,
@@ -66,8 +77,8 @@ export const DashboardPage: React.FC = () => {
       action: 'BUY',
       lots: 2,
       entry_price: entryPrice,
-      stop_loss: currentSignal?.stop_loss || Number((entryPrice * 0.8).toFixed(1)),
-      target: currentSignal?.target || Number((entryPrice * 1.4).toFixed(1)),
+      stop_loss: currentSignal.stop_loss!,
+      target: currentSignal.target!,
     });
     setActiveTab('Paper Trading');
   };
@@ -125,7 +136,7 @@ export const DashboardPage: React.FC = () => {
                 </span>
               </div>
               <p className="text-[10px] text-slate-300 mt-0.5 line-clamp-1 font-sans">
-                {selectedIndex} Confluence: {currentMarket?.trend || 'BULLISH'} • PCR {currentMarket?.pcr || 1.12} • 10m Anti-Spike Gate Active
+                {marketActionable ? `${selectedIndex} Confluence: ${currentMarket?.trend || 'NEUTRAL'} • PCR ${currentMarket?.pcr ?? 'N/A'}` : 'OFFLINE PREVIEW • MARKET DATA NOT VERIFIED'} • 10m Safety Gate
               </p>
             </div>
           </div>
@@ -150,7 +161,7 @@ export const DashboardPage: React.FC = () => {
               </span>
             </div>
             <div className="text-2xl font-black text-white font-mono mt-1 tracking-tight">
-              ₹{ltp.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              {marketActionable ? `₹${ltp.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : 'N/A — OFFLINE'}
             </div>
           </div>
 
@@ -164,7 +175,7 @@ export const DashboardPage: React.FC = () => {
               <span>{isPositive ? '+' : ''}{change.toFixed(2)} ({isPositive ? '+' : ''}{changePercent.toFixed(2)}%)</span>
             </div>
             <div className="text-[11px] text-slate-400 font-mono mt-1">
-              India VIX: <span className="text-amber-300 font-bold">{currentMarket?.india_vix || 13.85}</span>
+              India VIX: <span className="text-amber-300 font-bold">{marketActionable ? currentMarket?.india_vix ?? 'N/A' : 'N/A'}</span>
             </div>
           </div>
         </div>
@@ -172,9 +183,9 @@ export const DashboardPage: React.FC = () => {
         {/* Range bar: Day Low to Day High */}
         <div className="mt-3.5 pt-3 border-t border-[#1C2740]/80">
           <div className="flex justify-between text-[10px] text-slate-400 font-mono mb-1">
-            <span>Low: ₹{currentMarket?.low.toLocaleString('en-IN')}</span>
-            <span className="text-cyan-400 font-semibold">VWAP: ₹{currentMarket?.vwap.toLocaleString('en-IN')}</span>
-            <span>High: ₹{currentMarket?.high.toLocaleString('en-IN')}</span>
+            <span>Low: {marketActionable ? `₹${currentMarket?.low.toLocaleString('en-IN')}` : 'N/A'}</span>
+            <span className="text-cyan-400 font-semibold">VWAP: {marketActionable ? `₹${currentMarket?.vwap.toLocaleString('en-IN')}` : 'N/A'}</span>
+            <span>High: {marketActionable ? `₹${currentMarket?.high.toLocaleString('en-IN')}` : 'N/A'}</span>
           </div>
           <div className="w-full h-1.5 bg-[#070B12] rounded-full overflow-hidden relative">
             <div
@@ -314,10 +325,10 @@ export const DashboardPage: React.FC = () => {
             <ArrowRight className="w-3 h-3 text-cyan-400" />
           </div>
           <div className="text-xl font-black text-white font-mono">
-            {currentMarket?.pcr || 1.15}
+            {marketActionable ? currentMarket?.pcr ?? 'N/A' : 'N/A'}
           </div>
           <div className="text-[10px] text-emerald-400 font-semibold mt-1">
-            {currentMarket && currentMarket.pcr >= 1.0 ? 'Bullish Put Writing Floor' : 'Bearish Call Resistance'}
+            {marketActionable && currentMarket ? (currentMarket.pcr >= 1.0 ? 'Bullish Put Writing Floor' : 'Bearish Call Resistance') : 'Awaiting verified data'}
           </div>
         </div>
 
@@ -331,7 +342,7 @@ export const DashboardPage: React.FC = () => {
             <ArrowRight className="w-3 h-3 text-cyan-400" />
           </div>
           <div className="text-xl font-black text-cyan-400 font-mono">
-            {currentMarket?.max_pain || Math.round(ltp / cfg.strikeStep) * cfg.strikeStep}
+            {marketActionable ? currentMarket?.max_pain ?? 'N/A' : 'N/A'}
           </div>
           <div className="text-[10px] text-slate-400 font-medium mt-1">
             Target expiry gravitational center
