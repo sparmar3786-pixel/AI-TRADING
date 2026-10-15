@@ -135,7 +135,7 @@ export const MarketIntelligencePage: React.FC = () => {
     void loadIntelligence();
     const interval = setInterval(() => {
       void loadIntelligence();
-    }, 60000);
+    }, 15 * 60 * 1000);
     return () => clearInterval(interval);
   }, [loadIntelligence]);
 
