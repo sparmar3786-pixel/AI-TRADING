@@ -3763,6 +3763,7 @@ def portfolio(_: str = Depends(_device)) -> dict[str, Any]:
 
 _signal_outcomes_memory: list[dict[str, Any]] = []
 SIGNAL_OUTCOMES_MAX_ROWS = 5000
+_signal_outcome_persistence: dict[str, Any] = {"status": "NOT_CHECKED", "last_error": None}
 
 
 def _signal_outcome_path() -> Path:
@@ -3781,9 +3782,12 @@ def _load_signal_outcomes() -> list[dict[str, Any]]:
                         dict(item) for item in raw
                         if isinstance(item, dict) and item.get("outcome_id")
                     )
-        except (OSError, ValueError, TypeError):
-            # Keep the last in-memory ledger if the persistent volume is temporarily unavailable.
-            pass
+                    _signal_outcome_persistence.update({"status": "OK", "last_error": None, "path": str(path), "records": len(_signal_outcomes_memory)})
+            else:
+                _signal_outcome_persistence.update({"status": "NOT_INITIALIZED", "last_error": None, "path": str(path), "records": len(_signal_outcomes_memory)})
+        except (OSError, ValueError, TypeError) as exc:
+            # Surface persistence failure; don't pretend in-memory-only results are durable.
+            _signal_outcome_persistence.update({"status": "ERROR", "last_error": type(exc).__name__, "path": str(path), "records": len(_signal_outcomes_memory)})
         return [dict(item) for item in _signal_outcomes_memory]
 
 
@@ -3798,8 +3802,10 @@ def _save_signal_outcomes(rows: list[dict[str, Any]]) -> bool:
             temporary = path.with_suffix(path.suffix + ".tmp")
             temporary.write_text(json.dumps(bounded, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
             temporary.replace(path)
+            _signal_outcome_persistence.update({"status": "OK", "last_error": None, "path": str(path), "records": len(bounded)})
             return True
-        except OSError:
+        except OSError as exc:
+            _signal_outcome_persistence.update({"status": "ERROR", "last_error": type(exc).__name__, "path": str(path), "records": len(bounded)})
             return False
 
 
@@ -3841,8 +3847,16 @@ def _signal_outcome_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
     targets = sum(1 for row in closed if row.get("exit_reason") == "TARGET")
     stops = sum(1 for row in closed if row.get("exit_reason") == "STOP_LOSS")
     count = len(closed)
-    net_pnl = [_number(row.get("net_pnl_inr")) for row in closed]
-    net_pnl_complete = bool(closed) and all(value is not None for value in net_pnl)
+    net_pnl = [
+        _number(row.get("net_pnl_inr"))
+        if row.get("pnl_status") == "RECORDED" and row.get("costs_inr") is not None else None
+        for row in closed
+    ]
+    net_values = [value for value in net_pnl if value is not None]
+    net_complete = bool(closed) and len(net_values) == count
+    net_wins = sum(1 for value in net_values if value > 0)
+    net_losses = sum(1 for value in net_values if value < 0)
+    net_break_even = sum(1 for value in net_values if value == 0)
     gross_points = [
         float(row["exit_price"]) - float(row["entry_price"])
         for row in closed
@@ -3853,31 +3867,46 @@ def _signal_outcome_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "open_count": sum(1 for row in rows if row.get("status") == "OPEN"),
         "target_hits": targets,
         "stop_loss_hits": stops,
-        "win_rate": targets / count if count else None,
-        "loss_rate": stops / count if count else None,
         "target_hit_rate": targets / count if count else None,
         "stop_loss_rate": stops / count if count else None,
+        # Target/SL outcomes are not the same as fee-adjusted profitable trades.
+        "win_rate": net_wins / len(net_values) if net_values else None,
+        "loss_rate": net_losses / len(net_values) if net_values else None,
+        "net_break_even_count": net_break_even,
+        "net_pnl_coverage_count": len(net_values),
         "gross_points_total": round(sum(gross_points), 4) if gross_points else None,
-        "net_pnl_inr": round(sum(float(value) for value in net_pnl if value is not None), 2) if net_pnl_complete else None,
-        "pnl_status": "RECORDED" if net_pnl_complete else "NOT_AVAILABLE_WITHOUT_QUANTITY_AND_ALL_COSTS",
+        "net_pnl_inr": round(sum(net_values), 2) if net_complete else None,
+        "pnl_status": "RECORDED" if net_complete else "UNAVAILABLE_COST_OR_QUANTITY_DATA",
     }
 
 
-def _signal_outcome_report(rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _signal_outcome_report(rows: list[dict[str, Any]], persistence: dict[str, Any] | None = None) -> dict[str, Any]:
     by_instrument: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
-        by_instrument.setdefault(str(row.get("index") or "UNKNOWN").upper(), []).append(row)
+        key = str(row.get("index") or "UNKNOWN").upper().replace(" ", "")
+        by_instrument.setdefault(key, []).append(row)
+    # Keep the requested categories visible even before enough observations exist.
+    # MCX is explicitly marked unsupported by this index-option signal tracker.
+    by_instrument.setdefault("NIFTY", [])
+    by_instrument.setdefault("BANKNIFTY", [])
     closed = sum(1 for row in rows if row.get("status") == "CLOSED" and row.get("exit_reason") in {"TARGET", "STOP_LOSS"})
+    mcx_note = {
+        "status": "NOT_TRACKED_BY_INDEX_OPTION_SIGNAL_ENGINE",
+        "closed_count": 0,
+        "message": "MCX requires its own live futures/commodity signal and quote-matching pipeline; do not interpret zero as 0% accuracy.",
+    }
     return {
         "status": "ok",
         "mode": "LIVE_SIGNAL_SHADOW_TRACKING",
         "accuracy_status": "UNVERIFIED_NO_CLOSED_SIGNAL_OUTCOMES" if closed == 0 else "OBSERVED_QUOTE_OUTCOMES",
         "metrics": _signal_outcome_metrics(rows),
         "by_instrument": {key: _signal_outcome_metrics(value) for key, value in sorted(by_instrument.items())},
+        "mcx": mcx_note,
+        "persistence": persistence or {"status": "UNKNOWN"},
         "outcome_count": len(rows),
         "recent_outcomes": rows[-100:],
-        "tracking_method": "fresh Angel One option quotes observed during background signal refresh; intra-refresh touches can be missed",
-        "message": "Shadow tracking only; target/stop counts reflect observed fresh quotes, not broker executions. INR net P&L is withheld unless explicit quantity, lot size and all rupee costs are recorded.",
+        "tracking_method": "fresh Angel One option quotes observed during background signal refresh; intra-refresh touches can be missed; target fills are assumed at target level",
+        "message": "Shadow estimates only, not broker executions. Net P&L is shown only when every closed outcome has an explicit quantity, lot size, and all cost values; win/loss rate uses fee-adjusted P&L coverage only.",
         "order_placement_enabled": False,
     }
 
@@ -4332,7 +4361,7 @@ def evaluate_strategies(body: dict[str, Any], _: str = Depends(_device)) -> dict
 
 @app.get("/v1/signals/performance")
 def signal_performance(_: str = Depends(_device)) -> dict[str, Any]:
-    return _signal_outcome_report(_load_signal_outcomes())
+    rows = _load_signal_outcomes()\n    return _signal_outcome_report(rows, dict(_signal_outcome_persistence))
 
 
 @app.get("/v1/signals")
