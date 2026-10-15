@@ -88,6 +88,16 @@ class NvidiaService {
     return Boolean(this.lastStatus?.active && Date.now() - this.lastStatus.checkedAt <= this.STATUS_TTL_MS);
   }
 
+  /** Record a real chat response without mistaking OpenRouter fallback for NVIDIA inference. */
+  public recordInferenceResult(provider: string, model: string): void {
+    const isNvidiaInference = /nvidia|nim/i.test(provider);
+    this.lastStatus = {
+      configured: isNvidiaInference || Boolean(this.lastStatus?.configured),
+      active: isNvidiaInference && Boolean(model.trim()),
+      checkedAt: Date.now(),
+    };
+  }
+
   public getEngineStatusLabel(): { label: string; isDirectKey: boolean } {
     return { label: 'NVIDIA STATUS REQUIRES RAILWAY VERIFICATION', isDirectKey: false };
   }
@@ -163,8 +173,8 @@ class NvidiaService {
         ['deterministic_fallback', 'none', 'template', 'offline'].includes(provider.toLowerCase())) {
       throw new Error('Backend did not confirm a real NVIDIA model inference.');
     }
-    this.lastStatus = { configured: true, active: true, checkedAt: Date.now() };
-    return { answer, model, provider: provider || 'NVIDIA NIM' };
+    this.recordInferenceResult(provider, model);
+    return { answer, model, provider: provider || 'Unknown provider' };
   }
 
 

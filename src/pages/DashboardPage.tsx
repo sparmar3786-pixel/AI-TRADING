@@ -41,8 +41,14 @@ export const DashboardPage: React.FC = () => {
 
   const marketActionable = apiService.isFreshLiveMarketRow(currentMarket);
   const ltp = currentMarket ? currentMarket.ltp : cfg.basePrice;
-  const change = currentMarket ? currentMarket.change : 0;
-  const changePercent = currentMarket ? currentMarket.change_percent : 0;
+  const change = currentMarket && Number.isFinite(currentMarket.change)
+    ? currentMarket.change
+    : currentMarket?.day_move_pct !== undefined && Number.isFinite(currentMarket.day_move_pct)
+      ? ltp * currentMarket.day_move_pct / 100 : 0;
+  const changePercent = currentMarket && Number.isFinite(currentMarket.change_percent)
+    ? currentMarket.change_percent
+    : currentMarket?.day_move_pct !== undefined && Number.isFinite(currentMarket.day_move_pct)
+      ? currentMarket.day_move_pct : 0;
   const isPositive = change >= 0;
 
   // Stability gate calculation
@@ -183,9 +189,9 @@ export const DashboardPage: React.FC = () => {
         {/* Range bar: Day Low to Day High */}
         <div className="mt-3.5 pt-3 border-t border-[#1C2740]/80">
           <div className="flex justify-between text-[10px] text-slate-400 font-mono mb-1">
-            <span>Low: {marketActionable ? `₹${currentMarket?.low.toLocaleString('en-IN')}` : 'N/A'}</span>
-            <span className="text-cyan-400 font-semibold">VWAP: {marketActionable ? `₹${currentMarket?.vwap.toLocaleString('en-IN')}` : 'N/A'}</span>
-            <span>High: {marketActionable ? `₹${currentMarket?.high.toLocaleString('en-IN')}` : 'N/A'}</span>
+            <span>Low: {marketActionable && (currentMarket?.session_low ?? currentMarket?.low) !== undefined ? `₹${(currentMarket?.session_low ?? currentMarket?.low)!.toLocaleString('en-IN')}` : 'N/A'}</span>
+            <span className="text-cyan-400 font-semibold">VWAP: {marketActionable && (currentMarket?.indicators?.vwap ?? currentMarket?.vwap) !== undefined ? `₹${(currentMarket?.indicators?.vwap ?? currentMarket?.vwap)!.toLocaleString('en-IN')}` : 'N/A'}</span>
+            <span>High: {marketActionable && (currentMarket?.session_high ?? currentMarket?.high) !== undefined ? `₹${(currentMarket?.session_high ?? currentMarket?.high)!.toLocaleString('en-IN')}` : 'N/A'}</span>
           </div>
           <div className="w-full h-1.5 bg-[#070B12] rounded-full overflow-hidden relative">
             <div

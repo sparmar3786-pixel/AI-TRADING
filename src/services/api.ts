@@ -61,10 +61,22 @@ class ApiService {
     const source = String((row as MarketRow & { source?: string; data_source?: string }).source ||
       (row as MarketRow & { data_source?: string }).data_source || '').toLowerCase();
     const trustedSource = /angel|smartapi|nse|bse|broker|exchange/.test(source);
-    const numericValues = [row.ltp, row.open, row.high, row.low, row.close, row.vwap, row.volume];
+    const rowWithOptionalMarketFields = row as MarketRow & {
+      session_high?: number; session_low?: number;
+    };
+    const requiredPriceValid = typeof row.ltp === 'number' && Number.isFinite(row.ltp) && row.ltp > 0;
+    const optionalValues = [
+      row.open, row.high, row.low, row.close, row.vwap, row.volume, row.pcr, row.max_pain, row.india_vix,
+      rowWithOptionalMarketFields.session_high, rowWithOptionalMarketFields.session_low,
+    ].filter(value => value !== undefined && value !== null);
+    const optionalNumbersValid = optionalValues.every(value =>
+      typeof value === 'number' && Number.isFinite(value) && value >= 0);
+    const high = typeof row.high === 'number' ? row.high : rowWithOptionalMarketFields.session_high;
+    const low = typeof row.low === 'number' ? row.low : rowWithOptionalMarketFields.session_low;
+    const rangeValid = typeof high !== 'number' || typeof low !== 'number' ||
+      (high >= low && row.ltp <= high && row.ltp >= low);
     return trustedSource && Number.isFinite(timestamp) && ageMs >= 0 && ageMs <= maxAgeMs &&
-      numericValues.every(value => Number.isFinite(value) && value >= 0) &&
-      row.ltp > 0 && row.high >= row.low && row.ltp <= row.high && row.ltp >= row.low;
+      requiredPriceValid && optionalNumbersValid && rangeValid;
   }
 
   private getOrCreateDeviceId(): string {
@@ -296,19 +308,47 @@ class ApiService {
 
       if (resp.ok) {
         const data = sanitizeRepositoryLinks(await resp.json()) as any;
-        const rows = data.market && typeof data.market === 'object'
-          ? Object.values(data.market) as MarketRow[]
-          : [];
-        const hasFreshLiveMarket = rows.length > 0 && rows.every(row => this.isFreshLiveMarketRow(row));
+        const rawMarket = data.market && typeof data.market === 'object'
+          ? data.market as Record<string, MarketRow>
+          : {};
+        const marketEntries = Object.entries(rawMarket);
+        const freshMarketKeys = new Set(
+          marketEntries.filter(([, row]) => this.isFreshLiveMarketRow(row)).map(([key]) => key.toUpperCase()),
+        );
+        const hasAnyFreshLiveMarket = marketEntries.length > 0 && freshMarketKeys.size > 0;
         const hasSignals = data.signals && Object.keys(data.signals).length > 0;
 
-        // A 200 response is not proof of fresh broker data. Fail closed if
-        // market rows lack an explicit live marker or fresh exchange timestamp.
-        if (hasFreshLiveMarket && hasSignals) {
+        // Keep individually verified symbols usable without allowing one stale
+        // index to make every other healthy index disappear.
+        if (hasAnyFreshLiveMarket && hasSignals) {
+          const market = Object.fromEntries(marketEntries.map(([key, row]) => [
+            key,
+            this.isFreshLiveMarketRow(row) ? row : { ...row, live: false },
+          ])) as Record<string, MarketRow>;
+          const signals = this.applyTenMinuteSignalGate(data.signals);
+          for (const [key, signal] of Object.entries(signals)) {
+            if (!freshMarketKeys.has(key.toUpperCase())) {
+              signals[key] = {
+                ...signal,
+                decision: 'WAIT',
+                candidate_decision: 'WAIT',
+                guards: [...new Set([...(signal.guards || []), 'MARKET_DATA_NOT_VERIFIED'])],
+                live_validation: {
+                  verdict: 'FAIL',
+                  decision: 'WAIT',
+                  blocks: [...new Set([
+                    ...(signal.live_validation?.blocks || []),
+                    'Market snapshot is stale or lacks a trusted source; signal forced to WAIT.',
+                  ])],
+                },
+                signal_stability: { state: 'NOT_ACTIONABLE', required_minutes: 10 },
+              };
+            }
+          }
           return {
-            signals: this.applyTenMinuteSignalGate(data.signals),
-            market: data.market,
-            isLive: true,
+            signals,
+            market,
+            isLive: marketEntries.every(([, row]) => this.isFreshLiveMarketRow(row)),
           };
         }
       }

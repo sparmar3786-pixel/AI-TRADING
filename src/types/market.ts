@@ -76,6 +76,10 @@ export interface MarketRow {
   /** Explicit upstream source; required for trading eligibility. */
   source?: string;
   data_source?: string;
+  day_move_pct?: number;
+  session_high?: number;
+  session_low?: number;
+  indicators?: { vwap?: number };
 }
 
 
