@@ -7,7 +7,7 @@ on:
       - 'flutter_app/**'
       - '.github/workflows/android-apk.yml'
   pull_request:
-    branches: [main]
+    branches: [main, fix/signal-backend-health-status]
     paths:
       - 'flutter_app/**'
       - '.github/workflows/android-apk.yml'
