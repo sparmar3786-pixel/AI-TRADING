@@ -43,10 +43,28 @@ class ApiService {
     const trimmed = (url || '').trim();
     if (!trimmed) return DEFAULT_SIGNAL_BACKEND;
     try {
-      return new URL(trimmed).origin;
+      const parsed = new URL(trimmed);
+      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return DEFAULT_SIGNAL_BACKEND;
+      if (parsed.search || parsed.hash || parsed.username || parsed.password) return DEFAULT_SIGNAL_BACKEND;
+      const path = parsed.pathname.replace(/\/+$/, '');
+      return parsed.origin + (path === '/' ? '' : path);
     } catch {
-      return trimmed.replace(/\/+$/, '');
+      return DEFAULT_SIGNAL_BACKEND;
     }
+  }
+
+  /** Only trusted, fresh, explicitly live exchange/broker snapshots may feed trading calculations. */
+  public isFreshLiveMarketRow(row: MarketRow | undefined, maxAgeMs = 120000): boolean {
+    if (!row || row.live !== true) return false;
+    const timestamp = Date.parse(row.timestamp || '');
+    const ageMs = Date.now() - timestamp;
+    const source = String((row as MarketRow & { source?: string; data_source?: string }).source ||
+      (row as MarketRow & { data_source?: string }).data_source || '').toLowerCase();
+    const trustedSource = /angel|smartapi|nse|bse|broker|exchange/.test(source);
+    const numericValues = [row.ltp, row.open, row.high, row.low, row.close, row.vwap, row.volume];
+    return trustedSource && Number.isFinite(timestamp) && ageMs >= 0 && ageMs <= maxAgeMs &&
+      numericValues.every(value => Number.isFinite(value) && value >= 0) &&
+      row.ltp > 0 && row.high >= row.low && row.ltp <= row.high && row.ltp >= row.low;
   }
 
   private getOrCreateDeviceId(): string {
@@ -119,16 +137,24 @@ class ApiService {
         decision: 'WAIT',
         blocks: ['Live validation missing; signal is not actionable.'],
       };
-      const guards = updatedSignal.guards || [];
-
-      const isCandidate = (decision === 'CALL BUY' || decision === 'PUT BUY') &&
-        updatedSignal.strike &&
-        updatedSignal.option_side &&
-        updatedSignal.entry &&
-        updatedSignal.stop_loss &&
-        updatedSignal.target &&
-        validation.verdict === 'PASS' &&
-        guards.length === 0;
+      const guards = Array.isArray(updatedSignal.guards) ? updatedSignal.guards : [];
+      const signalTimestamp = Date.parse(updatedSignal.timestamp || '');
+      const signalAgeMs = now - signalTimestamp;
+      const signalFresh = Number.isFinite(signalTimestamp) && signalAgeMs >= 0 && signalAgeMs <= 120000 &&
+        updatedSignal.data_fresh !== false;
+      const validPositive = (value: unknown): value is number =>
+        typeof value === 'number' && Number.isFinite(value) && value > 0;
+      const validTradeNumbers = validPositive(updatedSignal.strike) &&
+        validPositive(updatedSignal.entry) &&
+        validPositive(updatedSignal.stop_loss) &&
+        validPositive(updatedSignal.target) &&
+        updatedSignal.stop_loss < updatedSignal.entry &&
+        updatedSignal.target > updatedSignal.entry;
+      const sideMatchesDecision = (decision === 'CALL BUY' && updatedSignal.option_side === 'CE') ||
+        (decision === 'PUT BUY' && updatedSignal.option_side === 'PE');
+      const isBuy = decision === 'CALL BUY' || decision === 'PUT BUY';
+      const isCandidate = isBuy && signalFresh && validTradeNumbers && sideMatchesDecision &&
+        validation.verdict === 'PASS' && guards.length === 0;
 
       const storageKey = `ai_trading_signal_gate_${index}`;
 
@@ -145,6 +171,9 @@ class ApiService {
           if (guards.length > 0) {
             blocks.push('Signal blocked by risk guards: ' + guards.join(', '));
           }
+          if (!signalFresh) blocks.push('Signal timestamp missing, stale, malformed, or in the future; signal forced to WAIT.');
+          if (!validTradeNumbers) blocks.push('Strike/entry/stop-loss/target must be finite positive numbers with stop-loss < entry < target.');
+          if (!sideMatchesDecision) blocks.push('Option side conflicts with the BUY decision.');
           if (!updatedSignal.strike || !updatedSignal.option_side || !updatedSignal.entry ||
               !updatedSignal.stop_loss || !updatedSignal.target) {
             blocks.push('Required trade fields are incomplete; signal forced to WAIT.');
@@ -256,11 +285,7 @@ class ApiService {
         const rows = data.market && typeof data.market === 'object'
           ? Object.values(data.market) as MarketRow[]
           : [];
-        const hasFreshLiveMarket = rows.length > 0 && rows.every(row => {
-          const timestamp = Date.parse(row.timestamp || '');
-          const ageMs = Date.now() - timestamp;
-          return row.live === true && Number.isFinite(timestamp) && ageMs >= 0 && ageMs <= 120000;
-        });
+        const hasFreshLiveMarket = rows.length > 0 && rows.every(row => this.isFreshLiveMarketRow(row));
         const hasSignals = data.signals && Object.keys(data.signals).length > 0;
 
         // A 200 response is not proof of fresh broker data. Fail closed if
