@@ -2,7 +2,7 @@ name: AI-TRADING CI
 
 on:
   push:
-    branches: [main, integrate-trading-research-v2-20261010, fix/commodity-footprint-ai-provider-ui]
+    branches: [main, integrate-trading-research-v2-20261010, fix/commodity-footprint-ai-provider-ui, fix/enable-python-ci-and-audit]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -37,8 +37,8 @@ jobs:
       - name: Build production frontend
         run: npm run build
 
-  backend:
-    name: Optional Python backend tests
+  python-tests:
+    name: Python research-engine tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -46,25 +46,21 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Detect backend source
+      - name: Detect Python test suite
         id: detect
         shell: bash
         run: |
-          if [ -f backend/requirements.txt ] && [ -d tests ]; then
+          if [ -d tests ] && find tests -maxdepth 1 -type f \( -name 'test_*.py' -o -name '*_test.py' \) -print -quit | grep -q .; then
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
             echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping Python backend tests: this branch does not contain both backend/requirements.txt and tests/."
+            echo "No root-level Python unit-test files were found."
           fi
-      - name: Install backend runtime dependencies
+      - name: Run Python unit tests
         if: steps.detect.outputs.available == 'true'
-        run: python -m pip install -r backend/requirements.txt
-      - name: Run unit tests
-        if: steps.detect.outputs.available == 'true'
-        run: python -m unittest discover -s tests -v
-      - name: Build backend Docker image
-        if: steps.detect.outputs.available == 'true' && hashFiles('Dockerfile') != ''
-        run: docker build --tag ai-trading-api:ci .
-      - name: Explain backend test skip
+        run: python -m unittest discover -s tests -p 'test*.py' -v
+      - name: Fail if expected Python tests are missing
         if: steps.detect.outputs.available != 'true'
-        run: echo "No Python backend test suite is present on this branch; frontend CI still runs and must pass."
+        run: |
+          echo "::error::Python tests were not discovered; refusing to report the backend/research test job as a successful skip."
+          exit 1
