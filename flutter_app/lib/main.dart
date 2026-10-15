@@ -445,15 +445,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           status: status,
           onIndexSelected: (value) => setState(() => selectedIndex = value),
         ),
-        Builder(
-          builder: (tabContext) => QuantEngineLabPage(
-            backendUrl: backendUrl,
-            index: selectedIndex,
-            market: market,
-            lastFetch: lastFetch,
-            onOpenBacktest: () => DefaultTabController.of(tabContext).animateTo(tabs.indexOf('Backtesting')),
-          ),
-        ),
         const StrategyLibraryPage(),
       ]),
     ),
@@ -531,8 +522,6 @@ class DataHealthPage extends StatelessWidget {
           title: const Text('Market data'),
           subtitle: Text('Instrument master rows: ${_diagValue(diagnostics, 'instrument_master', 'row_count')} • Snapshots: ${_diagValue(diagnostics, 'market_data', 'snapshot_count')} • Fresh: ${_diagValue(diagnostics, 'market_data', 'fresh_snapshot_count')} • Live: ${_diagValue(diagnostics, 'market_data', 'live_snapshot_count')}'),
         ),
-        ListTile(
-          leading: const Icon(Icons.psychology_outlined),
         if (_diagValue(diagnostics, 'angel_one', 'last_error', fallback: '') != '')
           ListTile(leading: const Icon(Icons.warning_amber), title: const Text('Angel One error'), subtitle: Text(_diagValue(diagnostics, 'angel_one', 'last_error', fallback: ''))),
         if (_diagValue(diagnostics, 'angel_one', 'stream_error', fallback: '') != '')
