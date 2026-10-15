@@ -67,5 +67,26 @@ class OIPriceActionEngineTests(unittest.TestCase):
             OIPriceActionEngine(wick_ratio=0)
 
 
+    def test_candidate_generation_requires_timestamped_option_chain(self):
+        now = datetime(2026, 10, 15, 10, 0, tzinfo=IST)
+        result = OIPriceActionEngine().generate(
+            pd.DataFrame(), pd.DataFrame([{"strike": 25000}]), 25000, now
+        )
+        self.assertEqual(result.decision, "WAIT")
+        self.assertIn("QUOTE_TIMESTAMP_MISSING", result.guards)
+
+    def test_missing_oi_fields_fail_closed_instead_of_zero_filling(self):
+        engine = OIPriceActionEngine()
+        with self.assertRaisesRegex(ValueError, "Option-chain fields missing"):
+            engine._chain(pd.DataFrame([{"strike": 25000, "ce_oi": 100, "pe_oi": 100}]))
+
+    def test_serializer_marks_price_fields_as_underlying_spot(self):
+        from quant.oi_price_action_engine import QuantSignal
+        payload = to_signal_data(QuantSignal(entry=25000, stop_loss=24900, target=25200))
+        self.assertEqual(payload["entry_price_basis"], "UNDERLYING_SPOT")
+        self.assertEqual(payload["stop_loss_price_basis"], "UNDERLYING_SPOT")
+        self.assertEqual(payload["target_price_basis"], "UNDERLYING_SPOT")
+
+
 if __name__ == "__main__":
     unittest.main()
