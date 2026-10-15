@@ -58,7 +58,7 @@ jobs:
       - name: Verify removed chart pages are absent from Flutter source
         run: |
           set -euo pipefail
-          REMOVED_UI='SMC Pro Chart|SMC Chart|Smart Money Concepts Chart|Order Flow & Footprint|Order Flow Chart|Footprint Chart|FOOTPRINT CHART|class OrderFlowPage|MCX|Commodities|CRUDEOIL|NATURALGAS|CommodityPage|CommodityScreen|McxPage|MCXPage'
+          REMOVED_UI='SMC Pro Chart|SMC Chart|Smart Money Concepts Chart|Order Flow & Footprint|Order Flow Chart|Footprint Chart|FOOTPRINT CHART|class OrderFlowPage|MCX Commodities|MCX Commodity Exchange|CommodityPage|CommodityScreen|McxPage|MCXPage|CRUDEOIL|NATURALGAS'
           if grep -RniE "$REMOVED_UI" lib; then
             echo "Removed MCX, SMC, or Order Flow UI/code is still present in Flutter source."
             exit 1
@@ -92,7 +92,7 @@ jobs:
           mapfile -t CODE_FILES < <(unzip -Z1 "$APK" | grep -E '(^classes[0-9]*[.]dex$|^lib/[^/]+/libapp[.]so$)' || true)
           test "${#CODE_FILES[@]}" -gt 0
           COMPILED_STRINGS=$(for file in "${CODE_FILES[@]}"; do unzip -p "$APK" "$file" | strings; done)
-          if printf '%s\n' "$COMPILED_STRINGS" | grep -Ei 'SMC Pro Chart|SMC Chart|Smart Money Concepts Chart|Order Flow & Footprint|Order Flow Chart|Footprint Chart|FOOTPRINT CHART|MCX|Commodities|CRUDEOIL|NATURALGAS|CommodityPage|CommodityScreen|McxPage|MCXPage' >/dev/null; then
+          if printf '%s\n' "$COMPILED_STRINGS" | grep -Ei 'SMC Pro Chart|SMC Chart|Smart Money Concepts Chart|Order Flow & Footprint|Order Flow Chart|Footprint Chart|FOOTPRINT CHART|class OrderFlowPage|MCX Commodities|MCX Commodity Exchange|CommodityPage|CommodityScreen|McxPage|MCXPage|CRUDEOIL|NATURALGAS' >/dev/null; then
             echo "Removed MCX, SMC, or Order Flow label/code found in the compiled APK"
             exit 1
           fi
