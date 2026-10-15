@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 /// In-app, page-by-page companion to Fresh_Algo_Signal_Screenshots_Error_Report.pdf.
 /// Keeps the existing trading UI untouched and adds the report as a separate tab.
@@ -37,10 +36,10 @@ class PdfReportSolutionsPage extends StatelessWidget {
       'Screenshot 4: Backtesting tab — Backtest failed: HTTP 404: Not Found.',
       'Fix the backtest route by comparing the deployed API route and app URL; keep live execution disabled while validation is blocked.',
     ]),
-    ('PDF Page 5 • Screenshots 5–6', 'Repository Library', [
-      'Screenshot 5: Repository Library — list 2.',
-      'Screenshot 6: Repository Library — list 1.',
-      'Repository links are research references unless specific code has been separately ported, tested and licensed.',
+    ('PDF Page 5 • Screenshots 5–6', 'Trading workflow and validation', [
+      'Screenshot 5: Trading workflow status.',
+      'Screenshot 6: Trading workflow status.',
+      'This page focuses on integrated trading status, not external source links.',
     ]),
     ('PDF Page 6 • Screenshots 7–8', 'Trading Setup checklist and system flow', [
       'Screenshot 7: Live Setup Checklist — Angel login, live data and AI show CHECK.',
@@ -52,10 +51,10 @@ class PdfReportSolutionsPage extends StatelessWidget {
       'Screenshot 10: Trading Setup — modules 5 to 9 and disclaimer.',
       'Treat module status as evidence from the app/backend; do not mark a module healthy just because its screen exists.',
     ]),
-    ('PDF Page 8 • Screenshots 11–12', 'Research Engines and reference repositories', [
+    ('PDF Page 8 • Screenshots 11–12', 'Research Engines and validation', [
       'Screenshot 11: Research Engines — research sources.',
-      'Screenshot 12: 3-Layer Trade Engine — reference repositories.',
-      'Research repositories are not themselves live data sources or proof of working integration.',
+      'Screenshot 12: 3-Layer Trade Engine — validation output.',
+      'The page reports live backend outputs only when the backend returns them.',
     ]),
     ('PDF Page 9 • Screenshots 13–14', '3-Layer engine blocks and disabled monitor', [
       'Screenshot 13: Blocking reasons and Trade Monitor DISABLED.',
@@ -73,32 +72,17 @@ class PdfReportSolutionsPage extends StatelessWidget {
     '2. Indicators — more chart and dashboard links',
     '3. Signals — validation blocks and Live Execution DISABLED',
     '4. Backtesting — HTTP 404',
-    '5. Repository Library — list 2',
-    '6. Repository Library — list 1',
+    '5. Trading workflow status',
+    '6. Trading workflow status',
     '7. Trading Setup — live setup checklist',
     '8. Trading Setup — system flow and modules',
     '9. Trading Setup — modules 2 to 8',
     '10. Trading Setup — modules 5 to 9 and disclaimer',
     '11. Research Engines — research sources',
-    '12. 3-Layer Trade Engine — reference repositories',
+    '12. 3-Layer Trade Engine — validation output',
     '13. 3-Layer Trade Engine — blocking reasons and disabled monitor',
     '14. 3-Layer Trade Engine — all checks',
     '15. 3-Layer Trade Engine — Risk & Validation FAIL / WAIT',
-  ];
-
-  static const repositories = <(String, String, String)>[
-    ('Fresh-Apk • current app/backend repository', 'https://github.com/sparmar3786-pixel/Fresh-Apk/tree/fresh-platform-v1', 'Current target branch; contains the app, API client and backend integration.'),
-    ('Angel One SmartAPI Python SDK', 'https://github.com/angel-one/smartapi-python', 'Broker API reference; use backend-side credentials only.'),
-    ('Systematic trading strategies', 'https://github.com/paperswithbacktest/awesome-systematic-trading', 'Strategy research collection.'),
-    ('Algorithmic trading collection', 'https://github.com/joelowj/awesome-algorithmic-trading', 'Algorithmic trading tools and references.'),
-    ('Quant finance resources', 'https://github.com/wilsonfreitas/awesome-quant', 'Quantitative finance libraries and learning.'),
-    ('Deep trading research', 'https://github.com/cbailes/awesome-deep-trading', 'Deep-learning and trading references.'),
-    ('Trading strategy topic', 'https://github.com/topics/trading-strategies', 'Additional strategy repositories.'),
-    ('KLineChart', 'https://github.com/klinecharts/KLineChart', 'Candlestick chart library reference.'),
-    ('TradingView Lightweight Charts', 'https://github.com/tradingview/lightweight-charts', 'Lightweight charting library reference.'),
-    ('Railway FastAPI templates', 'https://github.com/railwayapp-templates/fastapi', 'Deployment template reference.'),
-    ('Railway dashboard', 'https://railway.com/dashboard', 'Inspect deployment status, variables and logs.'),
-    ('FastAPI documentation', 'https://fastapi.tiangolo.com', 'API routing and OpenAPI documentation.'),
   ];
 
   @override
@@ -154,22 +138,6 @@ class PdfReportSolutionsPage extends StatelessWidget {
             title: Text(screenshotCaptions[i], style: const TextStyle(fontSize: 12)),
           ),
       ])),
-      const SizedBox(height: 8),
-      const Text('REPOSITORY & DOCUMENTATION LINKS', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
-      const SizedBox(height: 6),
-      const Text('Links open externally. They are reference repositories unless their code has been separately ported, tested and licensed; adding a link does not mean its code was copied into the APK.',
-          style: TextStyle(color: Colors.white70, fontSize: 12)),
-      for (final item in repositories)
-        Card(child: ListTile(
-          leading: const Icon(Icons.code, color: Color(0xFF12D6FF)),
-          title: Text(item.$1, style: const TextStyle(fontWeight: FontWeight.w800)),
-          subtitle: Text(item.$3),
-          trailing: const Icon(Icons.open_in_new),
-          onTap: () async {
-            final uri = Uri.parse(item.$2);
-            await launchUrl(uri, mode: LaunchMode.externalApplication);
-          },
-        )),
       const SizedBox(height: 8),
       const Text('SAFETY STATUS FROM THE PDF', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
       const Card(child: Column(children: [
