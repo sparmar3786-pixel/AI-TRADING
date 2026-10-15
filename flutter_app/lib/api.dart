@@ -140,8 +140,6 @@ class FreshApi {
   Future<Map<String, dynamic>> systemDiagnostics() => getJson('/v1/system/diagnostics');
   Future<Map<String, dynamic>> metadata() => getJson('/v1/metadata');
   Future<Map<String, dynamic>> angelStatus() => getJson('/v1/angel/status');
-  Future<Map<String, dynamic>> testAIProviders() =>
-      FreshApi.signal().postJson('/v1/providers/ai/test', {});
   Future<Map<String, dynamic>> testSearchProviders() =>
       FreshApi.signal().postJson('/v1/providers/search/test', {});
 
@@ -241,21 +239,6 @@ class FreshApi {
         'gross_r': grossR,
         'notes': notes,
       });
-
-  /// NVIDIA-first cloud chat with OpenRouter fallback through the backend.
-  Future<Map<String, dynamic>> aiChat({
-    required String index,
-    required String question,
-    List<Map<String, String>> history = const [],
-  }) => FreshApi.signal().postJson(
-        '/v1/ai/nvidia-chat',
-        {
-          'index': index,
-          'question': question,
-          'history': history,
-        },
-        timeout: const Duration(seconds: 40),
-      );
 
   /// Historical candle fetches are bounded server-side to 45 seconds.
   Future<Map<String, dynamic>> historicalBacktest(
