@@ -30,7 +30,7 @@ jobs:
         with:
           channel: stable
           cache: true
-      - name: Verify repository links and local-model UI are absent
+      - name: Verify repository links, local models, and all AI UI are absent
         working-directory: .
         shell: bash
         run: |
@@ -43,11 +43,16 @@ jobs:
             echo "On-device GGUF/Qwen model code or dependency remains in the APK source."
             exit 1
           fi
+          if grep -RniE 'AI Access|AI Chat|NVIDIA|Gemini|OpenRouter|/v1/ai/|/v1/providers/ai|Multi-Agent AI|Live AI Validation|AI provider|sentiment with AI|Reflect on closed paper trades with AI|llama_flutter_android|LlamaController|\.gguf|GGUF model|offline Qwen' flutter_app/lib; then
+            echo "AI provider/model/chat UI or client endpoint remains in the APK source."
+            exit 1
+          fi
           if ! grep -Fq 'RepositoryLinkFilter.sanitizeValue(decoded)' flutter_app/lib/api.dart; then
             echo "Global API-response repository-link filtering is missing."
             exit 1
           fi
-          echo "Repository-link and on-device-model source guards passed."
+          grep -Fq "Strategies" flutter_app/lib/main.dart
+echo "Repository-link, AI-removal, and strategy-tab source guards passed."
       - name: Install Flutter dependencies
         run: flutter pub get
       - name: Analyze Dart
