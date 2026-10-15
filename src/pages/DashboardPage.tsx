@@ -109,8 +109,8 @@ export const DashboardPage: React.FC = () => {
                 </span>
                 <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold font-mono border ${
                   nvidiaService.isNvidiaConfigured()
-                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                    : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                    : 'bg-rose-500/15 text-rose-300 border-rose-500/30'
                 }`}>
                   {nvidiaService.isNvidiaConfigured() ? 'NVIDIA KEY CONFIGURED' : 'NVIDIA CLOUD NOT VERIFIED'}
                 </span>
