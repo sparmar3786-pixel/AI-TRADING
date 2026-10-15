@@ -28,6 +28,7 @@ def _connect():
         return None
     try:
         import psycopg
+        from psycopg.types.json import Jsonb
         connection = psycopg.connect(
             url,
             connect_timeout=2,
@@ -79,7 +80,7 @@ def put_state(key: str, value: Any) -> bool:
                 "VALUES (%s, %s, NOW()) "
                 "ON CONFLICT (state_key) DO UPDATE SET "
                 "state_json = EXCLUDED.state_json, updated_at = NOW()",
-                (key, value),
+                (key, Jsonb(value)),
             )
         return True
     except Exception:
