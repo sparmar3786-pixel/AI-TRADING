@@ -96,7 +96,7 @@ class _AiChatPageState extends State<AiChatPage> {
       var displayAnswer = answer;
       final rawEvidence = response['search_evidence'];
       final evidence = rawEvidence is List
-          ? rawEvidence.whereType<Map>().toList(growable: false)
+          ? rawEvidence.whereType<Map>().where((source) { final rawUrl = (source['url'] ?? source['source_url'] ?? source['link'] ?? '').toString().trim().toLowerCase(); final uri = Uri.tryParse(rawUrl); final host = uri?.host ?? ''; return !<String>{'github.com', 'www.github.com', 'raw.githubusercontent.com', 'gitlab.com', 'www.gitlab.com', 'bitbucket.org', 'www.bitbucket.org', 'sourceforge.net', 'www.sourceforge.net'}.contains(host); }).toList(growable: false)
           : <Map>[];
       if (evidence.isNotEmpty) {
         final sourceLines = <String>[];
