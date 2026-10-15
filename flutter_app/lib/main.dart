@@ -14,7 +14,7 @@ import 'quant_repositories_page.dart';
 import 'ai_chat_page.dart';
 import 'quant_engine_lab_page.dart';
 
-const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Repository Library','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home (Prototype)','PDF Report & Repositories','Quant Research Hub','Quant & Trading Repositories','AI Chat','Quant Engine Lab'];
+const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Integrated Engines','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home (Prototype)','PDF Reports','Quant Research Hub','Quant Engine Status','AI Chat','Quant Engine Lab'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
 
 void main() {
