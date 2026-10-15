@@ -12,21 +12,11 @@ import {
   Wallet,
   Settings,
   Key,
-  BrainCircuit,
-  Sparkles,
 } from 'lucide-react';
 import { useTrading } from '../context/TradingContext';
 import { apiService, INDEX_CONFIG } from '../services/api';
-import { nvidiaService } from '../services/nvidiaService';
 
 export const DashboardPage: React.FC = () => {
-  const [nvidiaBackendStatus, setNvidiaBackendStatus] = useState<{ configured: boolean; active: boolean }>({ configured: false, active: false });
-  useEffect(() => {
-    let mounted = true;
-    void nvidiaService.refreshNvidiaStatus().then(status => { if (mounted) setNvidiaBackendStatus(status); });
-    return () => { mounted = false; };
-  }, []);
-
   const {
     selectedIndex,
     market,
@@ -113,44 +103,6 @@ export const DashboardPage: React.FC = () => {
         <div className="flex items-center space-x-1 text-cyan-400 text-xs font-bold font-mono pl-2">
           <span>OPEN</span>
           <ArrowRight className="w-3.5 h-3.5" />
-        </div>
-      </div>
-
-      {/* NVIDIA AI Market Intelligence Quick Banner */}
-      <div
-        onClick={() => setActiveTab('Market Intelligence')}
-        className="p-3 rounded-xl bg-gradient-to-r from-[#121A2D] via-[#091122] to-[#121A2D] border border-cyan-500/40 hover:border-cyan-400 cursor-pointer active:scale-98 transition-all shadow-md group"
-      >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2.5">
-            <div className="p-2 rounded-xl bg-cyan-500/15 border border-cyan-500/30 text-cyan-400 group-hover:bg-cyan-500/25 transition-all">
-              <BrainCircuit className="w-5 h-5 animate-pulse" />
-            </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <span className="text-xs font-black text-white font-mono uppercase tracking-wide">
-                  NVIDIA AI Market Intelligence
-                </span>
-                <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold font-mono border ${
-                  nvidiaBackendStatus.active
-                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                    : nvidiaBackendStatus.configured
-                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                      : 'bg-rose-500/15 text-rose-300 border-rose-500/30'
-                }`}>
-                  {nvidiaBackendStatus.active ? 'NVIDIA INFERENCE ACTIVE' : nvidiaBackendStatus.configured ? 'NVIDIA CONFIGURED • INFERENCE UNVERIFIED' : 'NVIDIA CLOUD NOT VERIFIED'}
-                </span>
-              </div>
-              <p className="text-[10px] text-slate-300 mt-0.5 line-clamp-1 font-sans">
-                {marketActionable ? `${selectedIndex} Confluence: ${currentMarket?.trend || 'NEUTRAL'} • PCR ${currentMarket?.pcr ?? 'N/A'}` : 'OFFLINE PREVIEW • MARKET DATA NOT VERIFIED'} • 10m Safety Gate
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center space-x-1 text-cyan-400 text-xs font-bold font-mono pl-2">
-            <span>ASK AI</span>
-            <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
-          </div>
         </div>
       </div>
 
