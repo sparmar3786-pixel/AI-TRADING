@@ -16,17 +16,17 @@ def sample_daily():
 
 def sample_intraday(*, breakout=True, volume=True):
     start = datetime(2026, 10, 15, 9, 15, tzinfo=IST)
-    times = [start + timedelta(minutes=5 * i) for i in range(26)]
-    closes = [95.0 + (0.05 * (i % 3)) for i in range(26)]
+    times = [start + timedelta(minutes=5 * i) for i in range(28)]
+    closes = [95.0 + (0.05 * (i % 3)) for i in range(28)]
     if breakout:
         # Last three completed candles close above PDH; final row is the forming bar.
-        closes[22:25] = [101.0, 102.0, 103.0]
-        closes[25] = 103.2
+        closes[24:27] = [101.0, 102.0, 103.0]
+        closes[27] = 103.2
     highs = [c + 0.5 for c in closes]
     lows = [c - 0.5 for c in closes]
     frame = {"high": highs, "low": lows, "close": closes}
     if volume:
-        frame["volume"] = [100.0] * 24 + [500.0, 500.0]
+        frame["volume"] = [100.0] * 24 + [500.0, 500.0, 500.0, 500.0]
     return pd.DataFrame(frame, index=pd.DatetimeIndex(times))
 
 
@@ -53,6 +53,9 @@ class FailedMoveFadeTests(unittest.TestCase):
         )
         self.assertEqual(mapped["decision"], "WAIT")
         self.assertEqual(mapped["candidate_decision"], "CALL BUY")
+        self.assertEqual(mapped["live_validation"]["verdict"], "PENDING")
+        self.assertEqual(mapped["decision"], "WAIT")
+        self.assertEqual(mapped["entry_price_basis"], "UNDERLYING_SPOT")
         self.assertEqual(mapped["signal_stability"]["remaining_seconds"], 600)
 
     def test_stale_data_clears_candidate_and_prices(self):

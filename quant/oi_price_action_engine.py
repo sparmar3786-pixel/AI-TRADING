@@ -57,8 +57,10 @@ class QuantSignal:
 
 
 def _wait(reason: str, **metadata: Any) -> QuantSignal:
+    supplied_guards = metadata.pop("guards", [])
+    guards = list(dict.fromkeys(["NO_VALID_SETUP", *supplied_guards]))
     return QuantSignal(
-        reasons=[reason], guards=["NO_VALID_SETUP"],
+        reasons=[reason], guards=guards,
         live_validation={"verdict": "FAIL", "decision": "WAIT", "blocks": [reason]},
         **metadata,
     )
@@ -75,6 +77,7 @@ class OIPriceActionEngine:
         skip_first_minutes: int = 10, valid_from: str = "09:25",
         valid_until: str = "15:10", drop_forming_candle: bool = True,
         hold_bars: int = 1, wick_ratio: float = 2.0, use_depth_pressure: bool = True,
+        max_candle_age_seconds: int = 360, max_option_chain_age_seconds: int = 90,
     ):
         if atr_period < 2 or atr_sl_mult <= 0 or risk_reward <= 0 or min_score < 1:
             raise ValueError("Invalid engine risk/scoring configuration")
@@ -87,6 +90,10 @@ class OIPriceActionEngine:
         if hold_bars < 1 or wick_ratio <= 0:
             raise ValueError("Invalid price-action configuration")
         self.hold_bars, self.wick_ratio = hold_bars, wick_ratio
+        if max_candle_age_seconds <= 0 or max_option_chain_age_seconds <= 0:
+            raise ValueError("Freshness limits must be positive")
+        self.max_candle_age_seconds = int(max_candle_age_seconds)
+        self.max_option_chain_age_seconds = int(max_option_chain_age_seconds)
         self.use_depth_pressure = use_depth_pressure
         self.skip_first_minutes = skip_first_minutes
         self.valid_from = time.fromisoformat(valid_from)
@@ -107,6 +114,7 @@ class OIPriceActionEngine:
 
     def _chain(self, chain: pd.DataFrame) -> pd.DataFrame:
         df = chain.copy()
+        df.columns = [str(c).strip().lower() for c in df.columns]
         aliases = {
             "strike": ("strike", "strikeprice", "strike_price"),
             "ce_oi": ("ce_oi", "calloi", "call_oi", "ceoi"),
@@ -122,9 +130,10 @@ class OIPriceActionEngine:
         df = df.rename(columns=rename)
         if "strike" not in df:
             raise ValueError("option_chain must contain strike")
+        missing_oi = {"ce_oi", "pe_oi", "ce_oi_ch", "pe_oi_ch"} - set(df.columns)
+        if missing_oi:
+            raise ValueError("Option-chain fields missing: " + ", ".join(sorted(missing_oi)))
         for c in ("ce_oi", "pe_oi", "ce_oi_ch", "pe_oi_ch"):
-            if c not in df:
-                df[c] = 0.0
             df[c] = pd.to_numeric(df[c], errors="coerce")
         df["strike"] = pd.to_numeric(df["strike"], errors="coerce")
         df = df.dropna(subset=["strike", "ce_oi", "pe_oi", "ce_oi_ch", "pe_oi_ch"])
@@ -185,6 +194,7 @@ class OIPriceActionEngine:
         strike_step: int = 50, fut_oi_now: Optional[float] = None,
         fut_oi_prev: Optional[float] = None, spot_ref: Optional[float] = None,
         market_depth: Optional[dict[str, Any]] = None,
+        option_chain_timestamp: Optional[datetime] = None,
     ) -> QuantSignal:
         if not self._number(current_spot) or float(current_spot) <= 0:
             return _wait("Invalid spot price")
@@ -195,6 +205,17 @@ class OIPriceActionEngine:
             now = now.astimezone(IST)
         if not (self.valid_from <= now.time() <= self.valid_until):
             return _wait("Outside OI-PA trade window")
+        if option_chain is None or option_chain.empty:
+            return _wait("Option chain missing")
+        if option_chain_timestamp is None:
+            return _wait("Option-chain timestamp missing", guards=["QUOTE_TIMESTAMP_MISSING"])
+        try:
+            quote_time = option_chain_timestamp.replace(tzinfo=IST) if option_chain_timestamp.tzinfo is None else option_chain_timestamp.astimezone(IST)
+        except (AttributeError, TypeError, ValueError):
+            return _wait("Invalid option-chain timestamp", guards=["INVALID_QUOTE_TIMESTAMP"])
+        quote_age = (now - quote_time).total_seconds()
+        if quote_age < 0 or quote_age > self.max_option_chain_age_seconds:
+            return _wait("Option chain is stale or future-dated", guards=["STALE_OPTION_CHAIN"])
         if strike_step <= 0:
             return _wait("Invalid strike step")
         required = {"open", "high", "low", "close"}
@@ -210,6 +231,12 @@ class OIPriceActionEngine:
         df = df[(df.index.date == now.date()) & (df.index <= now)]
         if self.drop_forming and len(df) > 1:
             df = df.iloc[:-1]
+        if df.empty:
+            return _wait("No completed candles")
+        candle_time = df.index[-1].to_pydatetime()
+        candle_age = (now - candle_time).total_seconds()
+        if candle_age < 0 or candle_age > self.max_candle_age_seconds:
+            return _wait("Latest completed candle is stale or future-dated", guards=["STALE_CANDLES"])
         if len(df) < max(8, self.atr_period + 1):
             return _wait("Insufficient closed candles")
         if self.skip_first_minutes:
@@ -337,7 +364,7 @@ def to_signal_data(q: QuantSignal, index: str = "", timestamp: str = "", data_fr
         "target": None if wait else q.target, "risk_reward": None if wait else q.risk_reward,
         "confidence": 0.0 if wait else q.confidence, "regime": q.regime,
         "reasons": q.reasons, "guards": q.guards, "live_validation": q.live_validation,
-        "engine_source": "OI_PA", "pcr": q.pcr, "total_ce_oi": q.total_ce_oi, "total_pe_oi": q.total_pe_oi,
+        "engine_source": "OI_PA", "entry_price_basis": "UNDERLYING_SPOT", "stop_loss_price_basis": "UNDERLYING_SPOT", "target_price_basis": "UNDERLYING_SPOT", "pcr": q.pcr, "total_ce_oi": q.total_ce_oi, "total_pe_oi": q.total_pe_oi,
         "ce_oi_change": q.ce_oi_change,
         "pe_oi_change": q.pe_oi_change, "oi_bias": q.oi_bias,
         "price_oi_structure": q.price_oi_structure, "pressure": q.pressure,
