@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feat/ai-trading-signal-apk
+      - feat/strategy-tab-no-ai
     paths:
       - 'flutter_app/**'
       - '.github/workflows/flutter-source-check.yml'
