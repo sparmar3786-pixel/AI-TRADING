@@ -3979,13 +3979,13 @@ def _signal_outcome_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
     net_wins = sum(1 for value in net_values if value > 0)
     net_losses = sum(1 for value in net_values if value < 0)
     net_break_even = sum(1 for value in net_values if value == 0)
-    gross_points = [
-        (float(row["entry_price"]) - float(row["exit_price"]))
-        if row.get("instrument_type") == "MCX_FUTURE" and row.get("decision") == "SELL FUTURE"
-        else (float(row["exit_price"]) - float(row["entry_price"]))
-        for row in closed
-        if _number(row.get("exit_price")) is not None and _number(row.get("entry_price")) is not None
-    ]
+    gross_points = []
+    for row in closed:
+        entry, exit_price = _number(row.get("entry_price")), _number(row.get("exit_price"))
+        if entry is None or exit_price is None:
+            continue
+        is_short = str(row.get("decision") or "").upper() == "SELL FUTURE"
+        gross_points.append(entry - exit_price if is_short else exit_price - entry)
     return {
         "closed_count": count,
         "open_count": sum(1 for row in rows if row.get("status") == "OPEN"),
@@ -3993,7 +3993,6 @@ def _signal_outcome_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "stop_loss_hits": stops,
         "target_hit_rate": targets / count if count else None,
         "stop_loss_rate": stops / count if count else None,
-        # Target/SL outcomes are not the same as fee-adjusted profitable trades.
         "win_rate": net_wins / count if net_complete else None,
         "loss_rate": net_losses / count if net_complete else None,
         "net_break_even_count": net_break_even,
@@ -4003,104 +4002,97 @@ def _signal_outcome_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "pnl_status": "RECORDED" if net_complete else "UNAVAILABLE_COST_OR_QUANTITY_DATA",
     }
 
-
 def _signal_outcome_report(rows: list[dict[str, Any]], persistence: dict[str, Any] | None = None) -> dict[str, Any]:
     by_instrument: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         key = str(row.get("index") or "UNKNOWN").upper().replace(" ", "")
         by_instrument.setdefault(key, []).append(row)
-    # Keep the requested categories visible even before enough observations exist.
-    # MCX is explicitly marked unsupported by this index-option signal tracker.
     by_instrument.setdefault("NIFTY", [])
     by_instrument.setdefault("BANKNIFTY", [])
-    closed = sum(1 for row in rows if row.get("status") == "CLOSED" and row.get("exit_reason") in {"TARGET", "STOP_LOSS"})
-    mcx_rows = [row for row in rows if row.get("instrument_type") == "MCX_FUTURE"]
+    mcx_rows = [row for row in rows if row.get("signal_type") == "MCX_FUTURE"]
     mcx_closed = sum(1 for row in mcx_rows if row.get("status") == "CLOSED" and row.get("exit_reason") in {"TARGET", "STOP_LOSS"})
-    mcx_note = {
-        "status": "OBSERVED_QUOTE_OUTCOMES" if mcx_closed else "UNVERIFIED_NO_CLOSED_MCX_OUTCOMES",
-        "metrics": _signal_outcome_metrics(mcx_rows),
-        "instrument_count": len({str(row.get("index") or "").upper() for row in mcx_rows}),
-        "message": "MCX futures are shadow-tracked from fresh Angel One quotes; target/stop touches are observed, not broker fills. One lot is assumed unless a quantity is explicitly configured.",
-    }
+    closed = sum(1 for row in rows if row.get("status") == "CLOSED" and row.get("exit_reason") in {"TARGET", "STOP_LOSS"})
     return {
         "status": "ok",
         "mode": "LIVE_SIGNAL_SHADOW_TRACKING",
         "accuracy_status": "UNVERIFIED_NO_CLOSED_SIGNAL_OUTCOMES" if closed == 0 else "OBSERVED_QUOTE_OUTCOMES",
         "metrics": _signal_outcome_metrics(rows),
         "by_instrument": {key: _signal_outcome_metrics(value) for key, value in sorted(by_instrument.items())},
-        "mcx": mcx_note,
+        "mcx": {
+            "status": "OBSERVED_QUOTE_OUTCOMES" if mcx_closed else "WAITING_FOR_CLOSED_MCX_OUTCOMES",
+            "metrics": _signal_outcome_metrics(mcx_rows),
+            "instruments": {key: _signal_outcome_metrics([row for row in mcx_rows if str(row.get("index") or "").upper() == key]) for key in sorted({str(row.get("index") or "").upper() for row in mcx_rows})},
+            "message": "MCX futures are tracked separately using fresh timestamped futures quotes; this is shadow tracking, not broker fills.",
+        },
         "persistence": persistence or {"status": "UNKNOWN"},
         "outcome_count": len(rows),
         "recent_outcomes": rows[-100:],
-        "tracking_method": "fresh Angel One option quotes observed during background signal refresh; intra-refresh touches can be missed; target fills are assumed at target level",
+        "tracking_method": "fresh Angel One option quotes for NIFTY/BANKNIFTY and fresh timestamped MCX futures quotes; intra-refresh touches can be missed; target fills are assumed at target level",
         "message": "Shadow estimates only, not broker executions. Net P&L is shown only when every closed outcome has an explicit quantity, lot size, and all cost values; win/loss rate uses fee-adjusted P&L coverage only.",
         "order_placement_enabled": False,
     }
 
-
-def _update_signal_outcomes(signals: dict[str, Any], market: dict[str, Any], commodities: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def _update_signal_outcomes(
+    signals: dict[str, Any],
+    market: dict[str, Any],
+    commodities: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     rows = _load_signal_outcomes()
+    commodity_rows = [row for row in (commodities or []) if isinstance(row, dict)]
     changed = False
     now = _utc_now().isoformat()
-    # Resolve open shadow records only from a fresh quote for the exact option contract.
+
+    # Resolve open rows only from fresh source-timestamped quotes for their exact instrument.
     for outcome in rows:
         if outcome.get("status") != "OPEN":
             continue
-        index = str(outcome.get("index") or "").upper().replace(" ", "")
-        if outcome.get("instrument_type") == "MCX_FUTURE":
-            commodity = next((row for row in (commodities or []) if isinstance(row, dict)
-                              and str(row.get("name") or row.get("symbol") or "").upper().replace(" ", "") == index), None)
-            if not commodity or commodity.get("live") is not True:
-                continue
-            age = _number(commodity.get("age_seconds"))
-            if age is None or age < 0 or age > 60:
-                continue
-            if str(commodity.get("contract") or commodity.get("symbol") or "") != str(outcome.get("contract") or ""):
-                continue
-            if str(commodity.get("expiry") or "")[:10] != str(outcome.get("expiry") or "")[:10]:
-                continue
-            quote = commodity
-            price = _number(commodity.get("ltp"))
+        index = str(outcome.get("index") or "").upper()
+        is_mcx = outcome.get("signal_type") == "MCX_FUTURE"
+        if is_mcx:
+            quote = next((row for row in commodity_rows
+                          if str(row.get("name") or row.get("symbol") or "").upper() == index
+                          and row.get("live") is True
+                          and _number(row.get("ltp")) is not None
+                          and (_number(row.get("age_seconds")) is not None)
+                          and 0 <= float(row["age_seconds"]) <= 60
+                          and (row.get("source_timestamp") or row.get("timestamp"))), None)
+            price = _number(quote.get("ltp")) if quote else None
         else:
             quote = _signal_option_quote(index, {
                 "strike": outcome.get("strike"), "expiry": outcome.get("expiry"),
                 "option_type": outcome.get("option_type"), "decision": outcome.get("decision"),
             }, market)
-            price = _number(quote.get("ltp")) if quote is not None else None
-        if quote is None or price is None or price <= 0:
+            price = _number(quote.get("ltp")) if quote else None
+        if quote is None or price is None:
             continue
         outcome["last_price"] = price
         outcome["last_price_at"] = quote.get("source_timestamp") or quote.get("timestamp")
         outcome["last_observed_at"] = now
         outcome["max_seen_price"] = max(float(outcome.get("max_seen_price") or price), price)
         outcome["min_seen_price"] = min(float(outcome.get("min_seen_price") or price), price)
-        entry = _number(outcome.get("entry_price"))
-        stop = _number(outcome.get("stop_loss"))
-        target = _number(outcome.get("target"))
-        is_short_future = outcome.get("instrument_type") == "MCX_FUTURE" and outcome.get("decision") == "SELL FUTURE"
-        target_touched = target is not None and (price <= target if is_short_future else price >= target)
-        stop_touched = stop is not None and (price >= stop if is_short_future else price <= stop)
+        entry, stop, target = (_number(outcome.get(key)) for key in ("entry_price", "stop_loss", "target"))
+        is_short = str(outcome.get("decision") or "").upper() == "SELL FUTURE"
+        target_touched = target is not None and (price <= target if is_short else price >= target)
+        stop_touched = stop is not None and (price >= stop if is_short else price <= stop)
         exit_reason = "TARGET" if target_touched else "STOP_LOSS" if stop_touched else None
         changed = True
         if exit_reason is None:
             continue
         outcome["status"] = "CLOSED"
         outcome["exit_reason"] = exit_reason
-        # Do not credit an overshoot beyond the target. For stop-outs, retain the
-        # observed quote so a gap through the stop is not hidden.
+        # Target fills are conservatively booked at the target; stop gaps use observed quote.
         exit_price = target if exit_reason == "TARGET" and target is not None else price
+        signed_points = (entry - exit_price) if is_short and entry is not None else (exit_price - entry) if entry is not None else None
         outcome["observed_exit_price"] = price
         outcome["exit_price"] = exit_price
         outcome["exit_price_basis"] = "target_level_assumed" if exit_reason == "TARGET" else "observed_stop_quote"
         outcome["closed_at"] = now
-        outcome["gross_points"] = round(exit_price - entry, 4) if entry is not None else None
+        outcome["gross_points"] = round(signed_points, 4) if signed_points is not None else None
         risk_distance = abs(entry - stop) if entry is not None and stop is not None else None
-        outcome["gross_r"] = round((exit_price - entry) / risk_distance, 6) if entry is not None and risk_distance else None
-        quantity = _number(outcome.get("quantity"))
-        lot_size = _number(outcome.get("lot_size"))
-        if entry is not None and quantity is not None and quantity > 0 and lot_size is not None and lot_size > 0:
-            point_delta = entry - exit_price if is_short_future else exit_price - entry
-            outcome["gross_pnl_inr"] = round(point_delta * quantity * lot_size, 2)
+        outcome["gross_r"] = round(signed_points / risk_distance, 6) if signed_points is not None and risk_distance else None
+        quantity, lot_size = _number(outcome.get("quantity")), _number(outcome.get("lot_size"))
+        if signed_points is not None and quantity is not None and quantity > 0 and lot_size is not None and lot_size > 0:
+            outcome["gross_pnl_inr"] = round(signed_points * quantity * lot_size, 2)
         costs = {
             "brokerage_inr": _number(os.getenv("PAPER_BROKERAGE_INR_PER_ROUND_TRIP")),
             "slippage_inr": _number(os.getenv("PAPER_SLIPPAGE_INR_PER_ROUND_TRIP")),
@@ -4113,7 +4105,8 @@ def _update_signal_outcomes(signals: dict[str, Any], market: dict[str, Any], com
         else:
             outcome["net_pnl_inr"] = None
             outcome["pnl_status"] = "NOT_AVAILABLE_WITHOUT_QUANTITY_AND_ALL_COSTS"
-    # Only add signals that passed every gate and have a fresh matching option quote.
+
+    # Index options: require the full validation gates and a fresh matching option quote.
     for index, signal in signals.items():
         if not isinstance(signal, dict):
             continue
@@ -4128,8 +4121,7 @@ def _update_signal_outcomes(signals: dict[str, Any], market: dict[str, Any], com
         ):
             continue
         entry, stop, target = (_number(signal.get(key)) for key in ("entry", "stop_loss", "target"))
-        strike = _number(signal.get("strike"))
-        expiry = str(signal.get("expiry") or "")[:10]
+        strike, expiry = _number(signal.get("strike")), str(signal.get("expiry") or "")[:10]
         if entry is None or stop is None or target is None or strike is None or not expiry or not 0 < stop < entry < target:
             continue
         quote = _signal_option_quote(str(index).upper(), signal, market)
@@ -4137,22 +4129,19 @@ def _update_signal_outcomes(signals: dict[str, Any], market: dict[str, Any], com
             continue
         confirmation = signal.get("confirmation_state") if isinstance(signal.get("confirmation_state"), dict) else {}
         signature_payload = {
-            "index": str(index).upper(), "decision": decision, "strike": strike,
-            "expiry": expiry, "entry": entry,
+            "signal_type": "INDEX_OPTION", "index": str(index).upper(), "decision": decision,
+            "strike": strike, "expiry": expiry, "entry": entry,
             "since": str(stability.get("since_utc") or confirmation.get("since_utc") or ""),
         }
         signature = hashlib.sha256(json.dumps(signature_payload, sort_keys=True).encode()).hexdigest()
         if any(str(row.get("signature") or "") == signature for row in rows):
             continue
-        trade_plan = signal.get("trade_plan") if isinstance(signal.get("trade_plan"), dict) else {}
-        quantity = _number(trade_plan.get("quantity") or signal.get("quantity")) or 1.0
-        lot_size = _number(trade_plan.get("lot_size") or signal.get("lot_size"))
+        plan = signal.get("trade_plan") if isinstance(signal.get("trade_plan"), dict) else {}
+        quantity, lot_size = _number(plan.get("quantity") or signal.get("quantity")), _number(plan.get("lot_size") or signal.get("lot_size"))
         rows.append({
-            "outcome_id": f"sig-{uuid.uuid4().hex}",
-            "signature": signature, "index": str(index).upper(),
-            "instrument_type": "INDEX_OPTION",
-            "quantity_basis": "configured_quantity_or_assumed_one_lot",
-            "decision": decision, "option_type": "CALL" if decision == "CALL BUY" else "PUT",
+            "outcome_id": f"sig-{uuid.uuid4().hex}", "signature": signature,
+            "signal_type": "INDEX_OPTION", "index": str(index).upper(), "decision": decision,
+            "option_type": "CALL" if decision == "CALL BUY" else "PUT",
             "strike": strike, "expiry": expiry, "entry_price": entry,
             "stop_loss": stop, "target": target, "quantity": quantity, "lot_size": lot_size,
             "status": "OPEN", "exit_reason": None, "exit_price": None,
@@ -4166,55 +4155,58 @@ def _update_signal_outcomes(signals: dict[str, Any], market: dict[str, Any], com
             "paper_only": True, "order_placement_enabled": False,
         })
         changed = True
-    # Track confirmed MCX futures separately from index options. Use the exact
-    # current futures contract and direction-aware target/stop comparisons.
-    for commodity in commodities or []:
-        if not isinstance(commodity, dict):
-            continue
-        name = str(commodity.get("name") or commodity.get("symbol") or "").upper().replace(" ", "")
+
+    # MCX futures have a distinct underlying-price/ATR signal; never route them through option-chain matching.
+    for commodity in commodity_rows:
+        name = str(commodity.get("name") or commodity.get("symbol") or "").upper()
         decision = str(commodity.get("decision") or "").upper()
-        if (decision not in {"BUY FUTURE", "SELL FUTURE"}
-                or commodity.get("live") is not True
-                or (commodity.get("signal_stability") or {}).get("state") != "CONFIRMED"):
-            continue
-        entry, stop, target = (_number(commodity.get(key)) for key in ("entry", "stop_loss", "target"))
-        price = _number(commodity.get("ltp"))
-        expiry = str(commodity.get("expiry") or "")[:10]
-        contract = str(commodity.get("contract") or commodity.get("symbol") or "")
+        stability = commodity.get("signal_stability") if isinstance(commodity.get("signal_stability"), dict) else {}
         age = _number(commodity.get("age_seconds"))
-        layers = commodity.get("layers") if isinstance(commodity.get("layers"), dict) else {}
-        contract_layer = layers.get("contract_selection") if isinstance(layers.get("contract_selection"), dict) else {}
-        lot_size = _number(commodity.get("lotsize") or contract_layer.get("lot_size"))
-        if (not name or not contract or not expiry or entry is None or stop is None or target is None
-                or price is None or price <= 0 or age is None or not 0 <= age <= 60
-                or lot_size is None or lot_size <= 0):
+        entry, stop, target = (_number(commodity.get(key)) for key in ("entry", "stop_loss", "target"))
+        if (
+            name not in COMMODITY_NAMES
+            or decision not in {"BUY FUTURE", "SELL FUTURE"}
+            or commodity.get("live") is not True
+            or age is None or not 0 <= age <= 60
+            or stability.get("state") != "CONFIRMED"
+            or entry is None or stop is None or target is None
+            or not (0 < stop < entry < target if decision == "BUY FUTURE" else 0 < target < entry < stop)
+        ):
             continue
-        signature_payload = {"instrument_type": "MCX_FUTURE", "index": name, "decision": decision,
-                             "contract": contract, "expiry": expiry, "entry": entry,
-                             "since": str((commodity.get("confirmation_state") or {}).get("since_utc") or "")}
+        contract = str(commodity.get("contract") or commodity.get("symbol") or name)
+        expiry = str(commodity.get("expiry") or "")[:10]
+        source_timestamp = commodity.get("source_timestamp") or commodity.get("timestamp")
+        if not expiry or not source_timestamp or _number(commodity.get("ltp")) is None:
+            continue
+        signature_payload = {
+            "signal_type": "MCX_FUTURE", "index": name, "decision": decision,
+            "contract": contract, "expiry": expiry, "entry": entry,
+            "since": str(stability.get("since_utc") or ""),
+        }
         signature = hashlib.sha256(json.dumps(signature_payload, sort_keys=True).encode()).hexdigest()
         if any(str(row.get("signature") or "") == signature for row in rows):
             continue
+        lot_size = _number(commodity.get("lotsize"))
+        quantity = _number(os.getenv("PAPER_MCX_QUANTITY_LOTS"))
         rows.append({
-            "outcome_id": f"sig-{uuid.uuid4().hex}", "signature": signature,
-            "index": name, "instrument_type": "MCX_FUTURE", "decision": decision,
-            "direction": "SHORT" if decision == "SELL FUTURE" else "LONG",
+            "outcome_id": f"mcx-{uuid.uuid4().hex}", "signature": signature,
+            "signal_type": "MCX_FUTURE", "index": name, "decision": decision,
             "contract": contract, "expiry": expiry, "entry_price": entry,
-            "stop_loss": stop, "target": target, "quantity": 1.0,
-            "quantity_basis": "assumed_one_lot", "lot_size": lot_size,
+            "stop_loss": stop, "target": target, "quantity": quantity, "lot_size": lot_size,
             "status": "OPEN", "exit_reason": None, "exit_price": None,
             "gross_points": None, "gross_pnl_inr": None, "net_pnl_inr": None,
             "pnl_status": "OPEN", "opened_at": now,
-            "last_price": price, "last_price_at": commodity.get("source_timestamp") or commodity.get("timestamp"),
-            "last_observed_at": now, "max_seen_price": price, "min_seen_price": price,
+            "last_price": _number(commodity.get("ltp")), "last_price_at": source_timestamp,
+            "last_observed_at": now, "max_seen_price": _number(commodity.get("ltp")),
+            "min_seen_price": _number(commodity.get("ltp")),
             "source": "angelone_smartapi_fresh_mcx_future_quote",
             "paper_only": True, "order_placement_enabled": False,
         })
         changed = True
+
     if changed:
         _save_signal_outcomes(rows)
-    return _signal_outcome_report(rows)
-
+    return _signal_outcome_report(rows, persistence=_signal_outcome_persistence)
 
 _paper_trades_memory: dict[str, dict[str, Any]] = {}
 
