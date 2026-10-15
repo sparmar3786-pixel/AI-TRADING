@@ -33,6 +33,37 @@ class PaperPerformanceSummaryTests(unittest.TestCase):
         self.assertIsNone(report["metrics"]["net_pnl_inr"])
         self.assertEqual(report["metrics"]["pnl_status"], "NOT_AVAILABLE_FOR_ALL_TRADES")
 
+    def test_confirmed_signal_is_shadow_tracked_until_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ledger_path = os.path.join(directory, "signal_outcomes.json")
+            with patch.dict(os.environ, {"SIGNAL_OUTCOMES_FILE": ledger_path}, clear=False):
+                _signal_outcomes_memory.clear()
+                signal = {
+                    "decision": "CALL BUY", "option_type": "CALL", "strike": 25000,
+                    "expiry": "2026-10-29", "entry": 100.0, "stop_loss": 90.0, "target": 120.0,
+                    "data_fresh": True, "live_validation": {"verdict": "PASS"},
+                    "signal_stability": {"state": "CONFIRMED"},
+                    "trade_plan": {"lot_size": 50, "quantity": 1},
+                }
+                market = {"NIFTY": {
+                    "live": True, "option_chain": [{
+                        "strike": 25000, "expiry": "2026-10-29", "option_type": "CALL",
+                        "ltp": 100.0, "age_seconds": 2, "live": True,
+                        "source_timestamp": "2026-10-15T08:00:00+00:00",
+                    }],
+                }}
+                first = _update_signal_outcomes({"NIFTY": signal}, market)
+                self.assertEqual(first["metrics"]["open_count"], 1)
+                market["NIFTY"]["option_chain"][0]["ltp"] = 121.0
+                second = _update_signal_outcomes({}, market)
+                self.assertEqual(second["metrics"]["closed_count"], 1)
+                self.assertEqual(second["metrics"]["target_hits"], 1)
+                self.assertEqual(second["metrics"]["stop_loss_hits"], 0)
+                self.assertEqual(second["metrics"]["gross_points_total"], 21.0)
+                self.assertIsNone(second["metrics"]["net_pnl_inr"])
+                self.assertEqual(second["accuracy_status"], "OBSERVED_QUOTE_OUTCOMES")
+                _signal_outcomes_memory.clear()
+
     def test_empty_history_is_explicitly_unverified(self):
         report = _paper_performance_summary([])
         self.assertEqual(report["trade_count"], 0)
