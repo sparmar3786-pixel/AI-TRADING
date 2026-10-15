@@ -65,7 +65,7 @@ export const SettingsPage: React.FC = () => {
   const handleTestAndSaveNvidiaKey = async () => {
     if (!nvidiaKey.trim()) {
       nvidiaService.setNvidiaApiKey('');
-      setNvidiaStatus({ text: 'NVIDIA API Key cleared. AI section will use Built-in Quant Engine.', ok: true });
+      setNvidiaStatus({ text: 'Direct NVIDIA key cleared. Cloud AI requires a successful server-side inference.', ok: true });
       return;
     }
     setNvidiaTesting(true);
@@ -75,7 +75,7 @@ export const SettingsPage: React.FC = () => {
     if (res.valid) {
       nvidiaService.setNvidiaApiKey(nvidiaKey);
       nvidiaService.setSelectedModel(nvidiaModel);
-      setNvidiaStatus({ text: '✅ NVIDIA NIM API Key connected and verified successfully!', ok: true });
+      setNvidiaStatus({ text: 'NVIDIA key authenticated at the model catalog. Actual inference is not yet verified.', ok: true });
     } else {
       setNvidiaStatus({ text: `❌ ${res.message}`, ok: false });
     }
