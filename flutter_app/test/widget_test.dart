@@ -42,7 +42,7 @@ void main() {
   testWidgets('PDF report tab includes report pages but no repository links', (tester) async {
     await tester.pumpWidget(const FreshApp());
     final tabBarContext = tester.element(find.byType(TabBar).first);
-    DefaultTabController.of(tabBarContext).animateTo(tabs.indexOf('PDF Report & Repositories'));
+    DefaultTabController.of(tabBarContext).animateTo(tabs.indexOf('PDF Reports'));
     await tester.pumpAndSettle();
     expect(find.text('PDF REPORT • ALL 10 PAGES & FIX CHECKLIST'), findsOneWidget);
     expect(find.textContaining('PDF Page 1'), findsOneWidget);
@@ -151,7 +151,7 @@ void main() {
     final dataHealth = find.byKey(const ValueKey('drawer-tab-Data Health'));
     await tester.scrollUntilVisible(dataHealth, 250, scrollable: drawerScrollable);
     expect(dataHealth, findsOneWidget);
-    final repositoryLibrary = find.byKey(const ValueKey('drawer-tab-Repository Library'));
+    final repositoryLibrary = find.byKey(const ValueKey('drawer-tab-Integrated Engines'));
     await tester.scrollUntilVisible(repositoryLibrary, 250, scrollable: drawerScrollable);
     expect(repositoryLibrary, findsOneWidget);
     await tester.scrollUntilVisible(apiRailway, 250, scrollable: drawerScrollable);
