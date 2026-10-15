@@ -132,11 +132,25 @@ class ApiService {
       const index = key.toUpperCase();
       const updatedSignal = { ...signal };
       const decision = (updatedSignal.decision || 'WAIT').toUpperCase();
-      const validation = updatedSignal.live_validation ?? {
-        verdict: 'FAIL' as const,
-        decision: 'WAIT',
-        blocks: ['Live validation missing; signal is not actionable.'],
-      };
+      const rawValidation = updatedSignal.live_validation;
+      const validation: NonNullable<SignalData['live_validation']> =
+        rawValidation && typeof rawValidation === 'object'
+          ? {
+              verdict: rawValidation.verdict === 'PASS' || rawValidation.verdict === 'WARN' || rawValidation.verdict === 'FAIL'
+                ? rawValidation.verdict : 'FAIL',
+              decision: typeof rawValidation.decision === 'string' ? rawValidation.decision : 'WAIT',
+              blocks: Array.isArray(rawValidation.blocks)
+                ? rawValidation.blocks.filter((block): block is string => typeof block === 'string')
+                : ['Live validation blocks are malformed; signal is not actionable.'],
+              reasons: Array.isArray(rawValidation.reasons)
+                ? rawValidation.reasons.filter((reason): reason is string => typeof reason === 'string')
+                : undefined,
+            }
+          : {
+              verdict: 'FAIL',
+              decision: 'WAIT',
+              blocks: ['Live validation missing; signal is not actionable.'],
+            };
       const guards = Array.isArray(updatedSignal.guards) ? updatedSignal.guards : [];
       const signalTimestamp = Date.parse(updatedSignal.timestamp || '');
       const signalAgeMs = now - signalTimestamp;
