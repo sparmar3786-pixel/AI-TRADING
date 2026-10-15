@@ -94,6 +94,7 @@ class PaperPerformanceSummaryTests(unittest.TestCase):
             ledger_path = os.path.join(directory, "signal_outcomes.json")
             costs = {
                 "SIGNAL_OUTCOMES_FILE": ledger_path,
+                "PAPER_MCX_QUANTITY_LOTS": "1",
                 "PAPER_BROKERAGE_INR_PER_ROUND_TRIP": "10",
                 "PAPER_SLIPPAGE_INR_PER_ROUND_TRIP": "5",
                 "PAPER_OTHER_COSTS_INR_PER_ROUND_TRIP": "5",
