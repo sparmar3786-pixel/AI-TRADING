@@ -104,7 +104,7 @@ class _StrategyCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ready = item.state == 'SOURCE PRESENT';
+    final ready = item.state == 'SOURCE BUNDLED';
     final color = ready ? Colors.orangeAccent : Colors.redAccent;
     return Card(
       margin: const EdgeInsets.only(bottom: 9),
