@@ -3924,11 +3924,13 @@ def _signal_outcome_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
     net_wins = sum(1 for value in net_values if value > 0)
     net_losses = sum(1 for value in net_values if value < 0)
     net_break_even = sum(1 for value in net_values if value == 0)
-    gross_points = [
-        float(row["exit_price"]) - float(row["entry_price"])
-        for row in closed
-        if _number(row.get("exit_price")) is not None and _number(row.get("entry_price")) is not None
-    ]
+    gross_points = []
+    for row in closed:
+        entry, exit_price = _number(row.get("entry_price")), _number(row.get("exit_price"))
+        if entry is None or exit_price is None:
+            continue
+        is_short = str(row.get("decision") or "").upper() == "SELL FUTURE"
+        gross_points.append(entry - exit_price if is_short else exit_price - entry)
     return {
         "closed_count": count,
         "open_count": sum(1 for row in rows if row.get("status") == "OPEN"),
@@ -3936,7 +3938,6 @@ def _signal_outcome_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "stop_loss_hits": stops,
         "target_hit_rate": targets / count if count else None,
         "stop_loss_rate": stops / count if count else None,
-        # Target/SL outcomes are not the same as fee-adjusted profitable trades.
         "win_rate": net_wins / len(net_values) if net_values else None,
         "loss_rate": net_losses / len(net_values) if net_values else None,
         "net_break_even_count": net_break_even,
@@ -3946,37 +3947,35 @@ def _signal_outcome_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "pnl_status": "RECORDED" if net_complete else "UNAVAILABLE_COST_OR_QUANTITY_DATA",
     }
 
-
 def _signal_outcome_report(rows: list[dict[str, Any]], persistence: dict[str, Any] | None = None) -> dict[str, Any]:
     by_instrument: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         key = str(row.get("index") or "UNKNOWN").upper().replace(" ", "")
         by_instrument.setdefault(key, []).append(row)
-    # Keep the requested categories visible even before enough observations exist.
-    # MCX is explicitly marked unsupported by this index-option signal tracker.
     by_instrument.setdefault("NIFTY", [])
     by_instrument.setdefault("BANKNIFTY", [])
+    mcx_rows = [row for row in rows if row.get("signal_type") == "MCX_FUTURE"]
+    mcx_closed = sum(1 for row in mcx_rows if row.get("status") == "CLOSED" and row.get("exit_reason") in {"TARGET", "STOP_LOSS"})
     closed = sum(1 for row in rows if row.get("status") == "CLOSED" and row.get("exit_reason") in {"TARGET", "STOP_LOSS"})
-    mcx_note = {
-        "status": "NOT_TRACKED_BY_INDEX_OPTION_SIGNAL_ENGINE",
-        "closed_count": 0,
-        "message": "MCX requires its own live futures/commodity signal and quote-matching pipeline; do not interpret zero as 0% accuracy.",
-    }
     return {
         "status": "ok",
         "mode": "LIVE_SIGNAL_SHADOW_TRACKING",
         "accuracy_status": "UNVERIFIED_NO_CLOSED_SIGNAL_OUTCOMES" if closed == 0 else "OBSERVED_QUOTE_OUTCOMES",
         "metrics": _signal_outcome_metrics(rows),
         "by_instrument": {key: _signal_outcome_metrics(value) for key, value in sorted(by_instrument.items())},
-        "mcx": mcx_note,
+        "mcx": {
+            "status": "OBSERVED_QUOTE_OUTCOMES" if mcx_closed else "WAITING_FOR_CLOSED_MCX_OUTCOMES",
+            "metrics": _signal_outcome_metrics(mcx_rows),
+            "instruments": {key: _signal_outcome_metrics([row for row in mcx_rows if str(row.get("index") or "").upper() == key]) for key in sorted({str(row.get("index") or "").upper() for row in mcx_rows})},
+            "message": "MCX futures are tracked separately using fresh timestamped futures quotes; this is shadow tracking, not broker fills.",
+        },
         "persistence": persistence or {"status": "UNKNOWN"},
         "outcome_count": len(rows),
         "recent_outcomes": rows[-100:],
-        "tracking_method": "fresh Angel One option quotes observed during background signal refresh; intra-refresh touches can be missed; target fills are assumed at target level",
+        "tracking_method": "fresh Angel One option quotes for NIFTY/BANKNIFTY and fresh timestamped MCX futures quotes; intra-refresh touches can be missed; target fills are assumed at target level",
         "message": "Shadow estimates only, not broker executions. Net P&L is shown only when every closed outcome has an explicit quantity, lot size, and all cost values; win/loss rate uses fee-adjusted P&L coverage only.",
         "order_placement_enabled": False,
     }
-
 
 def _update_signal_outcomes(signals: dict[str, Any], market: dict[str, Any]) -> dict[str, Any]:
     rows = _load_signal_outcomes()
