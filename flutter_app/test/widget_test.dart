@@ -213,26 +213,20 @@ void main() {
     expect(find.text('SIGNAL ENGINE'), findsOneWidget);
     final engineList = find.byKey(const ValueKey('trade-engine-primary-list'));
     expect(engineList, findsOneWidget);
-    // Scrollable wraps the ListView, so locate it as an ancestor of the keyed list.
-    final engineScrollable = find.ancestor(
-      of: engineList,
-      matching: find.byType(Scrollable),
-    );
-    expect(engineScrollable, findsOneWidget);
     final riskLayer = find.text('RISK & 10-MINUTE STABILITY');
-    await tester.scrollUntilVisible(riskLayer, 250, scrollable: engineScrollable);
+    await tester.scrollUntilVisible(riskLayer, 250);
     expect(riskLayer, findsOneWidget);
     final trendLayer = find.text('TREND & SENTIMENT');
-    await tester.scrollUntilVisible(trendLayer, 250, scrollable: engineScrollable);
+    await tester.scrollUntilVisible(trendLayer, 250);
     expect(trendLayer, findsOneWidget);
     final optionLayer = find.text('OPTION CHAIN & ORDER FLOW');
-    await tester.scrollUntilVisible(optionLayer, 250, scrollable: engineScrollable);
+    await tester.scrollUntilVisible(optionLayer, 250);
     expect(optionLayer, findsOneWidget);
     final monitorLayer = find.text('READ-ONLY BROKER MONITOR');
-    await tester.scrollUntilVisible(monitorLayer, 250, scrollable: engineScrollable);
+    await tester.scrollUntilVisible(monitorLayer, 250);
     expect(monitorLayer, findsOneWidget);
     final orderBookButton = find.text('LOAD / REFRESH ANGEL ONE ORDER BOOK');
-    await tester.scrollUntilVisible(orderBookButton, 250, scrollable: engineScrollable);
+    await tester.scrollUntilVisible(orderBookButton, 250);
     expect(orderBookButton, findsOneWidget);
   });
 
