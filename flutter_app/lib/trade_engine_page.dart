@@ -385,17 +385,4 @@ class _TradeEnginePageState extends State<TradeEnginePage> {
     child: Row(children: [Expanded(child: Text(label, style: const TextStyle(color: Colors.white70))), Flexible(child: Text(value, textAlign: TextAlign.end, style: const TextStyle(fontWeight: FontWeight.w800)))]),
   );
 
-  Widget _repoLink(BuildContext context, String title, String url, String detail) => Card(
-    child: ListTile(
-      leading: const Icon(Icons.open_in_new, color: _cyan),
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-      subtitle: Text(detail, style: const TextStyle(fontSize: 11)),
-      onTap: () async {
-        final opened = await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-        if (!opened && context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open repository link.')));
-        }
-      },
-    ),
-  );
 }
