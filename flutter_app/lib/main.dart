@@ -84,6 +84,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
   Map<String,dynamic> systemDiagnostics = const {};
   String? systemDiagnosticsError;
   Map<String,dynamic> signals = const {};
+  Map<String,dynamic> signalPerformance = const {};
   List<dynamic> commodities = const [];
   bool _refreshing = false;
   Map<String,dynamic> market = const {};
@@ -474,6 +475,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         feed = (s['feed'] as Map?)?.cast<String,dynamic>() ?? {};
         storeDiagnostics = (s['store'] as Map?)?.cast<String,dynamic>() ?? {};
         signals = (s['signals'] as Map?)?.cast<String,dynamic>() ?? {};
+        signalPerformance = Map<String, dynamic>.from(s['signal_performance'] as Map? ?? const {});
         market = responseMarket.map((key, value) {
           final row = Map<String, dynamic>.from(value as Map? ?? const {});
           final cachedChain = optionChainsByIndex[key];
@@ -512,6 +514,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         feed = (s['feed'] as Map?)?.cast<String,dynamic>() ?? {};
         storeDiagnostics = (s['store'] as Map?)?.cast<String,dynamic>() ?? {};
         signals = (s['signals'] as Map?)?.cast<String,dynamic>() ?? {};
+        signalPerformance = Map<String, dynamic>.from(s['signal_performance'] as Map? ?? const {});
         market = (s['market'] as Map?)?.cast<String,dynamic>() ?? {};
         commodities = (s['commodities'] as List?) ?? [];
         tradePlans = ((s['trade_plans'] as List?) ?? const []).whereType<Map>().map((plan) => Map<String, dynamic>.from(plan)).toList();
@@ -768,7 +771,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         ChainPage(selected:selectedIndex,onChanged:(v){setState(()=>selectedIndex=v);refresh();}, market:_market(selectedIndex), error:optionChainError),
         OIPage(signals:signals, market:market, commodities:commodities, optionChains:optionChainsByIndex),
         IndicatorsPage(selected:selectedIndex,signal:_signal(selectedIndex),fast:emaFast,slow:emaSlow,onChanged:(f,s){setState((){emaFast=f;emaSlow=s;});refresh();},onIndex:(v)=>setState(()=>selectedIndex=v)),
-        SignalPage(backendUrl:backendUrl,liveStatus:liveTrading,index:selectedIndex,signals:signals,ai:ai,aiProviders:aiProviderStatus,tradePlans:tradePlans,market:market,onChanged:(v)=>setState(()=>selectedIndex=v)),
+        SignalPage(backendUrl:backendUrl,liveStatus:liveTrading,index:selectedIndex,signals:signals,signalPerformance:signalPerformance,ai:ai,aiProviders:aiProviderStatus,tradePlans:tradePlans,market:market,onChanged:(v)=>setState(()=>selectedIndex=v)),
         RiskPage(index:selectedIndex,signal:_signal(selectedIndex),plans:tradePlans,market:market,commodities:commodities),
         CommodityPage(items:commodities),
         BacktestingPage(backendUrl: backendUrl),
@@ -1949,11 +1952,12 @@ class _IndicatorsState extends State<IndicatorsPage>{
 }
 
 class SignalPage extends StatelessWidget {
-  const SignalPage({required this.backendUrl, required this.liveStatus, required this.index, required this.signals, required this.ai, required this.aiProviders, required this.tradePlans, required this.market, required this.onChanged, super.key});
+  const SignalPage({required this.backendUrl, required this.liveStatus, required this.index, required this.signals, required this.signalPerformance, required this.ai, required this.aiProviders, required this.tradePlans, required this.market, required this.onChanged, super.key});
   final String backendUrl;
   final Map<String, dynamic> liveStatus;
   final String index;
   final Map<String, dynamic> signals;
+  final Map<String, dynamic> signalPerformance;
   final Map<String, dynamic> ai;
   final Map<String, dynamic> aiProviders;
   final List<dynamic> tradePlans;
