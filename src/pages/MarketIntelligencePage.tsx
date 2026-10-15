@@ -44,6 +44,7 @@ export const MarketIntelligencePage: React.FC = () => {
   const [selectedModel, setSelectedModel] = useState(() => nvidiaService.getSelectedModel());
   const [keyTesting, setKeyTesting] = useState(false);
   const [keyStatusMessage, setKeyStatusMessage] = useState<{ text: string; ok: boolean } | null>(null);
+  const [nvidiaBackendStatus, setNvidiaBackendStatus] = useState<{ configured: boolean; active: boolean }>({ configured: false, active: false });
 
   // Intelligence State
   const [summary, setSummary] = useState<string>('');
@@ -134,6 +135,7 @@ export const MarketIntelligencePage: React.FC = () => {
 
   // Initial load and periodic refresh
   useEffect(() => {
+    void nvidiaService.refreshNvidiaStatus().then(setNvidiaBackendStatus);
     void loadIntelligence();
     const interval = setInterval(() => {
       void loadIntelligence();
@@ -214,7 +216,7 @@ export const MarketIntelligencePage: React.FC = () => {
     }
   };
 
-  const isDirectKey = nvidiaService.isNvidiaConfigured();
+  const isDirectKey = nvidiaBackendStatus.configured;
 
   return (
     <div className="p-3 pb-24 space-y-4 select-none max-w-3xl mx-auto">
