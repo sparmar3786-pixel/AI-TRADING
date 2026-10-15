@@ -233,7 +233,7 @@ class ApiService {
           };
         }
       }
-    } catch (e: any) {
+    } catch {
       // Never describe locally generated preview values as live market data.
       const fallbackMarket = this.generateFallbackMarket();
       const safeMarket = Object.fromEntries(
