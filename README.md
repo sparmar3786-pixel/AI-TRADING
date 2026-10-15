@@ -1,6 +1,6 @@
 # AI Trading Signals — Android Terminal
 
-A high-performance algorithmic trading terminal for NSE equity indices (`NIFTY`, `BANKNIFTY`, `FINNIFTY`, `MIDCPNIFTY`, `SENSEX`, `BANKEX`) and MCX commodities (`CRUDEOIL`, `NATURALGAS`, `GOLD`, `SILVER`, `COPPER`).
+A high-performance algorithmic trading terminal for NSE/BSE equity indices (`NIFTY`, `BANKNIFTY`, `FINNIFTY`, `MIDCPNIFTY`, `SENSEX`, `BANKEX`).
 
 ## Core Architecture & Features
 
@@ -20,7 +20,6 @@ A high-performance algorithmic trading terminal for NSE equity indices (`NIFTY`,
 - **Live Option Chain & Greeks**: Real-time strike ladder with ATM tagging, CE/PE LTP, OI change, and Max Pain strike.
 - **SMC Pro Chart**: Interactive institutional liquidity visualization with order block zones and character change markers.
 - **Paper Broker**: Virtual margin account (₹10,00,000) for real-time order simulation and live mark-to-market P&L tracking.
-- **MCX Commodities**: Live quotes for Crude Oil, Natural Gas, Gold, Silver, and Copper with IST market hours tracking.
 - **AI Market Intelligence**: Conversational market analyst for quick queries, signal review, and order book synthesis.
 - **Telemetry & Diagnostics**: Real-time worker cycle tracking, Angel One broker session health, and scoped Android device identification (`X-Device-Id`).
 
