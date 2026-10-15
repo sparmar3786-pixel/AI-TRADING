@@ -76,7 +76,7 @@ jobs:
           mapfile -t CODE_FILES < <(unzip -Z1 "$APK" | grep -E '(^classes[0-9]*[.]dex$|^lib/[^/]+/libapp[.]so$)' || true)
           test "${#CODE_FILES[@]}" -gt 0
           COMPILED_STRINGS=$(for file in "${CODE_FILES[@]}"; do unzip -p "$APK" "$file" | strings; done)
-          if printf '%s\\n' "$COMPILED_STRINGS" | grep -Ei 'SMC Pro Chart|SMC Chart|Order Flow & Footprint|FOOTPRINT CHART' >/dev/null; then
+          if printf '%s\n' "$COMPILED_STRINGS" | grep -Ei 'SMC Pro Chart|SMC Chart|Order Flow & Footprint|FOOTPRINT CHART' >/dev/null; then
             echo "Removed SMC/Order Flow chart label found in the compiled APK"
             exit 1
           fi
