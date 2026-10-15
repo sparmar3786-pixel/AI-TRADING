@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 /// In-app, page-by-page companion to Fresh_Algo_Signal_Screenshots_Error_Report.pdf.
 /// Keeps the existing trading UI untouched and adds the report as a separate tab.
@@ -155,21 +154,6 @@ class PdfReportSolutionsPage extends StatelessWidget {
           ),
       ])),
       const SizedBox(height: 8),
-      const Text('REPOSITORY & DOCUMENTATION LINKS', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
-      const SizedBox(height: 6),
-      const Text('Links open externally. They are reference repositories unless their code has been separately ported, tested and licensed; adding a link does not mean its code was copied into the APK.',
-          style: TextStyle(color: Colors.white70, fontSize: 12)),
-      for (final item in repositories)
-        Card(child: ListTile(
-          leading: const Icon(Icons.code, color: Color(0xFF12D6FF)),
-          title: Text(item.$1, style: const TextStyle(fontWeight: FontWeight.w800)),
-          subtitle: Text(item.$3),
-          trailing: const Icon(Icons.open_in_new),
-          onTap: () async {
-            final uri = Uri.parse(item.$2);
-            await launchUrl(uri, mode: LaunchMode.externalApplication);
-          },
-        )),
       const SizedBox(height: 8),
       const Text('SAFETY STATUS FROM THE PDF', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
       const Card(child: Column(children: [
