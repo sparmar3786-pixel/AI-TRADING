@@ -97,7 +97,6 @@ class _PerformancePageState extends State<PerformancePage> {
   Widget build(BuildContext context) {
     final metrics = _map(_report['metrics']);
     final byInstrument = _map(_report['by_instrument']);
-    final accuracyStatus = (_report['accuracy_status'] ?? 'UNVERIFIED_NO_CLOSED_TRADES').toString();
     final hasClosedTrades = (_report['trade_count'] as num? ?? 0) > 0;
 
     return RefreshIndicator(
