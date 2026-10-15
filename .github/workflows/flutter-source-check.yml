@@ -43,6 +43,10 @@ jobs:
             echo "On-device GGUF/Qwen model code or dependency remains in the APK source."
             exit 1
           fi
+          if ! grep -Fq 'RepositoryLinkFilter.sanitizeValue(decoded)' flutter_app/lib/api.dart; then
+            echo "Global API-response repository-link filtering is missing."
+            exit 1
+          fi
           echo "Repository-link and on-device-model source guards passed."
       - name: Install Flutter dependencies
         run: flutter pub get
