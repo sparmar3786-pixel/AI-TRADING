@@ -1,16 +1,7 @@
 name: Build AI-TRADING Android APK
 
 on:
-  push:
-    branches: [main, feat/ai-trading-signal-apk]
-    paths:
-      - 'flutter_app/**'
-      - '.github/workflows/android-apk.yml'
-  pull_request:
-    branches: [main, feat/ai-trading-signal-apk]
-    paths:
-      - 'flutter_app/**'
-      - '.github/workflows/android-apk.yml'
+  # APK builds are paused until explicitly requested.
   workflow_dispatch:
 
 permissions:
@@ -49,8 +40,6 @@ jobs:
             exit 1
           fi
           sed -i 's/applicationId = "com.example.ai_trading_signal"/applicationId = "com.sparmar3786.aitradingsignals"/' "$GRADLE"
-          sed -i -E 's/minSdk[[:space:]]*=[[:space:]]*flutter\.minSdkVersion/minSdk = 26/' "$GRADLE"
-          grep -Eq 'minSdk[[:space:]]*=[[:space:]]*26' "$GRADLE" || { echo "Could not enforce minSdk 26 for llama_flutter_android"; exit 1; }
           grep -n 'applicationId\|minSdk' "$GRADLE"
           grep -n 'uses-permission' "$MANIFEST"
       - name: Install dependencies
