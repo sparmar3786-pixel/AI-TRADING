@@ -1,7 +1,5 @@
 export type IndexSymbol = 'NIFTY' | 'BANKNIFTY' | 'FINNIFTY' | 'MIDCPNIFTY' | 'SENSEX' | 'BANKEX';
 
-export type CommoditySymbol = 'CRUDEOIL' | 'NATURALGAS' | 'GOLD' | 'SILVER' | 'COPPER' | 'ZINC' | 'ALUMINIUM';
-
 export type SignalDecision = 'CALL BUY' | 'PUT BUY' | 'WAIT' | 'HOLD';
 
 export interface SignalStability {
@@ -77,21 +75,6 @@ export interface MarketRow {
   live: boolean;
 }
 
-export interface CommodityRow {
-  symbol: CommoditySymbol;
-  name: string;
-  unit: string;
-  ltp: number;
-  change: number;
-  change_percent: number;
-  high: number;
-  low: number;
-  open: number;
-  volume: number;
-  oi: number;
-  market_open: boolean;
-  timestamp: string;
-}
 
 export interface TechnicalIndicators {
   ema8: number;
