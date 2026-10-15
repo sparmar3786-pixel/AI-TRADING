@@ -113,7 +113,7 @@ class NvidiaService {
       });
 
       if (response.ok) {
-        return { valid: true, message: 'NVIDIA NIM API Key verified successfully!' };
+        return { valid: true, message: 'NVIDIA key authenticated against the model catalog; actual chat inference still needs a successful response.' };
       }
 
       if (response.status === 401 || response.status === 403) {
