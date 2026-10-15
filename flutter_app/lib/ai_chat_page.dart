@@ -179,7 +179,7 @@ class _AiChatPageState extends State<AiChatPage> {
                 const SizedBox(height: 12),
                 const Text('Ask Fresh AI', textAlign: TextAlign.center, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
                 const SizedBox(height: 6),
-                const Text('Cloud AI + optional local offline Qwen • Market Q&A', textAlign: TextAlign.center, style: TextStyle(color: Color(0xFF32D583), fontWeight: FontWeight.w700, fontSize: 12)),
+                const Text('Cloud AI • Market Q&A', textAlign: TextAlign.center, style: TextStyle(color: Color(0xFF32D583), fontWeight: FontWeight.w700, fontSize: 12)),
                 const SizedBox(height: 8),
                 const Text(
                   'Load a local GGUF model for offline inference. When the backend is reachable, local Qwen receives the selected index snapshot, deterministic strategy, cloud AI status and search evidence. Without backend access it must report that live context is unavailable.',
