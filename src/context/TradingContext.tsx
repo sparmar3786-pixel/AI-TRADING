@@ -210,6 +210,12 @@ export const TradingProvider: React.FC<{ children: ReactNode }> = ({ children })
   const closePaperTrade = useCallback((id: string) => {
     const trade = paperTrades.find(item => item.id === id && item.status === 'OPEN');
     if (!trade) return;
+    const markTime = Date.parse(trade.mark_timestamp || '');
+    if (trade.mark_status !== 'LIVE_OPTION_QUOTE' || !Number.isFinite(markTime) ||
+        Date.now() - markTime < 0 || Date.now() - markTime > 120000) {
+      alert('Close blocked: no fresh verified live option quote is available. Refresh market data first.');
+      return;
+    }
     const exitPrice = trade.current_price > 0 ? trade.current_price : trade.entry_price;
     const pnl = Number(((exitPrice - trade.entry_price) * trade.quantity).toFixed(2));
     const pnl_percent = trade.entry_price > 0
