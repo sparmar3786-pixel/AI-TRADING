@@ -86,7 +86,7 @@ class PaperPerformanceSummaryTests(unittest.TestCase):
         self.assertEqual(metrics["net_pnl_coverage_count"], 1)
         self.assertEqual(report["by_instrument"]["NIFTY"]["closed_count"], 2)
         self.assertIn("BANKNIFTY", report["by_instrument"])
-        self.assertEqual(report["mcx"]["status"], "UNVERIFIED_NO_CLOSED_MCX_OUTCOMES")
+        self.assertEqual(report["mcx"]["status"], "WAITING_FOR_CLOSED_MCX_OUTCOMES")
         self.assertEqual(report["persistence"]["status"], "OK")
 
     def test_mcx_short_future_target_uses_direction_and_explicit_costs(self):
@@ -94,6 +94,7 @@ class PaperPerformanceSummaryTests(unittest.TestCase):
             ledger_path = os.path.join(directory, "signal_outcomes.json")
             costs = {
                 "SIGNAL_OUTCOMES_FILE": ledger_path,
+                "PAPER_MCX_QUANTITY_LOTS": "1",
                 "PAPER_BROKERAGE_INR_PER_ROUND_TRIP": "10",
                 "PAPER_SLIPPAGE_INR_PER_ROUND_TRIP": "5",
                 "PAPER_OTHER_COSTS_INR_PER_ROUND_TRIP": "5",
@@ -116,6 +117,36 @@ class PaperPerformanceSummaryTests(unittest.TestCase):
                 self.assertEqual(second["mcx"]["metrics"]["target_hits"], 1)
                 self.assertEqual(second["mcx"]["metrics"]["gross_points_total"], 20.0)
                 self.assertEqual(second["mcx"]["metrics"]["net_pnl_inr"], 180.0)
+                self.assertEqual(second["mcx"]["metrics"]["pnl_status"], "RECORDED")
+                _signal_outcomes_memory.clear()
+
+    def test_mcx_future_signal_tracks_target_and_fee_adjusted_one_lot_pnl(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ledger_path = os.path.join(directory, "signal_outcomes.json")
+            with patch.dict(os.environ, {
+                "SIGNAL_OUTCOMES_FILE": ledger_path,
+                "PAPER_MCX_QUANTITY_LOTS": "1",
+                "PAPER_BROKERAGE_INR_PER_ROUND_TRIP": "0",
+                "PAPER_SLIPPAGE_INR_PER_ROUND_TRIP": "0",
+                "PAPER_OTHER_COSTS_INR_PER_ROUND_TRIP": "0",
+            }, clear=False):
+                _signal_outcomes_memory.clear()
+                commodity = {
+                    "name": "CRUDEOIL", "symbol": "CRUDEOIL", "contract": "CRUDEOIL25OCTFUT",
+                    "expiry": "2026-10-25", "decision": "BUY FUTURE",
+                    "entry": 100.0, "stop_loss": 90.0, "target": 120.0,
+                    "live": True, "age_seconds": 2.0, "ltp": 100.0, "lotsize": 10,
+                    "source_timestamp": "2026-10-15T08:00:00+00:00",
+                    "signal_stability": {"state": "CONFIRMED", "since_utc": "2026-10-15T07:50:00+00:00"},
+                }
+                first = _update_signal_outcomes({}, {}, [commodity])
+                self.assertEqual(first["mcx"]["metrics"]["open_count"], 1)
+                commodity["ltp"] = 121.0
+                second = _update_signal_outcomes({}, {}, [commodity])
+                self.assertEqual(second["mcx"]["metrics"]["closed_count"], 1)
+                self.assertEqual(second["mcx"]["metrics"]["target_hits"], 1)
+                self.assertEqual(second["by_instrument"]["CRUDEOIL"]["closed_count"], 1)
+                self.assertEqual(second["mcx"]["metrics"]["net_pnl_inr"], 200.0)
                 self.assertEqual(second["mcx"]["metrics"]["pnl_status"], "RECORDED")
                 _signal_outcomes_memory.clear()
 

@@ -31,6 +31,11 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, W
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
+try:
+    from app.state_store import database_configured, delete_state, get_state, put_state
+except ModuleNotFoundError:
+    from backend.app.state_store import database_configured, delete_state, get_state, put_state
+
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -513,6 +518,22 @@ def _ensure_market_intelligence_scheduler() -> None:
 
 @app.on_event("startup")
 def _start_market_intelligence_scheduler_on_startup() -> None:
+    # Migrate legacy volume state only after a reachable PostgreSQL is available.
+    # Keep /data as a fallback until diagnostics verifies row-count parity.
+    if database_configured():
+        try:
+            _load_credentials()
+            _load_signal_outcomes()
+            _load_paper_trades()
+            storage = _storage_diagnostics()
+            logger.info(
+                "persistent state migration status: postgres=%s outcomes=%s paper_trades=%s encrypted_credentials=%s volume_detach_ready=%s",
+                storage.get("postgres_reachable"), storage.get("signal_outcomes_in_postgres"),
+                storage.get("paper_trades_in_postgres"), storage.get("encrypted_credentials_in_postgres"),
+                storage.get("ready_to_detach_volume"),
+            )
+        except Exception:
+            logger.warning("persistent state migration deferred; volume fallback remains enabled")
     enabled = os.getenv("MARKET_INTELLIGENCE_AUTO_REFRESH", "true").strip().lower()
     if enabled not in {"0", "false", "no", "off"}:
         _ensure_market_intelligence_scheduler()
@@ -556,41 +577,60 @@ def _save_credentials(credentials: dict[str, str]) -> None:
     }, separators=(",", ":")).encode()
     nonce = os.urandom(12)
     ciphertext = AESGCM(_encryption_key()).encrypt(nonce, payload, b"AI-TRADING-ANGEL-CREDENTIALS-v1")
+    encrypted_blob = base64.urlsafe_b64encode(nonce + ciphertext).decode("ascii")
+    db_saved = put_state("angel_credentials_encrypted", {"blob": encrypted_blob})
+    file_saved = False
     path = _credential_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(path.suffix + ".tmp")
-        temporary.write_bytes(base64.urlsafe_b64encode(nonce + ciphertext))
+        temporary.write_text(encrypted_blob, encoding="ascii")
         os.chmod(temporary, 0o600)
         temporary.replace(path)
         os.chmod(path, 0o600)
-    except OSError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail="Could not persist encrypted credentials. Attach a Railway persistent volume at /data or disable Remember credentials.",
-        ) from exc
+        file_saved = True
+    except OSError:
+        pass
+    if not db_saved and not file_saved:
+        raise HTTPException(status_code=503, detail="Could not persist encrypted credentials to PostgreSQL or the fallback volume.")
+
+
+def _decrypt_credentials_blob(encrypted_blob: str) -> dict[str, str]:
+    raw = base64.urlsafe_b64decode(encrypted_blob.encode("ascii"))
+    plaintext = AESGCM(_encryption_key()).decrypt(raw[:12], raw[12:], b"AI-TRADING-ANGEL-CREDENTIALS-v1")
+    value = json.loads(plaintext)
+    return {key: str(value[key]) for key in ("angel_api_key", "angel_client_code", "angel_pin") if value.get(key)}
 
 
 def _load_credentials() -> dict[str, str]:
+    db_ok, db_value = get_state("angel_credentials_encrypted")
+    if db_ok and isinstance(db_value, dict) and isinstance(db_value.get("blob"), str):
+        try:
+            return _decrypt_credentials_blob(db_value["blob"])
+        except Exception:
+            pass
     path = _credential_path()
-    if not path.is_file():
-        return {}
     try:
-        raw = base64.urlsafe_b64decode(path.read_bytes())
-        plaintext = AESGCM(_encryption_key()).decrypt(raw[:12], raw[12:], b"AI-TRADING-ANGEL-CREDENTIALS-v1")
-        value = json.loads(plaintext)
-        return {key: str(value[key]) for key in ("angel_api_key", "angel_client_code", "angel_pin") if value.get(key)}
+        if path.is_file():
+            encrypted_blob = path.read_text(encoding="ascii").strip()
+            value = _decrypt_credentials_blob(encrypted_blob)
+            put_state("angel_credentials_encrypted", {"blob": encrypted_blob})
+            return value
     except Exception:
-        # Do not log ciphertext, plaintext or exception payloads.
-        return {}
+        # Never log ciphertext, plaintext or exception payloads.
+        pass
+    return {}
+
 
 def _forget_credentials() -> None:
+    db_ok, _ = delete_state("angel_credentials_encrypted")
+    if database_configured() and not db_ok:
+        raise HTTPException(status_code=503, detail="Could not remove saved encrypted credentials from PostgreSQL.")
     path = _credential_path()
     try:
         path.unlink(missing_ok=True)
     except OSError as exc:
-        raise HTTPException(status_code=503, detail="Could not remove saved encrypted credentials from the persistent volume.") from exc
-
+        raise HTTPException(status_code=503, detail="Could not remove saved encrypted credentials from the fallback volume.") from exc
 
 def _credentials_from_env() -> dict[str, str]:
     # Railway deployments have historically used ANGEL_CLIENT_ID while older
@@ -2209,6 +2249,51 @@ def angel_connect(body: ConnectRequest, _: str = Depends(_device)) -> dict[str, 
         }
 
 
+def _safe_json_list_count(path: Path) -> int | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return len(value) if isinstance(value, list) else None
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def _storage_diagnostics() -> dict[str, Any]:
+    db_ok, _ = get_state("__healthcheck__")
+    creds_ok, creds = get_state("angel_credentials_encrypted")
+    outcomes_ok, outcomes = get_state("signal_outcomes")
+    paper_ok, paper = get_state("paper_trades")
+    credential_file = _credential_path().is_file()
+    outcomes_file, paper_file = _signal_outcome_path(), _paper_trade_path()
+    outcomes_count = _safe_json_list_count(outcomes_file) if outcomes_file.is_file() else 0
+    paper_count = _safe_json_list_count(paper_file) if paper_file.is_file() else 0
+    outcomes_parity = not outcomes_file.is_file() or (
+        outcomes_count is not None and outcomes_ok and isinstance(outcomes, list) and len(outcomes) >= outcomes_count
+    )
+    paper_parity = not paper_file.is_file() or (
+        paper_count is not None and paper_ok and isinstance(paper, list) and len(paper) >= paper_count
+    )
+    credentials_parity = not credential_file or (
+        creds_ok and isinstance(creds, dict) and isinstance(creds.get("blob"), str)
+    )
+    ready = database_configured() and db_ok and outcomes_parity and paper_parity and credentials_parity
+    return {
+        "database_configured": database_configured(),
+        "postgres_reachable": db_ok,
+        "signal_outcomes_in_postgres": outcomes_ok and isinstance(outcomes, list),
+        "signal_outcomes_db_count": len(outcomes) if isinstance(outcomes, list) else None,
+        "paper_trades_in_postgres": paper_ok and isinstance(paper, list),
+        "paper_trades_db_count": len(paper) if isinstance(paper, list) else None,
+        "encrypted_credentials_in_postgres": creds_ok and isinstance(creds, dict) and isinstance(creds.get("blob"), str),
+        "legacy_volume_files": {
+            "encrypted_credentials": credential_file,
+            "signal_outcomes": outcomes_file.is_file(),
+            "paper_trades": paper_file.is_file(),
+        },
+        "ready_to_detach_volume": ready,
+        "note": "Do not detach /data until ready_to_detach_volume is true and migration has been independently verified.",
+    }
+
+
 @app.get("/v1/system/diagnostics")
 def diagnostics(_: str = Depends(_device)) -> dict[str, Any]:
     adapter = _current_adapter()
@@ -2233,6 +2318,7 @@ def diagnostics(_: str = Depends(_device)) -> dict[str, Any]:
             "cycle_age_seconds": round(time.monotonic() - _signal_cache_at, 1) if _signal_cache else None,
             "cycle_fresh": bool(_signal_cache and time.monotonic() - _signal_cache_at < SIGNAL_CACHE_SECONDS),
         },
+        "storage": _storage_diagnostics(),
         "instrument_master": {"row_count": len(_master_rows), "cached": bool(_master_rows)},
         "market_data": {
             "snapshot_count": len((_signal_cache or {}).get("market", {})),
@@ -3772,23 +3858,48 @@ def _signal_outcome_path() -> Path:
 
 def _load_signal_outcomes() -> list[dict[str, Any]]:
     with _lock:
+        db_ok, db_value = get_state("signal_outcomes")
         path = _signal_outcome_path()
+        volume_rows: list[dict[str, Any]] = []
         try:
             if path.is_file():
-                raw = json.loads(path.read_text(encoding="utf-8"))
-                if isinstance(raw, list):
-                    _signal_outcomes_memory.clear()
-                    _signal_outcomes_memory.extend(
-                        dict(item) for item in raw
-                        if isinstance(item, dict) and item.get("outcome_id")
-                    )
-                    _signal_outcome_persistence.update({"status": "OK", "last_error": None, "path": str(path), "records": len(_signal_outcomes_memory)})
-            else:
-                _signal_outcome_persistence.update({"status": "NOT_INITIALIZED", "last_error": None, "path": str(path), "records": len(_signal_outcomes_memory)})
-        except (OSError, ValueError, TypeError) as exc:
-            # Surface persistence failure; don't pretend in-memory-only results are durable.
-            _signal_outcome_persistence.update({"status": "ERROR", "last_error": type(exc).__name__, "path": str(path), "records": len(_signal_outcomes_memory)})
+                raw_volume = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(raw_volume, list):
+                    volume_rows = [dict(item) for item in raw_volume if isinstance(item, dict) and item.get("outcome_id")]
+        except (OSError, ValueError, TypeError):
+            volume_rows = []
+        if db_ok and isinstance(db_value, list):
+            merged: dict[str, dict[str, Any]] = {str(item["outcome_id"]): item for item in volume_rows}
+            for item in db_value:
+                if isinstance(item, dict) and item.get("outcome_id"):
+                    merged[str(item["outcome_id"])] = dict(item)
+            combined = list(merged.values())[-SIGNAL_OUTCOMES_MAX_ROWS:]
+            migrated = len(combined) > len(db_value)
+            if migrated:
+                put_state("signal_outcomes", combined)
+            _signal_outcomes_memory.clear()
+            _signal_outcomes_memory.extend(combined)
+            _signal_outcome_persistence.update({
+                "status": "POSTGRES_OK_MERGED_VOLUME" if migrated else "POSTGRES_OK",
+                "last_error": None, "path": "postgresql:ai_trading_state/signal_outcomes",
+                "records": len(combined),
+            })
+            return [dict(item) for item in _signal_outcomes_memory]
+        if volume_rows:
+            _signal_outcomes_memory.clear()
+            _signal_outcomes_memory.extend(volume_rows[-SIGNAL_OUTCOMES_MAX_ROWS:])
+            migrated = put_state("signal_outcomes", list(_signal_outcomes_memory))
+            _signal_outcome_persistence.update({
+                "status": "VOLUME_OK_POSTGRES_MIGRATED" if migrated else "VOLUME_FALLBACK",
+                "last_error": None, "path": str(path), "records": len(_signal_outcomes_memory),
+            })
+        else:
+            _signal_outcome_persistence.update({
+                "status": "NOT_INITIALIZED", "last_error": None,
+                "path": str(path), "records": len(_signal_outcomes_memory),
+            })
         return [dict(item) for item in _signal_outcomes_memory]
+
 
 
 def _save_signal_outcomes(rows: list[dict[str, Any]]) -> bool:
@@ -3796,18 +3907,29 @@ def _save_signal_outcomes(rows: list[dict[str, Any]]) -> bool:
     with _lock:
         _signal_outcomes_memory.clear()
         _signal_outcomes_memory.extend(dict(item) for item in bounded)
+        db_saved = put_state("signal_outcomes", bounded)
+        file_saved = False
         path = _signal_outcome_path()
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             temporary = path.with_suffix(path.suffix + ".tmp")
             temporary.write_text(json.dumps(bounded, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
             temporary.replace(path)
-            _signal_outcome_persistence.update({"status": "OK", "last_error": None, "path": str(path), "records": len(bounded)})
-            return True
-        except OSError as exc:
-            _signal_outcome_persistence.update({"status": "ERROR", "last_error": type(exc).__name__, "path": str(path), "records": len(bounded)})
-            return False
-
+            file_saved = True
+        except OSError:
+            pass
+        if db_saved:
+            status, error = ("POSTGRES_OK_VOLUME_BACKUP_OK" if file_saved else "POSTGRES_OK"), None
+        elif file_saved:
+            status, error = "VOLUME_FALLBACK_POSTGRES_UNAVAILABLE", "PostgreSQLWriteFailed"
+        else:
+            status, error = "ERROR", "NoDurableStoreAvailable"
+        _signal_outcome_persistence.update({
+            "status": status, "last_error": error,
+            "path": "postgresql+volume" if db_saved and file_saved else str(path),
+            "records": len(bounded),
+        })
+        return db_saved or file_saved
 
 def _signal_option_quote(index: str, signal: dict[str, Any], market: dict[str, Any]) -> dict[str, Any] | None:
     market_row = market.get(index)
@@ -3857,13 +3979,13 @@ def _signal_outcome_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
     net_wins = sum(1 for value in net_values if value > 0)
     net_losses = sum(1 for value in net_values if value < 0)
     net_break_even = sum(1 for value in net_values if value == 0)
-    gross_points = [
-        (float(row["entry_price"]) - float(row["exit_price"]))
-        if row.get("instrument_type") == "MCX_FUTURE" and row.get("decision") == "SELL FUTURE"
-        else (float(row["exit_price"]) - float(row["entry_price"]))
-        for row in closed
-        if _number(row.get("exit_price")) is not None and _number(row.get("entry_price")) is not None
-    ]
+    gross_points = []
+    for row in closed:
+        entry, exit_price = _number(row.get("entry_price")), _number(row.get("exit_price"))
+        if entry is None or exit_price is None:
+            continue
+        is_short = str(row.get("decision") or "").upper() == "SELL FUTURE"
+        gross_points.append(entry - exit_price if is_short else exit_price - entry)
     return {
         "closed_count": count,
         "open_count": sum(1 for row in rows if row.get("status") == "OPEN"),
@@ -3871,7 +3993,6 @@ def _signal_outcome_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "stop_loss_hits": stops,
         "target_hit_rate": targets / count if count else None,
         "stop_loss_rate": stops / count if count else None,
-        # Target/SL outcomes are not the same as fee-adjusted profitable trades.
         "win_rate": net_wins / count if net_complete else None,
         "loss_rate": net_losses / count if net_complete else None,
         "net_break_even_count": net_break_even,
@@ -3881,104 +4002,97 @@ def _signal_outcome_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "pnl_status": "RECORDED" if net_complete else "UNAVAILABLE_COST_OR_QUANTITY_DATA",
     }
 
-
 def _signal_outcome_report(rows: list[dict[str, Any]], persistence: dict[str, Any] | None = None) -> dict[str, Any]:
     by_instrument: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         key = str(row.get("index") or "UNKNOWN").upper().replace(" ", "")
         by_instrument.setdefault(key, []).append(row)
-    # Keep the requested categories visible even before enough observations exist.
-    # MCX is explicitly marked unsupported by this index-option signal tracker.
     by_instrument.setdefault("NIFTY", [])
     by_instrument.setdefault("BANKNIFTY", [])
-    closed = sum(1 for row in rows if row.get("status") == "CLOSED" and row.get("exit_reason") in {"TARGET", "STOP_LOSS"})
-    mcx_rows = [row for row in rows if row.get("instrument_type") == "MCX_FUTURE"]
+    mcx_rows = [row for row in rows if row.get("signal_type") == "MCX_FUTURE"]
     mcx_closed = sum(1 for row in mcx_rows if row.get("status") == "CLOSED" and row.get("exit_reason") in {"TARGET", "STOP_LOSS"})
-    mcx_note = {
-        "status": "OBSERVED_QUOTE_OUTCOMES" if mcx_closed else "UNVERIFIED_NO_CLOSED_MCX_OUTCOMES",
-        "metrics": _signal_outcome_metrics(mcx_rows),
-        "instrument_count": len({str(row.get("index") or "").upper() for row in mcx_rows}),
-        "message": "MCX futures are shadow-tracked from fresh Angel One quotes; target/stop touches are observed, not broker fills. One lot is assumed unless a quantity is explicitly configured.",
-    }
+    closed = sum(1 for row in rows if row.get("status") == "CLOSED" and row.get("exit_reason") in {"TARGET", "STOP_LOSS"})
     return {
         "status": "ok",
         "mode": "LIVE_SIGNAL_SHADOW_TRACKING",
         "accuracy_status": "UNVERIFIED_NO_CLOSED_SIGNAL_OUTCOMES" if closed == 0 else "OBSERVED_QUOTE_OUTCOMES",
         "metrics": _signal_outcome_metrics(rows),
         "by_instrument": {key: _signal_outcome_metrics(value) for key, value in sorted(by_instrument.items())},
-        "mcx": mcx_note,
+        "mcx": {
+            "status": "OBSERVED_QUOTE_OUTCOMES" if mcx_closed else "WAITING_FOR_CLOSED_MCX_OUTCOMES",
+            "metrics": _signal_outcome_metrics(mcx_rows),
+            "instruments": {key: _signal_outcome_metrics([row for row in mcx_rows if str(row.get("index") or "").upper() == key]) for key in sorted({str(row.get("index") or "").upper() for row in mcx_rows})},
+            "message": "MCX futures are tracked separately using fresh timestamped futures quotes; this is shadow tracking, not broker fills.",
+        },
         "persistence": persistence or {"status": "UNKNOWN"},
         "outcome_count": len(rows),
         "recent_outcomes": rows[-100:],
-        "tracking_method": "fresh Angel One option quotes observed during background signal refresh; intra-refresh touches can be missed; target fills are assumed at target level",
+        "tracking_method": "fresh Angel One option quotes for NIFTY/BANKNIFTY and fresh timestamped MCX futures quotes; intra-refresh touches can be missed; target fills are assumed at target level",
         "message": "Shadow estimates only, not broker executions. Net P&L is shown only when every closed outcome has an explicit quantity, lot size, and all cost values; win/loss rate uses fee-adjusted P&L coverage only.",
         "order_placement_enabled": False,
     }
 
-
-def _update_signal_outcomes(signals: dict[str, Any], market: dict[str, Any], commodities: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def _update_signal_outcomes(
+    signals: dict[str, Any],
+    market: dict[str, Any],
+    commodities: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     rows = _load_signal_outcomes()
+    commodity_rows = [row for row in (commodities or []) if isinstance(row, dict)]
     changed = False
     now = _utc_now().isoformat()
-    # Resolve open shadow records only from a fresh quote for the exact option contract.
+
+    # Resolve open rows only from fresh source-timestamped quotes for their exact instrument.
     for outcome in rows:
         if outcome.get("status") != "OPEN":
             continue
-        index = str(outcome.get("index") or "").upper().replace(" ", "")
-        if outcome.get("instrument_type") == "MCX_FUTURE":
-            commodity = next((row for row in (commodities or []) if isinstance(row, dict)
-                              and str(row.get("name") or row.get("symbol") or "").upper().replace(" ", "") == index), None)
-            if not commodity or commodity.get("live") is not True:
-                continue
-            age = _number(commodity.get("age_seconds"))
-            if age is None or age < 0 or age > 60:
-                continue
-            if str(commodity.get("contract") or commodity.get("symbol") or "") != str(outcome.get("contract") or ""):
-                continue
-            if str(commodity.get("expiry") or "")[:10] != str(outcome.get("expiry") or "")[:10]:
-                continue
-            quote = commodity
-            price = _number(commodity.get("ltp"))
+        index = str(outcome.get("index") or "").upper()
+        is_mcx = outcome.get("signal_type") == "MCX_FUTURE"
+        if is_mcx:
+            quote = next((row for row in commodity_rows
+                          if str(row.get("name") or row.get("symbol") or "").upper() == index
+                          and row.get("live") is True
+                          and _number(row.get("ltp")) is not None
+                          and (_number(row.get("age_seconds")) is not None)
+                          and 0 <= float(row["age_seconds"]) <= 60
+                          and (row.get("source_timestamp") or row.get("timestamp"))), None)
+            price = _number(quote.get("ltp")) if quote else None
         else:
             quote = _signal_option_quote(index, {
                 "strike": outcome.get("strike"), "expiry": outcome.get("expiry"),
                 "option_type": outcome.get("option_type"), "decision": outcome.get("decision"),
             }, market)
-            price = _number(quote.get("ltp")) if quote is not None else None
-        if quote is None or price is None or price <= 0:
+            price = _number(quote.get("ltp")) if quote else None
+        if quote is None or price is None:
             continue
         outcome["last_price"] = price
         outcome["last_price_at"] = quote.get("source_timestamp") or quote.get("timestamp")
         outcome["last_observed_at"] = now
         outcome["max_seen_price"] = max(float(outcome.get("max_seen_price") or price), price)
         outcome["min_seen_price"] = min(float(outcome.get("min_seen_price") or price), price)
-        entry = _number(outcome.get("entry_price"))
-        stop = _number(outcome.get("stop_loss"))
-        target = _number(outcome.get("target"))
-        is_short_future = outcome.get("instrument_type") == "MCX_FUTURE" and outcome.get("decision") == "SELL FUTURE"
-        target_touched = target is not None and (price <= target if is_short_future else price >= target)
-        stop_touched = stop is not None and (price >= stop if is_short_future else price <= stop)
+        entry, stop, target = (_number(outcome.get(key)) for key in ("entry_price", "stop_loss", "target"))
+        is_short = str(outcome.get("decision") or "").upper() == "SELL FUTURE"
+        target_touched = target is not None and (price <= target if is_short else price >= target)
+        stop_touched = stop is not None and (price >= stop if is_short else price <= stop)
         exit_reason = "TARGET" if target_touched else "STOP_LOSS" if stop_touched else None
         changed = True
         if exit_reason is None:
             continue
         outcome["status"] = "CLOSED"
         outcome["exit_reason"] = exit_reason
-        # Do not credit an overshoot beyond the target. For stop-outs, retain the
-        # observed quote so a gap through the stop is not hidden.
+        # Target fills are conservatively booked at the target; stop gaps use observed quote.
         exit_price = target if exit_reason == "TARGET" and target is not None else price
+        signed_points = (entry - exit_price) if is_short and entry is not None else (exit_price - entry) if entry is not None else None
         outcome["observed_exit_price"] = price
         outcome["exit_price"] = exit_price
         outcome["exit_price_basis"] = "target_level_assumed" if exit_reason == "TARGET" else "observed_stop_quote"
         outcome["closed_at"] = now
-        outcome["gross_points"] = round(exit_price - entry, 4) if entry is not None else None
+        outcome["gross_points"] = round(signed_points, 4) if signed_points is not None else None
         risk_distance = abs(entry - stop) if entry is not None and stop is not None else None
-        outcome["gross_r"] = round((exit_price - entry) / risk_distance, 6) if entry is not None and risk_distance else None
-        quantity = _number(outcome.get("quantity"))
-        lot_size = _number(outcome.get("lot_size"))
-        if entry is not None and quantity is not None and quantity > 0 and lot_size is not None and lot_size > 0:
-            point_delta = entry - exit_price if is_short_future else exit_price - entry
-            outcome["gross_pnl_inr"] = round(point_delta * quantity * lot_size, 2)
+        outcome["gross_r"] = round(signed_points / risk_distance, 6) if signed_points is not None and risk_distance else None
+        quantity, lot_size = _number(outcome.get("quantity")), _number(outcome.get("lot_size"))
+        if signed_points is not None and quantity is not None and quantity > 0 and lot_size is not None and lot_size > 0:
+            outcome["gross_pnl_inr"] = round(signed_points * quantity * lot_size, 2)
         costs = {
             "brokerage_inr": _number(os.getenv("PAPER_BROKERAGE_INR_PER_ROUND_TRIP")),
             "slippage_inr": _number(os.getenv("PAPER_SLIPPAGE_INR_PER_ROUND_TRIP")),
@@ -3991,7 +4105,8 @@ def _update_signal_outcomes(signals: dict[str, Any], market: dict[str, Any], com
         else:
             outcome["net_pnl_inr"] = None
             outcome["pnl_status"] = "NOT_AVAILABLE_WITHOUT_QUANTITY_AND_ALL_COSTS"
-    # Only add signals that passed every gate and have a fresh matching option quote.
+
+    # Index options: require the full validation gates and a fresh matching option quote.
     for index, signal in signals.items():
         if not isinstance(signal, dict):
             continue
@@ -4006,8 +4121,7 @@ def _update_signal_outcomes(signals: dict[str, Any], market: dict[str, Any], com
         ):
             continue
         entry, stop, target = (_number(signal.get(key)) for key in ("entry", "stop_loss", "target"))
-        strike = _number(signal.get("strike"))
-        expiry = str(signal.get("expiry") or "")[:10]
+        strike, expiry = _number(signal.get("strike")), str(signal.get("expiry") or "")[:10]
         if entry is None or stop is None or target is None or strike is None or not expiry or not 0 < stop < entry < target:
             continue
         quote = _signal_option_quote(str(index).upper(), signal, market)
@@ -4015,22 +4129,19 @@ def _update_signal_outcomes(signals: dict[str, Any], market: dict[str, Any], com
             continue
         confirmation = signal.get("confirmation_state") if isinstance(signal.get("confirmation_state"), dict) else {}
         signature_payload = {
-            "index": str(index).upper(), "decision": decision, "strike": strike,
-            "expiry": expiry, "entry": entry,
+            "signal_type": "INDEX_OPTION", "index": str(index).upper(), "decision": decision,
+            "strike": strike, "expiry": expiry, "entry": entry,
             "since": str(stability.get("since_utc") or confirmation.get("since_utc") or ""),
         }
         signature = hashlib.sha256(json.dumps(signature_payload, sort_keys=True).encode()).hexdigest()
         if any(str(row.get("signature") or "") == signature for row in rows):
             continue
-        trade_plan = signal.get("trade_plan") if isinstance(signal.get("trade_plan"), dict) else {}
-        quantity = _number(trade_plan.get("quantity") or signal.get("quantity")) or 1.0
-        lot_size = _number(trade_plan.get("lot_size") or signal.get("lot_size"))
+        plan = signal.get("trade_plan") if isinstance(signal.get("trade_plan"), dict) else {}
+        quantity, lot_size = _number(plan.get("quantity") or signal.get("quantity")), _number(plan.get("lot_size") or signal.get("lot_size"))
         rows.append({
-            "outcome_id": f"sig-{uuid.uuid4().hex}",
-            "signature": signature, "index": str(index).upper(),
-            "instrument_type": "INDEX_OPTION",
-            "quantity_basis": "configured_quantity_or_assumed_one_lot",
-            "decision": decision, "option_type": "CALL" if decision == "CALL BUY" else "PUT",
+            "outcome_id": f"sig-{uuid.uuid4().hex}", "signature": signature,
+            "signal_type": "INDEX_OPTION", "index": str(index).upper(), "decision": decision,
+            "option_type": "CALL" if decision == "CALL BUY" else "PUT",
             "strike": strike, "expiry": expiry, "entry_price": entry,
             "stop_loss": stop, "target": target, "quantity": quantity, "lot_size": lot_size,
             "status": "OPEN", "exit_reason": None, "exit_price": None,
@@ -4044,55 +4155,58 @@ def _update_signal_outcomes(signals: dict[str, Any], market: dict[str, Any], com
             "paper_only": True, "order_placement_enabled": False,
         })
         changed = True
-    # Track confirmed MCX futures separately from index options. Use the exact
-    # current futures contract and direction-aware target/stop comparisons.
-    for commodity in commodities or []:
-        if not isinstance(commodity, dict):
-            continue
-        name = str(commodity.get("name") or commodity.get("symbol") or "").upper().replace(" ", "")
+
+    # MCX futures have a distinct underlying-price/ATR signal; never route them through option-chain matching.
+    for commodity in commodity_rows:
+        name = str(commodity.get("name") or commodity.get("symbol") or "").upper()
         decision = str(commodity.get("decision") or "").upper()
-        if (decision not in {"BUY FUTURE", "SELL FUTURE"}
-                or commodity.get("live") is not True
-                or (commodity.get("signal_stability") or {}).get("state") != "CONFIRMED"):
-            continue
-        entry, stop, target = (_number(commodity.get(key)) for key in ("entry", "stop_loss", "target"))
-        price = _number(commodity.get("ltp"))
-        expiry = str(commodity.get("expiry") or "")[:10]
-        contract = str(commodity.get("contract") or commodity.get("symbol") or "")
+        stability = commodity.get("signal_stability") if isinstance(commodity.get("signal_stability"), dict) else {}
         age = _number(commodity.get("age_seconds"))
-        layers = commodity.get("layers") if isinstance(commodity.get("layers"), dict) else {}
-        contract_layer = layers.get("contract_selection") if isinstance(layers.get("contract_selection"), dict) else {}
-        lot_size = _number(commodity.get("lotsize") or contract_layer.get("lot_size"))
-        if (not name or not contract or not expiry or entry is None or stop is None or target is None
-                or price is None or price <= 0 or age is None or not 0 <= age <= 60
-                or lot_size is None or lot_size <= 0):
+        entry, stop, target = (_number(commodity.get(key)) for key in ("entry", "stop_loss", "target"))
+        if (
+            name not in COMMODITY_NAMES
+            or decision not in {"BUY FUTURE", "SELL FUTURE"}
+            or commodity.get("live") is not True
+            or age is None or not 0 <= age <= 60
+            or stability.get("state") != "CONFIRMED"
+            or entry is None or stop is None or target is None
+            or not (0 < stop < entry < target if decision == "BUY FUTURE" else 0 < target < entry < stop)
+        ):
             continue
-        signature_payload = {"instrument_type": "MCX_FUTURE", "index": name, "decision": decision,
-                             "contract": contract, "expiry": expiry, "entry": entry,
-                             "since": str((commodity.get("confirmation_state") or {}).get("since_utc") or "")}
+        contract = str(commodity.get("contract") or commodity.get("symbol") or name)
+        expiry = str(commodity.get("expiry") or "")[:10]
+        source_timestamp = commodity.get("source_timestamp") or commodity.get("timestamp")
+        if not expiry or not source_timestamp or _number(commodity.get("ltp")) is None:
+            continue
+        signature_payload = {
+            "signal_type": "MCX_FUTURE", "index": name, "decision": decision,
+            "contract": contract, "expiry": expiry, "entry": entry,
+            "since": str(stability.get("since_utc") or ""),
+        }
         signature = hashlib.sha256(json.dumps(signature_payload, sort_keys=True).encode()).hexdigest()
         if any(str(row.get("signature") or "") == signature for row in rows):
             continue
+        lot_size = _number(commodity.get("lotsize"))
+        quantity = _number(os.getenv("PAPER_MCX_QUANTITY_LOTS"))
         rows.append({
-            "outcome_id": f"sig-{uuid.uuid4().hex}", "signature": signature,
-            "index": name, "instrument_type": "MCX_FUTURE", "decision": decision,
-            "direction": "SHORT" if decision == "SELL FUTURE" else "LONG",
+            "outcome_id": f"mcx-{uuid.uuid4().hex}", "signature": signature,
+            "signal_type": "MCX_FUTURE", "index": name, "decision": decision,
             "contract": contract, "expiry": expiry, "entry_price": entry,
-            "stop_loss": stop, "target": target, "quantity": 1.0,
-            "quantity_basis": "assumed_one_lot", "lot_size": lot_size,
+            "stop_loss": stop, "target": target, "quantity": quantity, "lot_size": lot_size,
             "status": "OPEN", "exit_reason": None, "exit_price": None,
             "gross_points": None, "gross_pnl_inr": None, "net_pnl_inr": None,
             "pnl_status": "OPEN", "opened_at": now,
-            "last_price": price, "last_price_at": commodity.get("source_timestamp") or commodity.get("timestamp"),
-            "last_observed_at": now, "max_seen_price": price, "min_seen_price": price,
+            "last_price": _number(commodity.get("ltp")), "last_price_at": source_timestamp,
+            "last_observed_at": now, "max_seen_price": _number(commodity.get("ltp")),
+            "min_seen_price": _number(commodity.get("ltp")),
             "source": "angelone_smartapi_fresh_mcx_future_quote",
             "paper_only": True, "order_placement_enabled": False,
         })
         changed = True
+
     if changed:
         _save_signal_outcomes(rows)
-    return _signal_outcome_report(rows)
-
+    return _signal_outcome_report(rows, persistence=_signal_outcome_persistence)
 
 _paper_trades_memory: dict[str, dict[str, Any]] = {}
 
@@ -4103,18 +4217,30 @@ def _paper_trade_path() -> Path:
 
 def _load_paper_trades() -> list[dict[str, Any]]:
     with _lock:
+        db_ok, db_value = get_state("paper_trades")
         path = _paper_trade_path()
+        volume_rows: list[dict[str, Any]] = []
         try:
             if path.is_file():
-                raw = json.loads(path.read_text(encoding="utf-8"))
-                if isinstance(raw, list):
-                    _paper_trades_memory.clear()
-                    for item in raw:
-                        if isinstance(item, dict) and item.get("trade_id"):
-                            _paper_trades_memory[str(item["trade_id"])] = dict(item)
+                raw_volume = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(raw_volume, list):
+                    volume_rows = [dict(item) for item in raw_volume if isinstance(item, dict) and item.get("trade_id")]
         except (OSError, ValueError, TypeError):
-            # Keep the last in-memory state if a mounted volume is temporarily unavailable.
-            pass
+            volume_rows = []
+        if db_ok and isinstance(db_value, list):
+            merged: dict[str, dict[str, Any]] = {str(item["trade_id"]): item for item in volume_rows}
+            for item in db_value:
+                if isinstance(item, dict) and item.get("trade_id"):
+                    merged[str(item["trade_id"])] = dict(item)
+            _paper_trades_memory.clear()
+            _paper_trades_memory.update(merged)
+            if len(merged) > len(db_value):
+                put_state("paper_trades", list(_paper_trades_memory.values()))
+            return [dict(item) for item in _paper_trades_memory.values()]
+        if volume_rows:
+            _paper_trades_memory.clear()
+            _paper_trades_memory.update({str(item["trade_id"]): item for item in volume_rows})
+            put_state("paper_trades", list(_paper_trades_memory.values()))
         return [dict(item) for item in _paper_trades_memory.values()]
 
 
@@ -4122,25 +4248,27 @@ def _save_paper_trades(rows: list[dict[str, Any]]) -> bool:
     with _lock:
         _paper_trades_memory.clear()
         _paper_trades_memory.update({str(item["trade_id"]): dict(item) for item in rows if item.get("trade_id")})
+        db_saved = put_state("paper_trades", list(_paper_trades_memory.values()))
+        file_saved = False
         path = _paper_trade_path()
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             temporary = path.with_suffix(path.suffix + ".tmp")
             temporary.write_text(json.dumps(rows, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
             temporary.replace(path)
-            return True
+            file_saved = True
         except OSError:
-            # API remains honest about volatility; it never claims disk persistence.
-            return False
-
+            pass
+        return db_saved or file_saved
 
 @app.get("/v1/paper/trades")
 def paper_trades(_: str = Depends(_device)) -> dict[str, Any]:
     rows = _load_paper_trades()
     rows.sort(key=lambda item: str(item.get("opened_at") or ""), reverse=True)
+    db_ok, db_value = get_state("paper_trades")
     return {
         "status": "ok", "trades": rows, "trade_count": len(rows),
-        "persistence": "persistent" if _paper_trade_path().is_file() else "memory_or_empty",
+        "persistence": "postgresql" if db_ok and isinstance(db_value, list) else "volume" if _paper_trade_path().is_file() else "memory_or_empty",
         "signal_only": True, "order_placement_enabled": False,
     }
 
