@@ -134,6 +134,28 @@ class ApiService {
 
       if (!isCandidate) {
         localStorage.removeItem(storageKey);
+        if (decision === 'CALL BUY' || decision === 'PUT BUY') {
+          // A buy decision without complete live validation and every required
+          // trade field must never leak through as an actionable-looking signal.
+          updatedSignal.decision = 'WAIT';
+          const blocks = [...(validation.blocks || [])];
+          if (validation.verdict !== 'PASS' && blocks.length === 0) {
+            blocks.push('Live validation missing or failed; signal is not actionable.');
+          }
+          if (guards.length > 0) {
+            blocks.push('Signal blocked by risk guards: ' + guards.join(', '));
+          }
+          if (!updatedSignal.strike || !updatedSignal.option_side || !updatedSignal.entry ||
+              !updatedSignal.stop_loss || !updatedSignal.target) {
+            blocks.push('Required trade fields are incomplete; signal forced to WAIT.');
+          }
+          updatedSignal.live_validation = {
+            ...validation,
+            verdict: validation.verdict === 'PASS' ? 'WARN' : validation.verdict,
+            decision: 'WAIT',
+            blocks: [...new Set(blocks)],
+          };
+        }
         updatedSignal.signal_stability = {
           state: 'NOT_ACTIONABLE',
           required_minutes: 10,
