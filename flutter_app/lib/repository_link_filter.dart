@@ -1,4 +1,4 @@
-/// Removes repository links from user-facing AI chat content and search evidence.
+/// Removes repository links from user-facing text and search evidence.
 class RepositoryLinkFilter {
   static const Set<String> _repositoryHosts = <String>{
     'github.com',
