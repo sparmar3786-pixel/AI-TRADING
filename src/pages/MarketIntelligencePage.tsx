@@ -71,6 +71,7 @@ export const MarketIntelligencePage: React.FC = () => {
       // 1. Try querying backend for live data
       const backendUrl = apiService.getSignalBackend().replace(/\/+$/, '');
       let backendLoaded = false;
+      let backendFailure = '';
 
       try {
         const controller = new AbortController();
@@ -106,8 +107,9 @@ export const MarketIntelligencePage: React.FC = () => {
         } else {
           throw new Error('Backend has no verified market-intelligence result yet; refresh after the cloud inference finishes.');
         }
-      } catch (_) {
-        // Backend offline or rate limited
+      } catch (backendError) {
+        // Keep the real HTTP/network failure visible instead of masking it as a generic AI status.
+        backendFailure = backendError instanceof Error ? backendError.message : String(backendError);
       }
 
       // Never replace a failed cloud request with synthetic prices, fabricated news,
@@ -119,7 +121,7 @@ export const MarketIntelligencePage: React.FC = () => {
         setUpdatedAt('');
         setNextRefreshAt('');
         setArticles([]);
-        throw new Error('Cloud market intelligence is not verified. Check the backend CORS/AI provider status and retry.');
+        throw new Error(`Cloud market intelligence unavailable: ${backendFailure || 'backend returned an empty or unverified response'}. Check the configured Railway URL, endpoint deployment, CORS, and server-side NVIDIA/Exa/Tavily configuration.`);
       }
 
       setError(null);
