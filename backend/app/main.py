@@ -4086,6 +4086,8 @@ def open_paper_trade(body: dict[str, Any], _: str = Depends(_device)) -> dict[st
         "quantity": quantity, "lot_size": lot_size,
         "status": "OPEN", "slippage_r": slippage_r, "transaction_cost_r": transaction_cost_r,
         "slippage_inr": slippage_inr, "brokerage_inr": brokerage_inr, "other_costs_inr": other_costs_inr,
+        "costs_explicit": all(body.get(key) is not None for key in ("slippage_inr", "brokerage_inr", "other_costs_inr")),
+        "pnl_source": None,
         "gross_r": None, "net_r": None, "gross_pnl_inr": None, "net_pnl_inr": None,
         "exit_price": None, "exit_reason": None,
         "notes": str(body.get("notes") or "")[:1000],
@@ -4134,9 +4136,13 @@ def close_paper_trade(trade_id: str, body: dict[str, Any], _: str = Depends(_dev
             raise HTTPException(status_code=422, detail=f"{key} cannot be negative.")
     if exit_price is not None and entry_price is not None and quantity is not None and quantity > 0 and lot_size is not None and lot_size > 0:
         gross_pnl_inr = ((entry_price - exit_price) if is_short else (exit_price - entry_price)) * quantity * lot_size
-        if all(value is not None for value in effective_costs.values()):
+        costs_provided_at_close = all(body.get(key) is not None for key in cost_keys)
+        costs_explicit = trade.get("costs_explicit") is True or costs_provided_at_close
+        if costs_explicit and all(value is not None for value in effective_costs.values()):
             net_pnl_inr = gross_pnl_inr - sum(float(value) for value in effective_costs.values())
         trade.update(effective_costs)
+        trade["costs_explicit"] = costs_explicit
+        trade["pnl_source"] = "paper_estimate_with_explicit_costs" if net_pnl_inr is not None else None
     trade.update({
         "status": "CLOSED", "gross_r": round(gross_r, 6), "net_r": round(net_r, 6),
         "exit_price": exit_price, "exit_reason": exit_reason,
@@ -4162,7 +4168,11 @@ def _paper_performance_summary(trades: list[dict[str, Any]]) -> dict[str, Any]:
     reasons = [str(item.get("exit_reason") or "").upper() for item in closed]
     target_reasons = {"TARGET", "TARGET_HIT", "TAKE_PROFIT"}
     stop_reasons = {"STOP_LOSS", "SL", "STOP_FIRST_BOTH_TOUCHED"}
-    pnl_values = [_number(item.get("net_pnl_inr")) for item in closed]
+    pnl_values = [
+        _number(item.get("net_pnl_inr"))
+        if item.get("costs_explicit") is True or item.get("pnl_source") == "broker_realized" else None
+        for item in closed
+    ]
     has_complete_inr_pnl = bool(closed) and all(value is not None for value in pnl_values)
 
     def metrics_for(items: list[dict[str, Any]]) -> dict[str, Any]:
@@ -4172,7 +4182,11 @@ def _paper_performance_summary(trades: list[dict[str, Any]]) -> dict[str, Any]:
         item_flats = [value for value in values if value == 0]
         item_reasons = [str(item.get("exit_reason") or "").upper() for item in items]
         gross = [_number(item.get("gross_r")) for item in items]
-        rupee_values = [_number(item.get("net_pnl_inr")) for item in items]
+        rupee_values = [
+            _number(item.get("net_pnl_inr"))
+            if item.get("costs_explicit") is True or item.get("pnl_source") == "broker_realized" else None
+            for item in items
+        ]
         complete_rupees = bool(items) and all(value is not None for value in rupee_values)
         count = len(values)
         return {
@@ -4202,7 +4216,10 @@ def _paper_performance_summary(trades: list[dict[str, Any]]) -> dict[str, Any]:
     overall["total_slippage_r"] = round(sum(float(item.get("slippage_r") or 0) for item in closed), 6)
     overall["total_transaction_cost_r"] = round(sum(float(item.get("transaction_cost_r") or 0) for item in closed), 6)
     cost_keys = ("slippage_inr", "brokerage_inr", "other_costs_inr")
-    costs_complete = bool(closed) and all(all(_number(item.get(key)) is not None for key in cost_keys) for item in closed)
+    costs_complete = bool(closed) and all(
+        item.get("costs_explicit") is True and all(_number(item.get(key)) is not None for key in cost_keys)
+        for item in closed
+    )
     overall["total_costs_inr"] = round(sum(sum(float(item[key]) for key in cost_keys) for item in closed), 2) if costs_complete else None
     overall["total_costs_status"] = "RECORDED" if costs_complete else "NOT_AVAILABLE_FOR_ALL_TRADES"
     return {
