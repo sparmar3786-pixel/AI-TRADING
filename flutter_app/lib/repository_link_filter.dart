@@ -23,6 +23,22 @@ class RepositoryLinkFilter {
     return _repositoryHosts.any((domain) => host == domain || host.endsWith('.$domain'));
   }
 
+  /// Recursively sanitize server-provided values before any page renders them.
+  /// This prevents repository URLs from leaking through signals, diagnostics,
+  /// news evidence, strategy explanations, or future screens.
+  static dynamic sanitizeValue(dynamic value) {
+    if (value is String) return strip(value);
+    if (value is List) {
+      return value.map<dynamic>(sanitizeValue).toList(growable: false);
+    }
+    if (value is Map) {
+      return value.map<dynamic, dynamic>(
+        (key, item) => MapEntry<dynamic, dynamic>(key, sanitizeValue(item)),
+      );
+    }
+    return value;
+  }
+
   static String strip(String text) {
     var cleaned = text;
     // Keep a Markdown link's readable label while removing its repository target.
