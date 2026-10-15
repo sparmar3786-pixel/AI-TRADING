@@ -4101,6 +4101,14 @@ def _paper_trade_path() -> Path:
 
 def _load_paper_trades() -> list[dict[str, Any]]:
     with _lock:
+        db_ok, db_value = get_state("paper_trades")
+        if db_ok and isinstance(db_value, list):
+            _paper_trades_memory.clear()
+            _paper_trades_memory.update({
+                str(item["trade_id"]): dict(item) for item in db_value
+                if isinstance(item, dict) and item.get("trade_id")
+            })
+            return [dict(item) for item in _paper_trades_memory.values()]
         path = _paper_trade_path()
         try:
             if path.is_file():
@@ -4110,8 +4118,8 @@ def _load_paper_trades() -> list[dict[str, Any]]:
                     for item in raw:
                         if isinstance(item, dict) and item.get("trade_id"):
                             _paper_trades_memory[str(item["trade_id"])] = dict(item)
+                    put_state("paper_trades", list(_paper_trades_memory.values()))
         except (OSError, ValueError, TypeError):
-            # Keep the last in-memory state if a mounted volume is temporarily unavailable.
             pass
         return [dict(item) for item in _paper_trades_memory.values()]
 
@@ -4120,17 +4128,18 @@ def _save_paper_trades(rows: list[dict[str, Any]]) -> bool:
     with _lock:
         _paper_trades_memory.clear()
         _paper_trades_memory.update({str(item["trade_id"]): dict(item) for item in rows if item.get("trade_id")})
+        db_saved = put_state("paper_trades", list(_paper_trades_memory.values()))
+        file_saved = False
         path = _paper_trade_path()
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             temporary = path.with_suffix(path.suffix + ".tmp")
             temporary.write_text(json.dumps(rows, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
             temporary.replace(path)
-            return True
+            file_saved = True
         except OSError:
-            # API remains honest about volatility; it never claims disk persistence.
-            return False
-
+            pass
+        return db_saved or file_saved
 
 @app.get("/v1/paper/trades")
 def paper_trades(_: str = Depends(_device)) -> dict[str, Any]:
@@ -4138,7 +4147,11 @@ def paper_trades(_: str = Depends(_device)) -> dict[str, Any]:
     rows.sort(key=lambda item: str(item.get("opened_at") or ""), reverse=True)
     return {
         "status": "ok", "trades": rows, "trade_count": len(rows),
-        "persistence": "persistent" if _paper_trade_path().is_file() else "memory_or_empty",
+        "persistence": (
+            "postgresql" if get_state("paper_trades")[0] and get_state("paper_trades")[1] is not None
+            else "volume" if _paper_trade_path().is_file()
+            else "memory_or_empty"
+        ),
         "signal_only": True, "order_placement_enabled": False,
     }
 
