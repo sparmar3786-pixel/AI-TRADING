@@ -1063,14 +1063,6 @@ class TradingSetupPage extends StatelessWidget {
   );
 }
 
-Future<void> _openExternal(BuildContext context, String url) async {
-  final uri = Uri.parse(url);
-  final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
-  if (!opened && context.mounted) {
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open link. Please check your browser.')));
-  }
-}
-
 class DashboardPage extends StatelessWidget {
   const DashboardPage({required this.index,required this.connected,required this.status,required this.signals,required this.market,required this.tradePlans,required this.qualifiedCount,required this.lastFetch,required this.onSelected,super.key});
   final String index; final bool connected; final String status;
