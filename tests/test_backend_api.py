@@ -627,6 +627,36 @@ class BackendApiTests(unittest.TestCase):
             self.assertEqual(report.json()["metrics"]["net_total_r"], 0.96)
             api._paper_trades_memory.clear()
 
+    def test_paper_net_pnl_requires_explicit_costs_and_lot_size(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(api, "_paper_trade_path", return_value=Path(tmp) / "paper.json"):
+            api._paper_trades_memory.clear()
+            opened = self.client.post(
+                "/v1/paper/trades/open",
+                headers=self.device_headers,
+                json={
+                    "trade_id": "test-paper-pnl", "index": "NIFTY", "side": "CALL BUY",
+                    "entry_price": 100.0, "stop_loss": 90.0, "target": 120.0,
+                    "quantity": 2, "lot_size": 50,
+                    "slippage_inr": 10.0, "brokerage_inr": 20.0, "other_costs_inr": 5.0,
+                    "slippage_r": 0.0, "transaction_cost_r": 0.0,
+                },
+            )
+            self.assertEqual(opened.status_code, 200, opened.text)
+            closed = self.client.post(
+                "/v1/paper/trades/test-paper-pnl/close",
+                headers=self.device_headers,
+                json={"exit_price": 110.0, "exit_reason": "TARGET"},
+            )
+            self.assertEqual(closed.status_code, 200, closed.text)
+            self.assertEqual(closed.json()["trade"]["gross_pnl_inr"], 1000.0)
+            self.assertEqual(closed.json()["trade"]["net_pnl_inr"], 965.0)
+            report = self.client.get("/v1/paper/report", headers=self.device_headers)
+            self.assertEqual(report.status_code, 200, report.text)
+            self.assertEqual(report.json()["metrics"]["net_pnl_inr"], 965.0)
+            self.assertEqual(report.json()["metrics"]["total_costs_inr"], 35.0)
+            api._paper_trades_memory.clear()
+
     def test_index_quote_survives_signal_pipeline_failure(self):
         # The test verifies fallback quote preservation, not the host runner's
         # wall-clock market session. Freeze the session as open for determinism.
