@@ -12,25 +12,10 @@ export interface NvidiaModelInfo {
 
 export const SUPPORTED_NVIDIA_MODELS: NvidiaModelInfo[] = [
   {
-    id: 'nvidia/llama-3.1-nemotron-70b-instruct',
-    name: 'NVIDIA Llama 3.1 Nemotron 70B',
-    description: 'NVIDIA flagship reasoning model tuned for data analysis & reasoning',
+    id: 'z-ai/glm-5.3',
+    name: 'NVIDIA Hosted GLM 5.3',
+    description: 'Current server-configured cloud model; inference must return successfully to be shown as connected.',
     recommended: true,
-  },
-  {
-    id: 'nvidia/nemotron-4-340b-instruct',
-    name: 'NVIDIA Nemotron-4 340B',
-    description: 'High-capacity frontier model for institutional quant synthesis',
-  },
-  {
-    id: 'nvidia/mistral-nemo-minitron-8b-8k-instruct',
-    name: 'NVIDIA Mistral NeMo 8B',
-    description: 'Ultra-low latency model for high-frequency tick signals',
-  },
-  {
-    id: 'meta/llama-3.2-90b-vision-instruct',
-    name: 'Meta Llama 3.2 90B (NVIDIA Hosted)',
-    description: 'Advanced multimodal and chart pattern reasoning',
   },
 ];
 
@@ -93,7 +78,9 @@ class NvidiaService {
   }
 
   public getSelectedModel(): string {
-    return localStorage.getItem(STORAGE_KEY_SELECTED_MODEL) || this.defaultModel;
+    const saved = localStorage.getItem(STORAGE_KEY_SELECTED_MODEL);
+    // Migrate stale model IDs to the model configured by the server.
+    return SUPPORTED_NVIDIA_MODELS.some(model => model.id === saved) ? saved! : this.defaultModel;
   }
 
   public setSelectedModel(model: string): void {
