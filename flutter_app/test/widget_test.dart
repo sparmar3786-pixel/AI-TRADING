@@ -14,7 +14,7 @@ void main() {
   });
 
 
-  testWidgets('Quant Research Hub lists the requested research repositories', (tester) async {
+  testWidgets('Quant Research Hub does not render external repository links', (tester) async {
     await tester.pumpWidget(const FreshApp());
     final tabBarContext = tester.element(find.byType(TabBar).first);
     DefaultTabController.of(tabBarContext).animateTo(tabs.indexOf('Quant Research Hub'));
@@ -24,18 +24,9 @@ void main() {
       of: find.byType(ListView).last,
       matching: find.byType(Scrollable),
     );
-    for (final title in [
-      'Awesome Systematic Trading',
-      'Awesome Algorithmic Trading',
-      'Awesome Quant',
-      'Awesome Deep Trading',
-      'Stock Market Dashboard',
-      'AI Stock Market Dashboard',
-    ]) {
-      final item = find.text(title);
-      await tester.scrollUntilVisible(item, 250, scrollable: hubScrollable);
-      expect(item, findsOneWidget);
-    }
+    expect(find.text('Awesome Systematic Trading'), findsNothing);
+    expect(find.text('Awesome Algorithmic Trading'), findsNothing);
+    expect(find.text('Open GitHub repository'), findsNothing);
   });
 
   testWidgets('additional broker-home prototype uses Angel One-backed market data', (tester) async {
@@ -48,7 +39,7 @@ void main() {
     expect(find.text('Markets, watchlist & account overview'), findsOneWidget);
   });
 
-  testWidgets('PDF report tab includes all report pages, screenshot index and repository links', (tester) async {
+  testWidgets('PDF report tab includes report pages but no repository links', (tester) async {
     await tester.pumpWidget(const FreshApp());
     final tabBarContext = tester.element(find.byType(TabBar).first);
     DefaultTabController.of(tabBarContext).animateTo(tabs.indexOf('PDF Report & Repositories'));
@@ -65,9 +56,8 @@ void main() {
     final screenshotIndex = find.text('ALL 15 SCREENSHOT INDEX');
     await tester.scrollUntilVisible(screenshotIndex, 300, scrollable: reportScrollable);
     expect(screenshotIndex, findsOneWidget);
-    final repositoryLinks = find.text('REPOSITORY & DOCUMENTATION LINKS');
-    await tester.scrollUntilVisible(repositoryLinks, 300, scrollable: reportScrollable);
-    expect(repositoryLinks, findsOneWidget);
+    expect(find.text('REPOSITORY & DOCUMENTATION LINKS'), findsNothing);
+    expect(find.text('Fresh-Apk • current app/backend repository'), findsNothing);
     final priorityRootCause = find.text('PRIORITY ROOT CAUSE');
     await tester.drag(reportScrollable, const Offset(0, 3000));
     await tester.pumpAndSettle();
@@ -130,7 +120,7 @@ void main() {
     expect(find.text('PAPER TRADING'), findsNothing);
   });
 
-  testWidgets('Research Engines shows live data and non-chart research sources', (tester) async {
+  testWidgets('Research Engines shows live data without repository links', (tester) async {
     await tester.pumpWidget(const FreshApp());
     final tabBarContext = tester.element(find.byType(TabBar).first);
     DefaultTabController.of(tabBarContext).animateTo(tabs.indexOf('Research Engines'));
@@ -142,9 +132,8 @@ void main() {
       of: find.byType(ListView).last,
       matching: find.byType(Scrollable),
     );
-    final researchSources = find.text('RESEARCH SOURCES • NON-CHART REPOSITORIES');
-    await tester.scrollUntilVisible(researchSources, 250, scrollable: researchScrollable);
-    expect(researchSources, findsOneWidget);
+    expect(find.text('RESEARCH SOURCES • NON-CHART REPOSITORIES'), findsNothing);
+    expect(find.text('Systematic Trading'), findsNothing);
   });
 
   testWidgets('hamburger drawer exposes API and Railway navigation', (tester) async {
@@ -169,10 +158,11 @@ void main() {
     await tester.tap(apiRailway);
     await tester.pumpAndSettle();
     expect(find.text('ADVANCED API + RAILWAY CONNECTION'), findsOneWidget);
-    expect(find.text('Railway FastAPI starter'), findsOneWidget);
+    expect(find.text('Railway FastAPI starter'), findsNothing);
+    expect(find.text('GitHub repository: Fresh-Apk'), findsNothing);
   });
 
-  testWidgets('Trading Setup shows Angel One architecture and research links', (tester) async {
+  testWidgets('Trading Setup shows Angel One architecture without repository links', (tester) async {
     await tester.pumpWidget(const FreshApp());
     await tester.tap(find.byTooltip('Open navigation menu'));
     await tester.pumpAndSettle();
