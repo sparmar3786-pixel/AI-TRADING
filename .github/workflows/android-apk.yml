@@ -137,7 +137,7 @@ jobs:
           if ! grep -q 'id.flutter.flutter_background_service.BackgroundService' "$MANIFEST"; then
             sed -i 's#</application>#<service android:name="id.flutter.flutter_background_service.BackgroundService" android:foregroundServiceType="dataSync" android:exported="true" />\n    </application>#' "$MANIFEST"
           fi
-          sed -i 's/android:label="ai_trading_signal"/android:label="AI Trading Signals"/' "$MANIFEST"
+          sed -i 's/android:label="ai_trading_signal"/android:label="Trading Signals"/' "$MANIFEST"
           GRADLE=android/app/build.gradle.kts
           sed -i 's/applicationId = "com.example.ai_trading_signal"/applicationId = "com.sparmar3786.aitradingsignals"/' "$GRADLE"
           grep -n 'applicationId\|minSdk' "$GRADLE"
@@ -205,7 +205,7 @@ jobs:
               exit 1
             fi
             "$AAPT" dump permissions "$APK" | grep -q 'android.permission.INTERNET'
-            "$AAPT" dump badging "$APK" | grep -F "application-label:'AI Trading Signals'" >/dev/null
+            "$AAPT" dump badging "$APK" | grep -F "application-label:'Trading Signals'" >/dev/null
           done
           ls -lh "$UNIVERSAL" "$ARM64"
       - name: Upload APK artifacts
@@ -242,7 +242,7 @@ jobs:
           TAG="ai-trading-signal-latest"
           APK="flutter_app/build/app/outputs/flutter-apk/app-release.apk"
           ARM64_APK="flutter_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk"
-          NOTES="Universal signal-only Android APK for broad ABI compatibility; app-arm64-v8a-release.apk is the smaller optimized build for 64-bit ARM Android phones. Keeps the existing Railway AI/chat backend separate from the AI-TRADING Angel One signals API. The signal service uses SmartWebSocketV2 with timestamp-validated REST FULL-depth fallback. Signals require fresh exchange-timestamped evidence and continuous 10-minute same-side/same-strike confirmation. No broker order-placement API is included in the APK. Configure Angel One credentials in the app over HTTPS; validate on-device and paper-trade before relying on signals."
+          NOTES="Universal signal-only Android APK for broad ABI compatibility; app-arm64-v8a-release.apk is the smaller optimized build for 64-bit ARM Android phones. Uses the Railway market-data and Angel One signals APIs without AI-provider or AI-chat features. The signal service uses SmartWebSocketV2 with timestamp-validated REST FULL-depth fallback. Signals require fresh exchange-timestamped evidence and continuous 10-minute same-side/same-strike confirmation. No broker order-placement API is included in the APK. Configure Angel One credentials in the app over HTTPS; validate on-device and paper-trade before relying on signals."
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$APK" "$ARM64_APK" --clobber
             gh release edit "$TAG" --title "AI-TRADING Signal APK" --notes "$NOTES"
