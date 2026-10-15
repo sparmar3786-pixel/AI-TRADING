@@ -46,75 +46,58 @@ Instructions:
 3. Never turn WAIT into a buy/sell recommendation and never claim a trade is safe or profitable.
 4. Emphasize risk management and format with clean bullets.`;
 
-  // 1. Check if user has configured NVIDIA NIM API Key or preferred provider
-  if (nvidiaService.isNvidiaConfigured()) {
-    try {
-      const nvidiaResult = await nvidiaService.queryNvidiaNim(
-        question,
-        systemPrompt,
-        history
-      );
-      if (nvidiaResult && nvidiaResult.answer.trim().length > 0) {
-        return {
-          answer: stripRepositoryLinks(nvidiaResult.answer),
-          provider: 'NVIDIA NIM',
-          model: nvidiaResult.model,
-        };
-      }
-    } catch (e) {
-      console.warn('Direct NVIDIA NIM call failed; trying the server-side cloud provider:', e);
-    }
-  }
-
-  // 2. Try Railway Backend NVIDIA Cloud endpoint
+  // NVIDIA is the primary provider and inference runs through Railway so credentials stay server-side.
+  // Do not call NVIDIA directly from the browser or silently hide backend errors.
+  const backendUrl = apiService.getSignalBackend().replace(/\\/+$/, '');
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 20000);
+  let response: Response;
   try {
-    const backendUrl = apiService.getSignalBackend().replace(/\/+$/, '');
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
-
-    const resp = await fetch(`${backendUrl}/v1/ai/nvidia-chat`, {
+    response = await fetch(`${backendUrl}/v1/ai/nvidia-chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-Device-Id': apiService.getDeviceId(),
         Accept: 'application/json',
       },
-      body: JSON.stringify({
-        index,
-        question,
-        history: history.slice(-4),
-      }),
+      body: JSON.stringify({ index, question, history: history.slice(-4), context: {
+        ltp, change, change_percent: changePct, trend, pcr, max_pain: maxPain,
+        decision, confidence, signal_stability: signal?.signal_stability?.state || 'ACTIVE',
+      } }),
       signal: controller.signal,
+      cache: 'no-store',
     });
-    clearTimeout(timeoutId);
-
-    if (resp.ok) {
-      const body = await resp.json();
-      const ans = typeof body?.answer === 'string' ? body.answer.trim() : '';
-      // Ensure answer is not an error message about rate limits or missing data
-      const actualProvider = String(body.provider || '').toLowerCase();
-      const isRealCloudInference = body.llm_used !== false &&
-        actualProvider !== 'deterministic_fallback' &&
-        actualProvider !== 'none' &&
-        Boolean(body.model);
-      if (ans && isRealCloudInference &&
-          !ans.toLowerCase().includes('cannot be determined due to unavailable')) {
-        return {
-          answer: stripRepositoryLinks(ans),
-          provider: body.provider || 'NVIDIA NIM (Cloud AI)',
-          model: body.model,
-        };
-      }
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('NVIDIA Railway inference timed out after 20 seconds.');
     }
-  } catch (_) {
-    // Backend offline or timeout
+    throw new Error(`Cannot reach NVIDIA Railway inference endpoint: ${error instanceof Error ? error.message : 'network/CORS error'}`);
+  } finally {
+    clearTimeout(timeoutId);
   }
 
-  // No Gemini or template-based "AI" fallback: report provider failure truthfully.
-  // The built-in deterministic quant engine remains authoritative for gates/signals,
-  // but it must not impersonate an NVIDIA/Cloud LLM answer.
-  throw new Error(
-    'Cloud AI unavailable: NVIDIA inference did not return a real response. ' +
-    'Check Railway /v1/ai/status and run the AI provider test; OpenRouter is the configured fallback.'
-  );
+  const raw = await response.text();
+  let body: any = {};
+  try { body = raw ? JSON.parse(raw) : {}; } catch { body = {}; }
+  if (!response.ok) {
+    const detail = typeof body.detail === 'string' ? body.detail
+      : typeof body.error === 'string' ? body.error
+      : raw.slice(0, 240);
+    throw new Error(`NVIDIA inference HTTP ${response.status}: ${detail || response.statusText}`);
+  }
+
+  const answer = typeof body.answer === 'string' ? body.answer.trim() : '';
+  const provider = String(body.provider || '').toLowerCase();
+  const realInference = body.llm_used !== false &&
+    !['deterministic_fallback', 'none', 'template', 'offline'].includes(provider) &&
+    Boolean(body.model);
+  if (!answer || !realInference) {
+    throw new Error(String(body.error || body.detail ||
+      'Railway responded, but did not confirm a real NVIDIA model inference (answer/provider/model missing).'));
+  }
+  return {
+    answer: stripRepositoryLinks(answer),
+    provider: String(body.provider || 'NVIDIA NIM'),
+    model: String(body.model),
+  };
 }
