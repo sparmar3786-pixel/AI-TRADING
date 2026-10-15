@@ -1,6 +1,6 @@
 /**
  * NVIDIA NIM & AI Market Intelligence Service
- * Handles NVIDIA NIM (Llama 3.1 Nemotron 70B), Gemini, and Built-in Quant Engine
+ * Handles server-side NVIDIA cloud inference and reports verified status only.
  */
 
 export interface NvidiaModelInfo {
@@ -90,14 +90,15 @@ class NvidiaService {
    * NVIDIA NIM is active either via user direct API key or via built-in Nemotron 70B pipeline
    */
   public isNvidiaActive(): boolean {
-    return true; // Always active (Direct key or Built-in Nemotron 70B Quant Engine)
+    // A key or deterministic local rules do not prove that a cloud inference works.
+    return this.isNvidiaConfigured();
   }
 
   public getEngineStatusLabel(): { label: string; isDirectKey: boolean } {
     if (this.isNvidiaConfigured()) {
       return { label: 'NVIDIA NIM DIRECT KEY ACTIVE', isDirectKey: true };
     }
-    return { label: 'NVIDIA NIM ACTIVE (NEMOTRON 70B)', isDirectKey: false };
+    return { label: 'NVIDIA CLOUD NOT VERIFIED', isDirectKey: false };
   }
 
   public getSelectedModel(): string {
