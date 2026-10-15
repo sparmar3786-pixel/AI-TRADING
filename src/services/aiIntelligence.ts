@@ -40,10 +40,10 @@ Current Market Context:
 - 10-Minute Stability Gate: ${signal?.signal_stability?.state || 'ACTIVE'}
 
 Instructions:
-1. Provide concise, highly actionable, institutional-grade quant analysis in professional, helpful tone (English / clear Hinglish if appropriate).
-2. Reference exact support & resistance levels, strike selection, and Greeks.
-3. Always emphasize risk management and stop-loss discipline.
-4. Format with clean bullet points and bold highlights.`;
+1. Provide concise, professional analysis in English or clear Hinglish.
+2. Use only values explicitly present in the supplied context; if support/resistance, strike, Greeks, or other fields are missing, say unavailable instead of estimating or inventing them.
+3. Never turn WAIT into a buy/sell recommendation and never claim a trade is safe or profitable.
+4. Emphasize risk management and format with clean bullets.`;
 
   // 1. Check if user has configured NVIDIA NIM API Key or preferred provider
   if (nvidiaService.isNvidiaConfigured()) {
