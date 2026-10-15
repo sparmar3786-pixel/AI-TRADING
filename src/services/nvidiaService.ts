@@ -30,48 +30,31 @@ export interface MarketArticle {
   content: string;
 }
 
-const STORAGE_KEY_NVIDIA = 'ai_trading_nvidia_key';
 const STORAGE_KEY_SELECTED_MODEL = 'ai_trading_nvidia_model';
 const STORAGE_KEY_AI_PROVIDER = 'ai_trading_preferred_provider';
 
 class NvidiaService {
   private defaultModel = 'z-ai/glm-5.3';
 
+  // Provider secrets must remain on Railway; never persist them in browser storage.
   public getNvidiaApiKey(): string {
-    const fromStorage = localStorage.getItem(STORAGE_KEY_NVIDIA);
-    if (fromStorage && fromStorage.trim().length > 0) {
-      return fromStorage.trim();
-    }
-    const env = (import.meta as any).env || {};
-    return (env.VITE_NVIDIA_API_KEY as string) || (env.NVIDIA_API_KEY as string) || '';
+    return '';
   }
 
-  public setNvidiaApiKey(key: string): void {
-    if (key.trim()) {
-      localStorage.setItem(STORAGE_KEY_NVIDIA, key.trim());
-    } else {
-      localStorage.removeItem(STORAGE_KEY_NVIDIA);
-    }
+  public setNvidiaApiKey(_key: string): void {
+    // Intentionally disabled: configure NVIDIA credentials in Railway environment variables.
   }
 
   public isNvidiaConfigured(): boolean {
-    const key = this.getNvidiaApiKey();
-    return Boolean(key && (key.startsWith('nvapi-') || key.length > 20));
+    return false; // Configuration is verified by server status/inference, not browser-held keys.
   }
 
-  /**
-   * A browser-held key is configured; real inference success is checked on each request.
-   */
   public isNvidiaActive(): boolean {
-    // A key or deterministic local rules do not prove that a cloud inference works.
-    return this.isNvidiaConfigured();
+    return false; // Do not mark active until a real backend inference has succeeded.
   }
 
   public getEngineStatusLabel(): { label: string; isDirectKey: boolean } {
-    if (this.isNvidiaConfigured()) {
-      return { label: 'NVIDIA KEY CONFIGURED • NOT VERIFIED', isDirectKey: true };
-    }
-    return { label: 'NVIDIA CLOUD NOT VERIFIED', isDirectKey: false };
+    return { label: 'NVIDIA STATUS REQUIRES RAILWAY VERIFICATION', isDirectKey: false };
   }
 
   public getSelectedModel(): string {
@@ -97,37 +80,17 @@ class NvidiaService {
   }
 
   /**
-   * Validate user-supplied NVIDIA API key against NVIDIA NIM API catalog
+   * Never test or send user-supplied keys from the browser. Keys are server-side only.
    */
-  public async validateNvidiaKey(apiKey: string): Promise<{ valid: boolean; message: string }> {
-    const cleanKey = apiKey.trim();
-    if (!cleanKey) {
-      return { valid: false, message: 'API Key cannot be empty.' };
-    }
-    try {
-      const response = await fetch('https://integrate.api.nvidia.com/v1/models', {
-        headers: {
-          Authorization: `Bearer ${cleanKey}`,
-          Accept: 'application/json',
-        },
-      });
-
-      if (response.ok) {
-        return { valid: true, message: 'NVIDIA key authenticated against the model catalog; actual chat inference still needs a successful response.' };
-      }
-
-      if (response.status === 401 || response.status === 403) {
-        return { valid: false, message: 'Invalid NVIDIA API Key. Please verify key from build.nvidia.com' };
-      }
-
-      return { valid: false, message: `NVIDIA returned HTTP ${response.status}` };
-    } catch (e) {
-      return { valid: false, message: e instanceof Error ? e.message : 'Network error testing NVIDIA API' };
-    }
+  public async validateNvidiaKey(_apiKey: string): Promise<{ valid: boolean; message: string }> {
+    return {
+      valid: false,
+      message: 'Browser key entry is disabled. Configure NVIDIA_API_KEY on Railway and verify using a real backend inference.',
+    };
   }
 
   /**
-   * Query NVIDIA NIM directly via official API Catalog endpoint
+   * NVIDIA cloud inference through Railway only. No provider key is read by this client.
    */
   public async queryNvidiaNim(
     prompt: string,
@@ -135,53 +98,37 @@ class NvidiaService {
     history: { role: 'user' | 'assistant'; content: string }[] = [],
     modelOverride?: string
   ): Promise<{ answer: string; model: string; provider: string } | null> {
-    const apiKey = this.getNvidiaApiKey();
-    if (!apiKey) return null;
-
-    const model = modelOverride || this.getSelectedModel();
-
-    try {
-      const messages = [
-        { role: 'system', content: systemPrompt },
-        ...history.slice(-6).map(h => ({ role: h.role, content: h.content })),
-        { role: 'user', content: prompt },
-      ];
-
-      const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
-          Accept: 'application/json',
-        },
-        body: JSON.stringify({
-          model,
-          messages,
-          temperature: 0.3,
-          top_p: 0.8,
-          max_tokens: 1024,
-        }),
-      });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        console.warn('NVIDIA NIM API response not ok:', response.status, errText);
-        return null;
-      }
-
-      const data = await response.json();
-      const answer = data?.choices?.[0]?.message?.content;
-      if (answer && typeof answer === 'string') {
-        return {
-          answer: answer.trim(),
-          model,
-          provider: 'NVIDIA NIM',
-        };
-      }
-    } catch (e) {
-      console.warn('Direct NVIDIA NIM call error:', e);
+    const { apiService } = await import('./api');
+    const backendUrl = apiService.getSignalBackend();
+    const response = await fetch(`${backendUrl}/v1/ai/nvidia-chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Device-Id': apiService.getDeviceId(),
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        index: 'NIFTY',
+        question: [systemPrompt, prompt].join(String.fromCharCode(10).repeat(2)),
+        history: history.slice(-4),
+        context: { requested_model: modelOverride || this.getSelectedModel() },
+      }),
+      cache: 'no-store',
+    });
+    const raw = await response.text();
+    let data: any = {};
+    try { data = raw ? JSON.parse(raw) : {}; } catch { /* handled below */ }
+    if (!response.ok) {
+      throw new Error(`NVIDIA Railway inference HTTP ${response.status}: ${String(data.detail || data.error || raw).slice(0, 240)}`);
     }
-    return null;
+    const answer = typeof data.answer === 'string' ? data.answer.trim() : '';
+    const provider = String(data.provider || '');
+    const model = String(data.model || '');
+    if (!answer || !model || data.llm_used === false ||
+        ['deterministic_fallback', 'none', 'template', 'offline'].includes(provider.toLowerCase())) {
+      throw new Error('Backend did not confirm a real NVIDIA model inference.');
+    }
+    return { answer, model, provider: provider || 'NVIDIA NIM' };
   }
 
 
