@@ -768,7 +768,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         IndicatorsPage(selected:selectedIndex,signal:_signal(selectedIndex),fast:emaFast,slow:emaSlow,onChanged:(f,s){setState((){emaFast=f;emaSlow=s;});refresh();},onIndex:(v)=>setState(()=>selectedIndex=v)),
         SignalPage(backendUrl:backendUrl,liveStatus:liveTrading,index:selectedIndex,signals:signals,ai:ai,aiProviders:aiProviderStatus,tradePlans:tradePlans,market:market,onChanged:(v)=>setState(()=>selectedIndex=v)),
         RiskPage(index:selectedIndex,signal:_signal(selectedIndex),plans:tradePlans,market:market,commodities:commodities),
-        CommodityPage(items:commodities),
         BacktestingPage(backendUrl: backendUrl),
         ApiPage(backendUrl:backendUrl,signalBackendUrl:signalBackendUrl,feed:feed,storeDiagnostics:storeDiagnostics,market:market,onSaved:(url){setState(()=>backendUrl=url);refresh();}),
         AiAccessPage(backendUrl:backendUrl),
@@ -810,7 +809,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           onIndexSelected: (value) => setState(() => selectedIndex = value),
         ),
         MarketIntelligencePage(backendUrl: backendUrl, signalBackendUrl: signalBackendUrl),
-        OrderFlowPage(signalBackendUrl: signalBackendUrl),
         Builder(
           builder: (tabContext) => QuantEngineLabPage(
             backendUrl: backendUrl,
@@ -823,7 +821,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         StrategyLibraryPage(market: market, signals: signals, selectedIndex: selectedIndex),
         FlowMonitorPage(signalBackendUrl: signalBackendUrl),
         const DailyAiMemoryPage(),
-        SmcChartPage(index: selectedIndex, market: _market(selectedIndex), signal: _signal(selectedIndex), ai: ai, onIndexChanged: (value) => setState(() => selectedIndex = value)),
         PerformancePage(backendUrl: backendUrl, signalBackendUrl: signalBackendUrl),
       ]),
     ),
