@@ -93,8 +93,8 @@ export interface TechnicalIndicators {
 export interface QuantLayerResult {
   layer: number;
   name: string;
-  status: 'PASS' | 'WARN' | 'FAIL';
-  score: number;
+  status: 'PASS' | 'WARN' | 'FAIL' | 'UNAVAILABLE';
+  score: number | null;
   weight: number;
   detail: string;
 }
