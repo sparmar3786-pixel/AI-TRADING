@@ -31,6 +31,11 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, W
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
+try:
+    from app.state_store import database_configured, delete_state, get_state, put_state
+except ModuleNotFoundError:
+    from backend.app.state_store import database_configured, delete_state, get_state, put_state
+
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
