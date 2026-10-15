@@ -1,6 +1,6 @@
 {
   "name": "AI Trading Signals",
-  "description": "Android algorithmic trading terminal for NSE/BSE equity indices featuring 10-minute signal stability gate, 5-layer quant confluence engine, SMC pro charts, and paper broker execution.",
+  "description": "Android algorithmic trading terminal for NSE/BSE equity indices featuring 10-minute signal stability gate, 5-layer quant confluence engine, and paper broker execution. Dedicated SMC, MCX/commodities, and Order Flow/Footprint charts are excluded and reserved for a separate APK.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_NVIDIA_API"
