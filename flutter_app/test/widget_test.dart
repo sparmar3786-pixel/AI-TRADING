@@ -3,31 +3,29 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ai_trading_signal/main.dart';
 
 void main() {
-  testWidgets('AI Trading app starts and exposes core market/API tabs', (tester) async {
+  testWidgets('Trading app starts with strategy tab and no AI tabs', (tester) async {
     await tester.pumpWidget(const FreshApp());
     await tester.pump(const Duration(milliseconds: 100));
 
     expect(tabs, contains('Dashboard'));
     expect(tabs, contains('Market'));
     expect(tabs, contains('Signals'));
-    expect(tabs, contains('Strategy Library'));
+    expect(tabs, contains('Strategies'));
     expect(tabs, contains('API'));
-    expect(tabs, contains('AI Access'));
-    expect(tabs, isNot(contains('Repository Library')));
-    expect(tabs, isNot(contains('Quant Research Hub')));
-    expect(tabs, isNot(contains('Quant & Trading Repositories')));
-    expect(tabs, isNot(contains('PDF Reports')));
+    expect(tabs, isNot(contains('AI Access')));
     expect(tabs, isNot(contains('AI Chat')));
+    expect(tabs, isNot(contains('Quant Engine Lab')));
+    expect(tabs, isNot(contains('Research Engines')));
+    expect(tabs, isNot(contains('5-Layer Quant Signal Engine')));
     expect(find.byKey(const ValueKey('open-navigation-menu')), findsOneWidget);
   });
 
-
-  testWidgets('Strategy Library exposes inventory without claiming live readiness', (tester) async {
+  testWidgets('Strategies tab lists all known engines and discloses integration limits', (tester) async {
     await tester.pumpWidget(const FreshApp());
     await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(find.byKey(const ValueKey('open-navigation-menu')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('drawer-tab-Strategy Library')));
+    await tester.tap(find.byKey(const ValueKey('drawer-tab-Strategies')));
     await tester.pumpAndSettle();
 
     expect(find.text('STRATEGY LIBRARY'), findsOneWidget);
@@ -43,54 +41,25 @@ void main() {
 
   testWidgets('SMC, MCX and Order Flow chart pages are completely absent', (tester) async {
     const removedLabels = <String>[
-      'SMC Pro Chart',
-      'SMC Chart',
-      'Smart Money Concepts Chart',
-      'Order Flow & Footprint',
-      'Order Flow Chart',
-      'Footprint Chart',
-      'FOOTPRINT CHART',
-      'MCX',
-      'MCX Commodities',
-      'MCX Commodity Exchange',
-      'Commodities',
-      'CRUDEOIL',
-      'NATURALGAS',
+      'SMC Pro Chart', 'SMC Chart', 'Smart Money Concepts Chart',
+      'Order Flow & Footprint', 'Order Flow Chart', 'Footprint Chart',
+      'FOOTPRINT CHART', 'MCX', 'MCX Commodities', 'MCX Commodity Exchange',
+      'Commodities', 'CRUDEOIL', 'NATURALGAS',
     ];
-
     for (final tab in tabs) {
-      expect(
-        removedLabels.map((label) => label.toLowerCase()),
+      expect(removedLabels.map((label) => label.toLowerCase()),
         isNot(contains(tab.toLowerCase())),
-        reason: 'Removed chart page must not be a top-level tab: $tab',
-      );
+        reason: 'Removed chart page must not be a top-level tab: $tab');
     }
-
     await tester.pumpWidget(const FreshApp());
     await tester.pump(const Duration(milliseconds: 100));
     for (final label in removedLabels) {
       expect(find.text(label), findsNothing, reason: '$label must not be visible');
     }
-
     await tester.tap(find.byKey(const ValueKey('open-navigation-menu')));
     await tester.pumpAndSettle();
     for (final label in removedLabels) {
       expect(find.text(label), findsNothing, reason: '$label must not appear in navigation');
     }
   });
-  testWidgets('AI Access is cloud-only with no on-device model controls', (tester) async {
-    await tester.pumpWidget(const FreshApp());
-    await tester.pump(const Duration(milliseconds: 100));
-    await tester.tap(find.byKey(const ValueKey('open-navigation-menu')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('AI Access').last);
-    await tester.pumpAndSettle();
-
-    expect(find.text('ADD OFFLINE GGUF MODELS'), findsNothing);
-    expect(find.text('TEST ALL OFFLINE MODELS'), findsNothing);
-    expect(find.text('Offline AI — On-device GGUF Models'), findsNothing);
-    expect(find.text('OPEN AI CHAT • LOAD SELECTED OFFLINE MODEL'), findsNothing);
-  });
-
 }
-
