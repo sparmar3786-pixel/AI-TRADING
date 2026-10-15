@@ -1,10 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import {
   IndexSymbol,
-  CommoditySymbol,
   SignalData,
   MarketRow,
-  CommodityRow,
   SystemDiagnostics,
   PaperTrade,
 } from '../types/market';
@@ -12,16 +10,13 @@ import { apiService, INDEX_CONFIG } from '../services/api';
 
 interface TradingContextType {
   selectedIndex: IndexSymbol;
-  selectedCommodity: CommoditySymbol;
   activeTab: string;
   drawerOpen: boolean;
   market: Record<string, MarketRow>;
   signals: Record<string, SignalData>;
-  commodities: CommodityRow[];
   isLive: boolean;
   isRefreshing: boolean;
   lastUpdated: string;
-  marketStatus: { equityOpen: boolean; mcxOpen: boolean; istTime: string };
   diagnostics: SystemDiagnostics | null;
   paperBalance: number;
   paperTrades: PaperTrade[];
@@ -39,7 +34,6 @@ interface TradingContextType {
   resetPaperAccount: () => void;
   refresh: () => Promise<void>;
   setSelectedIndex: (idx: IndexSymbol) => void;
-  setSelectedCommodity: (comm: CommoditySymbol) => void;
   setActiveTab: (tab: string) => void;
   toggleDrawer: () => void;
   setDrawerOpen: (open: boolean) => void;
@@ -49,13 +43,11 @@ const TradingContext = createContext<TradingContextType | undefined>(undefined);
 
 export const TradingProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [selectedIndex, setSelectedIndex] = useState<IndexSymbol>('NIFTY');
-  const [selectedCommodity, setSelectedCommodity] = useState<CommoditySymbol>('CRUDEOIL');
   const [activeTab, setActiveTab] = useState<string>('Dashboard');
   const [drawerOpen, setDrawerOpen] = useState<boolean>(false);
 
   const [market, setMarket] = useState<Record<string, MarketRow>>({});
   const [signals, setSignals] = useState<Record<string, SignalData>>({});
-  const [commodities, setCommodities] = useState<CommodityRow[]>([]);
   const [isLive, setIsLive] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [lastUpdated, setLastUpdated] = useState<string>('');
@@ -101,7 +93,6 @@ export const TradingProvider: React.FC<{ children: ReactNode }> = ({ children })
       const data = await apiService.fetchSignals();
       setMarket(data.market);
       setSignals(data.signals);
-      setCommodities(data.commodities);
       setIsLive(data.isLive);
       setLastUpdated(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
       setMarketStatus(apiService.getMarketOpenStatus());
@@ -307,12 +298,10 @@ export const TradingProvider: React.FC<{ children: ReactNode }> = ({ children })
     <TradingContext.Provider
       value={{
         selectedIndex,
-        selectedCommodity,
         activeTab,
         drawerOpen,
         market,
         signals,
-        commodities,
         isLive,
         isRefreshing,
         lastUpdated,
@@ -325,7 +314,6 @@ export const TradingProvider: React.FC<{ children: ReactNode }> = ({ children })
         resetPaperAccount,
         refresh,
         setSelectedIndex,
-        setSelectedCommodity,
         setActiveTab,
         toggleDrawer,
         setDrawerOpen,
