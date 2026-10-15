@@ -8,11 +8,9 @@ import 'api.dart';
 import 'config.dart';
 import 'trade_engine_page.dart';
 import 'broker_home_prototype_page.dart';
-import 'pdf_report_solutions_page.dart';
-import 'ai_chat_page.dart';
 import 'quant_engine_lab_page.dart';
 
-const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Backtesting','API','AI Access','Data Health','API & Railway','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home (Prototype)','PDF Reports','AI Chat','Quant Engine Lab'];
+const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Backtesting','API','AI Access','Data Health','API & Railway','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home (Prototype)','Quant Engine Lab'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
 
 void main() {
@@ -466,8 +464,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           status: status,
           onIndexSelected: (value) => setState(() => selectedIndex = value),
         ),
-        const PdfReportSolutionsPage(),
-        AiChatPage(backendUrl: backendUrl, selectedIndex: selectedIndex),
         Builder(
           builder: (tabContext) => QuantEngineLabPage(
             backendUrl: backendUrl,
