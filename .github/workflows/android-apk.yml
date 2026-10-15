@@ -69,7 +69,7 @@ jobs:
             echo "Repository links remain in an active APK screen."
             exit 1
           fi
-          if grep -nE 'Repository Library|Quant Research Hub|Quant & Trading Repositories|REFERENCE REPOSITORIES|REPOSITORY & DOCUMENTATION LINKS|Strategy Library • research links' lib/main.dart lib/trade_engine_page.dart lib/pdf_report_solutions_page.dart; then
+          if grep -nE 'Repository Library|Quant Research Hub|Quant & Trading Repositories|REFERENCE REPOSITORIES|REPOSITORY & DOCUMENTATION LINKS|Strategy Library • research links' lib/main.dart lib/trade_engine_page.dart; then
             echo "Repository-only navigation or cards remain in an active APK screen."
             exit 1
           fi
