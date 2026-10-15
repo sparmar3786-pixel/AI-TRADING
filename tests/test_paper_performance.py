@@ -31,7 +31,7 @@ class PaperPerformanceSummaryTests(unittest.TestCase):
 
     def test_does_not_fabricate_rupee_pnl_when_missing(self):
         report = _paper_performance_summary([
-            {"trade_id": "1", "instrument": "NIFTY", "status": "CLOSED", "gross_r": 1.0, "net_r": 0.96, "exit_reason": "MANUAL"},
+            {"trade_id": "1", "instrument": "NIFTY", "status": "CLOSED", "gross_r": 1.0, "net_r": 0.96, "exit_reason": "MANUAL", "net_pnl_inr": 100.0, "slippage_inr": 0.0, "brokerage_inr": 0.0, "other_costs_inr": 0.0},
         ])
         self.assertIsNone(report["metrics"]["net_pnl_inr"])
         self.assertEqual(report["metrics"]["pnl_status"], "NOT_AVAILABLE_FOR_ALL_TRADES")
