@@ -13,6 +13,42 @@ class AiChatPage extends StatefulWidget {
 }
 
 class _AiChatPageState extends State<AiChatPage> {
+  // Repository-host links must never be rendered in the APK's chat UI.
+  static const Set<String> _repositoryHosts = <String>{
+    'github.com', 'githubusercontent.com', 'github.io',
+    'gitlab.com', 'gitlab.io', 'bitbucket.org', 'sourceforge.net',
+    'codeberg.org', 'git.sr.ht', 'huggingface.co',
+  };
+
+  bool _isRepositoryUrl(String rawUrl) {
+    final cleaned = rawUrl.trim().replaceAll(RegExp(r'[),.;!?]+$'), '');
+    var uri = Uri.tryParse(cleaned);
+    if (uri == null || uri.host.isEmpty) uri = Uri.tryParse('https://$cleaned');
+    final host = (uri?.host ?? '').toLowerCase().replaceFirst(RegExp(r'^www\.'), '');
+    return _repositoryHosts.any((domain) => host == domain || host.endsWith('.$domain'));
+  }
+
+  String _removeRepositoryLinks(String text) {
+    var cleaned = text;
+    cleaned = cleaned.replaceAllMapped(
+      RegExp(r'\[([^\]]+)\]\((?:<)?(https?://[^)\s>]+)(?:>)?\)', caseSensitive: false),
+      (match) => _isRepositoryUrl(match.group(2)!) ? match.group(1)! : match.group(0)!,
+    );
+    cleaned = cleaned.replaceAllMapped(
+      RegExp(r'<(https?://[^>\s]+)>', caseSensitive: false),
+      (match) => _isRepositoryUrl(match.group(1)!) ? '' : match.group(0)!,
+    );
+    cleaned = cleaned.replaceAllMapped(
+      RegExp(r'https?://[^\s<>()]+', caseSensitive: false),
+      (match) => _isRepositoryUrl(match.group(0)!) ? '' : match.group(0)!,
+    );
+    cleaned = cleaned.replaceAll(
+      RegExp(r'(?:www\.)?(?:github\.com|githubusercontent\.com|github\.io|gitlab\.com|gitlab\.io|bitbucket\.org|sourceforge\.net|codeberg\.org|git\.sr\.ht|huggingface\.co)/[^\s<>()\]]+', caseSensitive: false),
+      '',
+    );
+    return cleaned.replaceAll(RegExp(r'[ \t]+\n'), '\n')
+        .replaceAll(RegExp(r'\n{3,}'), '\n\n').trim();
+  }
   final ChatComposerController _composerController = ChatComposerController();
   final ScrollController _scrollController = ScrollController();
   final List<Map<String, String>> _messages = [];
@@ -88,7 +124,7 @@ class _AiChatPageState extends State<AiChatPage> {
         question: question,
         history: history,
       );
-      final answer = (response['answer'] ?? '').toString().trim();
+      final answer = _removeRepositoryLinks((response['answer'] ?? '').toString());
       if (answer.isEmpty) throw Exception('AI returned an empty answer.');
 
       // Show server-confirmed evidence in the chat itself instead of relying
@@ -96,14 +132,17 @@ class _AiChatPageState extends State<AiChatPage> {
       var displayAnswer = answer;
       final rawEvidence = response['search_evidence'];
       final evidence = rawEvidence is List
-          ? rawEvidence.whereType<Map>().where((source) { final rawUrl = (source['url'] ?? source['source_url'] ?? source['link'] ?? '').toString().trim().toLowerCase(); final uri = Uri.tryParse(rawUrl); final host = uri?.host ?? ''; return !<String>{'github.com', 'www.github.com', 'raw.githubusercontent.com', 'gitlab.com', 'www.gitlab.com', 'bitbucket.org', 'www.bitbucket.org', 'sourceforge.net', 'www.sourceforge.net'}.contains(host); }).toList(growable: false)
+          ? rawEvidence.whereType<Map>().where((source) {
+              final rawUrl = (source['url'] ?? source['source_url'] ?? source['link'] ?? '').toString();
+              return rawUrl.isEmpty || !_isRepositoryUrl(rawUrl);
+            }).toList(growable: false)
           : <Map>[];
       if (evidence.isNotEmpty) {
         final sourceLines = <String>[];
         for (final source in evidence) {
-          final title = (source['title'] ?? 'Untitled source').toString();
+          final title = _removeRepositoryLinks((source['title'] ?? 'Untitled source').toString());
           final provider = (source['provider'] ?? 'search').toString();
-          final url = (source['url'] ?? '').toString();
+          final url = (source['url'] ?? source['source_url'] ?? source['link'] ?? '').toString();
           final published = (source['published_at'] ?? '').toString();
           sourceLines.add('- **$title** ($provider)${published.isNotEmpty ? ' • $published' : ''}${url.isNotEmpty ? '\n  $url' : ''}');
         }
