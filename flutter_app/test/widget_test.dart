@@ -15,7 +15,8 @@ void main() {
     expect(tabs, isNot(contains('Repository Library')));
     expect(tabs, isNot(contains('Quant Research Hub')));
     expect(tabs, isNot(contains('Quant & Trading Repositories')));
-    expect(tabs, contains('PDF Reports'));
+    expect(tabs, isNot(contains('PDF Reports')));
+    expect(tabs, isNot(contains('AI Chat')));
     expect(find.byKey(const ValueKey('open-navigation-menu')), findsOneWidget);
   });
 
