@@ -74,6 +74,7 @@ def put_state(key: str, value: Any) -> bool:
     if connection is None:
         return False
     try:
+        from psycopg.types.json import Jsonb
         with connection:
             connection.execute(
                 "INSERT INTO ai_trading_state (state_key, state_json, updated_at) "
