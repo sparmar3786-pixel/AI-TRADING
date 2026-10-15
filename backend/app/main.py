@@ -45,6 +45,7 @@ from integrations.angelone_readonly import AngelOneConfigError, AngelOneReadOnly
 from integrations.angelone_stream import AngelOneStream, EXCHANGE_TYPES
 from integrations.news_sentiment import cached_market_news_sentiment, fetch_market_news_sentiment
 from quant_engine import evaluate_five_layer_signal, evaluate_futures_signal
+from quant.hero_zero import HeroZeroEngine, hero_zero_to_signal_data
 
 from strategies.technical import atr as technical_atr, ema as technical_ema, rsi as technical_rsi, rsi_reversion, sma as technical_sma
 from strategies.advanced import bollinger_bands, macd as advanced_macd, donchian_channels
@@ -1859,6 +1860,88 @@ def _index_snapshot(
     strategy_suite["strategy_trace"] = strategy_trace_rows
     result = _apply_strategy_confluence_filter(result, strategy_suite, strategy_execution_id)
     result["strategy_suite"] = strategy_suite
+
+    # Expiry Hero Zero is an isolated candidate engine. It shares only verified
+    # Angel One candles/quotes; it never overrides the main signal or bypasses
+    # the existing 10-minute confirmation and risk validation gates.
+    hero_zero_payload: dict[str, Any] = {
+        "index": index, "decision": "WAIT", "candidate_decision": None,
+        "hero_zero": True, "engine_source": "HERO_ZERO",
+        "reasons": ["Hero Zero candidate unavailable; required verified inputs not ready."],
+        "live_validation": {"verdict": "FAIL", "decision": "WAIT", "blocks": ["HERO_ZERO_NOT_EVALUATED"]},
+    }
+    try:
+        import pandas as pd
+
+        hero_frame = pd.DataFrame(chart_5m)
+        if not hero_frame.empty and "timestamp" in hero_frame.columns:
+            hero_frame["timestamp"] = pd.to_datetime(hero_frame["timestamp"], errors="coerce")
+            hero_frame = hero_frame.dropna(subset=["timestamp"]).set_index("timestamp")
+        else:
+            hero_frame = pd.DataFrame()
+        # Build a single strike row from real option quotes. Never synthesize LTP.
+        hero_rows: dict[float, dict[str, Any]] = {}
+        hero_quote_times: list[datetime] = []
+        for option in normalized_options:
+            strike_value = _number(option.get("strike"))
+            option_kind = str(option.get("option_type") or "").upper()
+            option_ltp = _number(option.get("ltp"))
+            if strike_value is None or option_ltp is None or option_kind not in ("CALL", "PUT"):
+                continue
+            item = hero_rows.setdefault(strike_value, {"strike": strike_value})
+            prefix = "ce" if option_kind == "CALL" else "pe"
+            item[f"{prefix}_ltp"] = option_ltp
+            item[f"{prefix}_bid"] = option.get("bid")
+            item[f"{prefix}_ask"] = option.get("ask")
+            quote_stamp = _iso(option.get("timestamp"))
+            parsed_quote_stamp = datetime.fromisoformat(quote_stamp) if quote_stamp else None
+            if parsed_quote_stamp is not None:
+                hero_quote_times.append(parsed_quote_stamp.astimezone(IST))
+        hero_chain = pd.DataFrame(list(hero_rows.values()))
+        strike_diffs = [right - left for left, right in zip(strike_values, strike_values[1:]) if right > left]
+        hero_strike_step = int(min(strike_diffs)) if strike_diffs else 0
+        now_ist = datetime.now(IST)
+        prior_daily = []
+        for daily_candle in daily_candle_rows:
+            if not isinstance(daily_candle, (list, tuple)) or len(daily_candle) < 6:
+                continue
+            daily_stamp = _iso(daily_candle[0])
+            parsed_daily_stamp = datetime.fromisoformat(daily_stamp) if daily_stamp else None
+            if parsed_daily_stamp is not None and parsed_daily_stamp.astimezone(IST).date() < now_ist.date():
+                prior_daily.append((parsed_daily_stamp, _number(daily_candle[2]), _number(daily_candle[3])))
+        prior_daily.sort(key=lambda item: item[0])
+        hero_pdh = prior_daily[-1][1] if prior_daily else None
+        hero_pdl = prior_daily[-1][2] if prior_daily else None
+        hero_engine = HeroZeroEngine(drop_forming_candle=False)
+        hero_signal = hero_engine.generate(
+            intraday_df=hero_frame,
+            current_spot=spot,
+            is_expiry_day=selected_expiry == now_ist.date(),
+            option_chain=hero_chain,
+            current_time=now_ist,
+            strike_step=hero_strike_step,
+            expiry_date=selected_expiry,
+            option_chain_timestamp=min(hero_quote_times) if hero_quote_times else None,
+            day_high=day_high,
+            day_low=day_low,
+            pdh=hero_pdh,
+            pdl=hero_pdl,
+        )
+        hero_zero_payload = hero_zero_to_signal_data(
+            hero_signal, index=index, timestamp=_utc_now().isoformat(),
+            data_fresh=(result.get("data_fresh") is True),
+        )
+    except Exception as hero_exc:
+        # A strategy-specific error must never turn the primary signal API into
+        # a 5xx or leak exception details; it is an explicit WAIT diagnostic.
+        hero_zero_payload = {
+            "index": index, "decision": "WAIT", "candidate_decision": None,
+            "hero_zero": True, "engine_source": "HERO_ZERO",
+            "reasons": ["Hero Zero evaluation unavailable: " + type(hero_exc).__name__],
+            "guards": ["HERO_ZERO_EVALUATION_ERROR"],
+            "live_validation": {"verdict": "FAIL", "decision": "WAIT", "blocks": ["HERO_ZERO_EVALUATION_ERROR"]},
+        }
+    result["hero_zero"] = hero_zero_payload
     result["indicators"] = indicators
     result["oi_summary"] = {
         "call_oi": call_oi, "put_oi": put_oi, "pcr": pcr,
@@ -1887,6 +1970,7 @@ def _index_snapshot(
         "timeframes": {"1m": [], "5m": chart_5m, "15m": chart_15m, "1H": chart_1h, "1D": chart_1d, "1W": chart_1w},
         "option_chain": chain_payload,
         "strategy_suite": result["strategy_suite"],
+        "hero_zero": hero_zero_payload,
     }
     return result, market
 
