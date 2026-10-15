@@ -67,6 +67,17 @@ jobs:
             echo "Repository-only navigation or cards remain in an active APK screen."
             exit 1
           fi
+      - name: Verify repository links and local AI models are absent
+        run: |
+          set -euo pipefail
+          if grep -RniE 'https?://(www\\.)?github\\.com/' lib; then
+            echo "GitHub repository links remain in an APK screen."
+            exit 1
+          fi
+          if grep -RniE 'llama_flutter_android|file_picker|LlamaController|GGUF|ADD OFFLINE|Offline AI|local Qwen|onOpenLocalQwen' lib pubspec.yaml; then
+            echo "On-device AI model code or dependencies remain in the APK source."
+            exit 1
+          fi
       - name: Analyze Dart
         run: flutter analyze --no-fatal-infos
       - name: Widget and API tests
