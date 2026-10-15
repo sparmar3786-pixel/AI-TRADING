@@ -6,12 +6,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'api.dart';
 import 'config.dart';
-import 'trade_engine_page.dart';
 import 'broker_home_prototype_page.dart';
-import 'quant_engine_lab_page.dart';
 import 'strategy_library_page.dart';
 
-const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Backtesting','API','AI Access','Data Health','API & Railway','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home (Prototype)','Quant Engine Lab','Strategy Library'];
+const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Backtesting','API','Data Health','API & Railway','Broker Home','Strategies'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
 
 void main() {
@@ -35,7 +33,7 @@ class FreshApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) => MaterialApp(
     debugShowCheckedModeBanner: false,
-    title: 'AI Trading Signals',
+    title: 'Trading Signals',
     theme: ThemeData(
       useMaterial3: true,
       brightness: Brightness.dark,
@@ -62,7 +60,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
   String? signalsFetchError;
   bool angelOnline = false;
   Map<String,dynamic> liveTrading = const {};
-  Map<String,dynamic> ai = const {};
   Map<String,dynamic> feed = const {};
   Map<String,dynamic> storeDiagnostics = const {};
   Map<String,dynamic> systemDiagnostics = const {};
@@ -253,7 +250,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         systemDiagnosticsError = latestSystemDiagnosticsError;
         angelOnline = a['authenticated'] == true;
         liveTrading = liveStatus;
-        ai = (s['ai'] as Map?)?.cast<String,dynamic>() ?? {};
         feed = (s['feed'] as Map?)?.cast<String,dynamic>() ?? {};
         storeDiagnostics = (s['store'] as Map?)?.cast<String,dynamic>() ?? {};
         signals = (s['signals'] as Map?)?.cast<String,dynamic>() ?? {};
@@ -278,8 +274,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         signalsEndpointOnline = false;
         systemDiagnostics = const {};
         systemDiagnosticsError = e.toString().replaceFirst('Exception: ', '');
-        ai = (s['ai'] as Map?)?.cast<String,dynamic>() ?? {};
-        feed = (s['feed'] as Map?)?.cast<String,dynamic>() ?? {};
+          feed = (s['feed'] as Map?)?.cast<String,dynamic>() ?? {};
         storeDiagnostics = (s['store'] as Map?)?.cast<String,dynamic>() ?? {};
         signals = (s['signals'] as Map?)?.cast<String,dynamic>() ?? {};
         market = (s['market'] as Map?)?.cast<String,dynamic>() ?? {};
@@ -368,7 +363,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
             children: [
               const ListTile(
                 leading: Icon(Icons.auto_graph, color: Color(0xFF12D6FF), size: 32),
-                title: Text('AI TRADING SIGNALS', style: TextStyle(fontWeight: FontWeight.w900)),
+                title: Text('TRADING SIGNALS', style: TextStyle(fontWeight: FontWeight.w900)),
                 subtitle: Text('Trading workspace • Navigation'),
               ),
               const Divider(),
@@ -425,11 +420,10 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         ChainPage(selected:selectedIndex,onChanged:(v)=>setState(()=>selectedIndex=v), market:_market(selectedIndex)),
         OIPage(signals:signals),
         IndicatorsPage(selected:selectedIndex,signal:_signal(selectedIndex),fast:emaFast,slow:emaSlow,onChanged:(f,s){setState((){emaFast=f;emaSlow=s;});refresh();},onIndex:(v)=>setState(()=>selectedIndex=v)),
-        SignalPage(backendUrl:backendUrl,liveStatus:liveTrading,index:selectedIndex,signals:signals,ai:ai,tradePlans:tradePlans,market:market,onChanged:(v)=>setState(()=>selectedIndex=v)),
+        SignalPage(backendUrl:backendUrl,liveStatus:liveTrading,index:selectedIndex,signals:signals,tradePlans:tradePlans,market:market,onChanged:(v)=>setState(()=>selectedIndex=v)),
         RiskPage(index:selectedIndex,signal:_signal(selectedIndex),plans:tradePlans),
         BacktestingPage(backendUrl: backendUrl),
         ApiPage(backendUrl:backendUrl,feed:feed,storeDiagnostics:storeDiagnostics,market:market,onSaved:(url){setState(()=>backendUrl=url);refresh();}),
-        AiAccessPage(backendUrl: backendUrl),
         DataHealthPage(
           backendUrl: backendUrl,
           apiOnline: apiOnline,
@@ -443,20 +437,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           onRefresh: refresh,
         ),
         const ApiRailwayPage(),
-        TradingSetupPage(backendUrl: backendUrl, apiOnline: apiOnline, signalsOnline: signalsEndpointOnline, angelOnline: angelOnline, market: market, signals: signals, ai: ai, liveStatus: liveTrading, lastFetch: lastFetch),
-        ResearchEnginesPage(market: market, signals: signals, ai: ai, lastFetch: lastFetch, selectedIndex: selectedIndex, onIndexChanged: (value) => setState(() => selectedIndex = value)),
-        TradeEnginePage(
-          backendUrl: backendUrl,
-          selectedIndex: selectedIndex,
-          market: market,
-          signals: signals,
-          ai: ai,
-          tradePlans: tradePlans,
-          feed: feed,
-          liveStatus: liveTrading,
-          lastFetch: lastFetch,
-          onIndexChanged: (value) => setState(() => selectedIndex = value),
-        ),
         BrokerHomePrototypePage(
           backendUrl: backendUrl,
           market: market,
@@ -570,8 +550,6 @@ class DataHealthPage extends StatelessWidget {
           ListTile(leading: const Icon(Icons.warning_amber), title: const Text('Angel One error'), subtitle: Text(_diagValue(diagnostics, 'angel_one', 'last_error', fallback: ''))),
         if (_diagValue(diagnostics, 'angel_one', 'stream_error', fallback: '') != '')
           ListTile(leading: const Icon(Icons.warning_amber), title: const Text('WebSocket error'), subtitle: Text(_diagValue(diagnostics, 'angel_one', 'stream_error', fallback: ''))),
-        if (_diagValue(diagnostics, 'ai', 'last_error', fallback: '') != '')
-          ListTile(leading: const Icon(Icons.warning_amber), title: const Text('AI request error'), subtitle: Text(_diagValue(diagnostics, 'ai', 'last_error', fallback: ''))),
         ListTile(
           leading: Icon(diagnostics.isNotEmpty ? Icons.check_circle_outline : Icons.info_outline),
           title: const Text('Diagnostics endpoint'),
@@ -629,10 +607,10 @@ class ApiRailwayPage extends StatelessWidget {
     children: [
       const Text('ADVANCED API + RAILWAY CONNECTION', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
       const SizedBox(height: 8),
-      const Text('Use the backend service as the secure bridge between this Android app, Angel One SmartAPI and AI providers. Keep broker and AI secrets on the server, not inside the APK.', style: TextStyle(color: Colors.white70)),
+      const Text('Use the backend service as the secure bridge between this Android app and Angel One SmartAPI. Keep broker secrets on the server, not inside the APK.', style: TextStyle(color: Colors.white70)),
       const SizedBox(height: 10),
       Card(child: Column(children: [
-        const ListTile(leading: Icon(Icons.security), title: Text('Recommended production flow'), subtitle: Text('Android app → HTTPS Railway API → Angel One REST/WebSocket + AI providers → normalized market store → signal engine')),
+        const ListTile(leading: Icon(Icons.security), title: Text('Recommended production flow'), subtitle: Text('Android app → HTTPS Railway API → Angel One REST/WebSocket → normalized market store → deterministic signal and risk engines')),
         const Divider(height: 1),
         const ListTile(leading: Icon(Icons.health_and_safety), title: Text('Health checks'), subtitle: Text('Expose /health and verify it before debugging market data. Check deployment logs, environment variables, public HTTPS domain, CORS only if browser clients need it, and request timeouts.')),
         const Divider(height: 1),
@@ -860,206 +838,6 @@ class _BacktestingPageState extends State<BacktestingPage> {
       ],
     ]);
   }
-}
-
-class ResearchEnginesPage extends StatelessWidget {
-  const ResearchEnginesPage({
-    required this.market,
-    required this.signals,
-    required this.ai,
-    required this.lastFetch,
-    required this.selectedIndex,
-    required this.onIndexChanged,
-    super.key,
-  });
-  final Map<String, dynamic> market, signals, ai;
-  final String? lastFetch;
-  final String selectedIndex;
-  final ValueChanged<String> onIndexChanged;
-
-  static const sources = <(String, String, String)>[
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    final m = Map<String, dynamic>.from(market[selectedIndex] as Map? ?? const {});
-    final s = Map<String, dynamic>.from(signals[selectedIndex] as Map? ?? const {});
-    final indicators = Map<String, dynamic>.from(s['indicators'] as Map? ?? const {});
-    final oi = Map<String, dynamic>.from(s['oi_summary'] as Map? ?? const {});
-    final validation = Map<String, dynamic>.from(s['live_validation'] as Map? ?? const {});
-    final tf = Map<String, dynamic>.from(s['timeframe_analysis'] as Map? ?? const {});
-    final research = Map<String, dynamic>.from(tf['research_pack'] as Map? ?? const {});
-    final checks = Map<String, dynamic>.from(research['checks'] as Map? ?? const {});
-    final aiRow = Map<String, dynamic>.from(ai[selectedIndex] as Map? ?? const {});
-    final chain = (m['option_chain'] as List?) ?? const <dynamic>[];
-    final fresh = m['live'] == true;
-
-    return ListView(padding: const EdgeInsets.all(12), children: [
-      const Text('RESEARCH ENGINES • LIVE BACKEND OUTPUT', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
-      const SizedBox(height: 6),
-      const Text('This tab shows the app’s actual indicator, OI, confluence and validation outputs from the backend.', style: TextStyle(color: Colors.white70, fontSize: 12)),
-      const SizedBox(height: 10),
-      IndexPicker(selected: selectedIndex, onChanged: onIndexChanged),
-      Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Expanded(child: Text(selectedIndex, style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w900))),
-          _statusPill(fresh ? 'LIVE' : 'STALE / NO DATA', fresh ? Colors.greenAccent : Colors.orangeAccent),
-        ]),
-        Text('Spot LTP ₹${_val(m['ltp'])}', style: const TextStyle(fontSize: 25, fontWeight: FontWeight.w900, color: Color(0xFF12D6FF))),
-        Text('Snapshot: ${m['timestamp'] ?? lastFetch ?? 'No snapshot'}', style: const TextStyle(fontSize: 11, color: Colors.white60)),
-        const Divider(height: 22),
-        const Text('TECHNICAL INDICATOR ENGINE', style: TextStyle(fontWeight: FontWeight.w900)),
-        for (final pair in <(String, dynamic)>[
-          ('EMA fast', indicators['ema_fast']), ('EMA slow', indicators['ema_slow']),
-          ('SMA 20', indicators['sma20']), ('RSI 14', indicators['rsi14']),
-          ('MACD histogram', indicators['macd_hist']), ('ATR 14', indicators['atr14']),
-          ('VWAP', indicators['vwap']), ('Bollinger upper', indicators['bb_upper']),
-          ('Bollinger mid', indicators['bb_mid']), ('Bollinger lower', indicators['bb_lower']),
-          ('Z-score 20', indicators['zscore20']), ('Realized volatility 20', indicators['realized_vol20']),
-        ]) InfoRow(pair.$1, _val(pair.$2)),
-        const Divider(height: 22),
-        const Text('OPTIONS / OPEN INTEREST ENGINE', style: TextStyle(fontWeight: FontWeight.w900)),
-        InfoRow('CALL OI', _val(oi['call_oi'])),
-        InfoRow('PUT OI', _val(oi['put_oi'])),
-        InfoRow('PCR', _val(oi['pcr'])),
-        InfoRow('OI regime', (oi['selected_oi_regime'] ?? oi['classification'] ?? 'UNKNOWN').toString()),
-        InfoRow('Live option rows', chain.length.toString()),
-        const Divider(height: 22),
-        const Text('RESEARCH PACK & CONFLUENCE', style: TextStyle(fontWeight: FontWeight.w900)),
-        InfoRow('Candidate alignment', (research['candidate_alignment'] ?? 'UNKNOWN').toString()),
-        InfoRow('Evidence alignment score', _val(research['evidence_score'])),
-        InfoRow('Known directional checks', (research['known_directional_checks'] ?? 0).toString()),
-        for (final entry in checks.entries)
-          if (entry.value is Map)
-            InfoRow(entry.key.replaceAll('_', ' '), (entry.value as Map)['state']?.toString() ?? 'UNKNOWN'),
-        const Divider(height: 22),
-        const Text('SIGNAL & VALIDATION OUTPUT', style: TextStyle(fontWeight: FontWeight.w900)),
-        InfoRow('Strategy candidate', (s['decision'] ?? 'NO DATA').toString()),
-        InfoRow('Validated decision', (validation['decision'] ?? 'WAIT').toString()),
-        InfoRow('Validation verdict', (validation['verdict'] ?? 'NOT VALIDATED').toString()),
-        InfoRow('AI action', (aiRow['action'] ?? 'AI NOT READY').toString()),
-        InfoRow('Blocked reasons', ((validation['blocks'] as List?) ?? const []).map((x) => x.toString()).join(', ').isEmpty ? 'None reported' : ((validation['blocks'] as List?) ?? const []).map((x) => x.toString()).join(', ')),
-      ]))),
-    ]);
-  }
-
-  Widget _statusPill(String text, Color color) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-    decoration: BoxDecoration(color: color.withValues(alpha: 0.12), border: Border.all(color: color.withValues(alpha: 0.4)), borderRadius: BorderRadius.circular(20)),
-    child: Text(text, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w900)),
-  );
-}
-
-class TradingSetupPage extends StatelessWidget {
-  const TradingSetupPage({
-    required this.backendUrl,
-    required this.apiOnline,
-    required this.signalsOnline,
-    required this.angelOnline,
-    required this.market,
-    required this.signals,
-    required this.ai,
-    required this.liveStatus,
-    required this.lastFetch,
-    super.key,
-  });
-  final String backendUrl;
-  final bool apiOnline, signalsOnline, angelOnline;
-  final Map<String, dynamic> market, signals, ai, liveStatus;
-  final String? lastFetch;
-
-  static const sections = <(String, String)>[
-    ('1 • Broker & Market Data', 'Angel One SmartAPI is the broker integration for this app. Live ticks, historical candles, instruments, option-chain/OI fields and feed freshness must be verified independently.'),
-    ('2 • Strategy & Signal Engine', 'Run deterministic indicators and OI classification first; use AI only as an evidence-based interpretation layer. Missing, stale or conflicting data must result in WAIT / NO TRADE.'),
-    ('3 • Signal Quality & Evidence Filter', 'Score independent evidence, reject stale quotes, require a minimum data-quality gate and avoid treating an AI confidence statement as a probability of profit.'),
-    ('4 • Backtesting & Walk-Forward Validation', 'Use out-of-sample periods, walk-forward testing, slippage, brokerage, taxes/fees, option expiry and realistic fill assumptions. Avoid look-ahead bias and overfitting.'),
-    ('5 • Risk & Trade Management', 'Require per-trade risk caps, max daily loss, max drawdown, max open positions, lot-size validation, spread/liquidity checks, kill switch and explicit handling of partial fills and rejected orders.'),
-    ('6 • Order Execution & Trade Lifecycle', 'Real orders are deliberately gated. Confirm authentication, contract mapping, quote freshness, order book state, partial fills and exit handling before enabling live orders.'),
-    ('7 • Monitoring, Alerts & Audit', 'Track WebSocket disconnects, stale data, API failures, rejected orders, latency, daily P&L, exposure and audit events. Alerts should never silently imply that an order filled.'),
-    ('8 • Dashboard, Charts & Mobile UX', 'Keep compact F&O-first screens, clear data timestamps, candle timeframe controls, option-chain/strike view, signal explanation, risk card, execution mode and connection health.'),
-    ('9 • Backend, Secrets & Deployment', 'Android → HTTPS Railway backend → Angel One REST/WebSocket → normalized store → strategy/risk gates → signal/monitoring APIs. Keep API keys, PIN and TOTP secrets off-device and out of the app.'),
-  ];
-
-  @override
-  Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.all(12),
-    children: [
-      const Text('COMPLETE TRADING SYSTEM • ANGEL ONE EDITION', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
-      const SizedBox(height: 8),
-      Builder(builder: (context) {
-        final liveIndexes = market.values.whereType<Map>().where((row) => row['live'] == true).length;
-        final optionRows = market.values.whereType<Map>().fold<int>(0, (sum, row) => sum + (((row['option_chain'] as List?) ?? const []).length));
-        final indicatorReady = signals.values.whereType<Map>().any((row) => row['indicators'] is Map);
-        final validationReady = signals.values.whereType<Map>().any((row) => row['live_validation'] is Map);
-        final aiReady = ai.values.whereType<Map>().any((row) => row['action'] != null);
-        final checks = <(String, bool, String)>[
-          ('1. Backend API', apiOnline, backendUrl),
-          ('2. Angel One login', angelOnline, 'Authenticated session required'),
-          ('3. Live market data', liveIndexes > 0, '$liveIndexes of ${indexes.length} indexes fresh'),
-          ('4. Indicators & strategy engine', indicatorReady, 'Deterministic indicators and OI strategy output'),
-          ('5. Option chain / OI', optionRows > 0, '$optionRows option quotes in latest snapshots'),
-          ('6. Signal risk validation', validationReady, 'Fail-closed validation payload'),
-          ('7. Historical backtest', angelOnline, 'Historical candle replay requires an authenticated Angel One session'),
-          ('8. AI analysis', aiReady, 'Cloud AI result returned by backend'),
-          ('9. Execution / order status', liveStatus.isNotEmpty, '${liveStatus['mode'] ?? 'Status not returned'} • live orders remain gated by risk and explicit approval'),
-        ];
-        return Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('LIVE SETUP CHECKLIST • 9 MODULES', style: TextStyle(fontWeight: FontWeight.w900)),
-          const SizedBox(height: 4),
-          Text('Last snapshot: ${lastFetch ?? 'No market snapshot'}', style: const TextStyle(fontSize: 11, color: Colors.white60)),
-          const Divider(),
-          for (final item in checks)
-            ListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(item.$2 ? Icons.check_circle : Icons.error_outline, color: item.$2 ? Colors.greenAccent : Colors.orangeAccent),
-              title: Text(item.$1, style: const TextStyle(fontWeight: FontWeight.w700)),
-              subtitle: Text(item.$3, maxLines: 2, overflow: TextOverflow.ellipsis),
-              trailing: Text(item.$2 ? 'READY' : 'CHECK', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: item.$2 ? Colors.greenAccent : Colors.orangeAccent)),
-              onTap: item.$1.startsWith('7.') ? () => DefaultTabController.of(context).animateTo(tabs.indexOf('Backtesting')) : null,
-            ),
-          SizedBox(width: double.infinity, child: FilledButton.icon(
-            onPressed: () => DefaultTabController.of(context).animateTo(tabs.indexOf('Backtesting')),
-            icon: const Icon(Icons.query_stats),
-            label: const Text('OPEN HISTORICAL BACKTEST'),
-          )),
-        ])));
-      }),
-      const SizedBox(height: 8),
-      const Text('Broker choice: Angel One SmartAPI. No Zerodha/Kite integration is required for this app.', style: TextStyle(color: Color(0xFF12D6FF), fontWeight: FontWeight.w700)),
-      const SizedBox(height: 12),
-      Card(child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
-          Text('SYSTEM FLOW', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
-          SizedBox(height: 8),
-          Text('Angel One REST + WebSocket → freshness/data-quality gate → normalized market store → indicators + OI/option-chain engine → AI/search evidence → signal scoring → historical backtest validation → risk limits → optional explicitly gated Angel One order → order/fill/position monitor → dashboard + alerts'),
-          SizedBox(height: 8),
-          Text('Fail-safe: stale or incomplete feed, unknown lot size, wide spread, strategy conflict, exceeded risk limits or broker errors should block a trade and show WAIT/NO TRADE.', style: TextStyle(color: Colors.orangeAccent)),
-        ]),
-      )),
-      const SizedBox(height: 8),
-      for (final section in sections)
-        Card(
-          child: ExpansionTile(
-            initiallyExpanded: false,
-            leading: const Icon(Icons.account_tree_outlined, color: Color(0xFF12D6FF)),
-            title: Text(section.$1, style: const TextStyle(fontWeight: FontWeight.w800)),
-            subtitle: Text(section.$2, maxLines: 3, overflow: TextOverflow.ellipsis),
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-                child: Text(section.$2),
-              ),
-            ],
-          ),
-        ),
-      const Card(child: Padding(
-        padding: EdgeInsets.all(12),
-        child: Text('This app is for decision support. Review historical assumptions and validate the live feed before any live order; live endpoints remain gated and are not a promise of profit.', style: TextStyle(fontSize: 12, color: Colors.white70)),
-      )),
-    ],
-  );
 }
 
 class DashboardPage extends StatelessWidget {
@@ -1321,12 +1099,11 @@ class _IndicatorsState extends State<IndicatorsPage>{
 }
 
 class SignalPage extends StatelessWidget {
-  const SignalPage({required this.backendUrl, required this.liveStatus, required this.index, required this.signals, required this.ai, required this.tradePlans, required this.market, required this.onChanged, super.key});
+  const SignalPage({required this.backendUrl, required this.liveStatus, required this.index, required this.signals, required this.tradePlans, required this.market, required this.onChanged, super.key});
   final String backendUrl;
   final Map<String, dynamic> liveStatus;
   final String index;
   final Map<String, dynamic> signals;
-  final Map<String, dynamic> ai;
   final List<dynamic> tradePlans;
   final Map<String, dynamic> market;
   final ValueChanged<String> onChanged;
@@ -1347,9 +1124,6 @@ class SignalPage extends StatelessWidget {
     final timeframeAnalysis = Map<String, dynamic>.from(s['timeframe_analysis'] as Map? ?? const {});
     final researchPack = Map<String, dynamic>.from(timeframeAnalysis['research_pack'] as Map? ?? const {});
     final researchChecks = Map<String, dynamic>.from(researchPack['checks'] as Map? ?? const {});
-    final aiDecision = Map<String, dynamic>.from(ai[index] as Map? ?? const {});
-    final agentAnalysis = Map<String, dynamic>.from(aiDecision['agent_analysis'] as Map? ?? const {});
-    final specialists = Map<String, dynamic>.from(agentAnalysis['specialists'] as Map? ?? const {});
     final decision = s['decision']?.toString() ?? '';
     final finalDecision = (validation['decision'] ?? 'WAIT').toString();
     final children = <Widget>[
@@ -1440,52 +1214,23 @@ class SignalPage extends StatelessWidget {
           Text((researchPack['safety_note'] ?? 'Research diagnostics are unavailable until the backend returns this payload.').toString(), style: const TextStyle(fontSize: 11)),
         ]),
       )),
-      const Section('Multi-Agent AI Review'),
-      Card(child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          InfoRow('AI mode', (agentAnalysis['mode'] ?? 'WAITING FOR OPENAI').toString()),
-          InfoRow('Evidence supplied', (agentAnalysis['source_evidence_count'] ?? aiDecision['evidence_count'] ?? 0).toString()),
-          ...specialists.entries.map((entry) {
-            final report = Map<String, dynamic>.from(entry.value as Map? ?? const {});
-            final status = (report['status'] ?? report['deterministic_status'] ?? 'UNKNOWN').toString();
-            final view = (report['view'] ?? report['direction'] ?? report['deterministic_direction'] ?? 'UNKNOWN').toString();
-            final rationale = (report['rationale'] ?? report['note'] ?? '').toString();
-            final flags = (report['flags'] as List?)?.map((x) => x.toString()).toList() ?? const <String>[];
-            return Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Card(
-                child: ListTile(
-                  dense: true,
-                  title: Text(entry.key.replaceAll('_', ' ').toUpperCase(), style: const TextStyle(fontWeight: FontWeight.w800)),
-                  subtitle: Text([view, status, rationale, if (flags.isNotEmpty) 'Flags: ${flags.join(', ')}'].where((x) => x.isNotEmpty).join(' • ')),
-                ),
-              ),
-            );
-          }),
-          const SizedBox(height: 4),
-          Text((agentAnalysis['safety_note'] ?? 'Specialist analysis appears after the cloud AI provider responds. Missing data must remain unavailable.').toString(), style: const TextStyle(fontSize: 11)),
-        ]),
-      )),
-      const Section('Live AI Validation'),
+      const Section('Deterministic Signal Validation'),
       Card(child:Padding(
         padding:const EdgeInsets.all(12),
         child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
           InfoRow('Validation verdict',(validation['verdict'] ?? 'WAITING').toString()),
-          InfoRow('BUY / SELL direction',(validation['market_direction'] ?? 'WAIT').toString()),
+          InfoRow('Market direction',(validation['market_direction'] ?? 'WAIT').toString()),
           InfoRow('F&O action',(validation['decision'] ?? 'WAIT').toString()),
-          InfoRow('AI decision',(validation['ai_decision'] ?? 'NOT VALIDATED').toString()),
-          InfoRow('Market tick age',validation['market_age_seconds'] == null ? '—' : '${validation['market_age_seconds']} sec'),
-          InfoRow('Option quote age',validation['option_age_seconds'] == null ? '—' : '${validation['option_age_seconds']} sec'),
-          InfoRow('AI result age',validation['ai_age_seconds'] == null ? '—' : '${validation['ai_age_seconds']} sec'),
+          InfoRow('Market tick age',validation['market_age_seconds'] == null ? '—' : '${validation['market_age_seconds']} sec'),
+          InfoRow('Option quote age',validation['option_age_seconds'] == null ? '—' : '${validation['option_age_seconds']} sec'),
           InfoRow('Reward / risk',validation['reward_risk']?.toString() ?? '—'),
           if (validationBlocks.isNotEmpty) ...[
             const Divider(),
             const Text('Validation blocks',style:TextStyle(fontWeight:FontWeight.w800)),
-            ...validationBlocks.map((b)=>Text('⚠ ${b.toString()}')),
+            ...validationBlocks.map((b)=>Text('⚠ {b.toString()}')),
           ],
           const SizedBox(height:4),
-          const Text('PASS requires fresh Angel One WebSocket data, a valid option quote, clear risk gates and a fresh AI decision agreeing with the strategy. Otherwise the final decision is WAIT.',style:TextStyle(fontSize:11)),
+          const Text('PASS requires fresh broker data, a valid option quote and all strategy/risk gates to pass. Missing or stale evidence means WAIT.',style:TextStyle(fontSize:11)),
         ]),
       )),
       const Section('Signal-only mode'),
@@ -1645,123 +1390,6 @@ class _ApiPageState extends State<ApiPage> {
 
   Widget field(TextEditingController c,String label,bool secret)=>Padding(padding:const EdgeInsets.only(bottom:8),child:TextField(controller:c,obscureText:secret,decoration:InputDecoration(labelText:label)));
   @override void dispose(){for(final c in [angelKey,client,pin,totp]){c.dispose();}super.dispose();}
-}
-
-class AiAccessPage extends StatefulWidget {
-  const AiAccessPage({required this.backendUrl, super.key});
-  final String backendUrl;
-  @override State<AiAccessPage> createState() => _AiAccessState();
-}
-
-class _AiAccessState extends State<AiAccessPage> {
-  bool working = false;
-  bool searchChecking = false;
-  String message = 'Cloud AI and search providers are managed by Railway.';
-  Map<String, Map<String, dynamic>> searchStatus = const {};
-
-  Future<void> refreshSearchStatus() async {
-    if (searchChecking) return;
-    setState(() => searchChecking = true);
-    try {
-      final result = await FreshApi.signal().postJson('/v1/providers/search/status', {});
-      final raw = result['providers'];
-      final providers = <String, Map<String, dynamic>>{};
-      if (raw is Map) {
-        for (final name in ['exa', 'tavily']) {
-          final value = raw[name];
-          if (value is Map) providers[name] = Map<String, dynamic>.from(value);
-        }
-      }
-      if (!mounted) return;
-      setState(() {
-        searchStatus = providers;
-        message = 'Search provider status refreshed from Railway. Provider keys are not stored in this APK.';
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        searchStatus = const {
-          'exa': {'working': false, 'configured': false, 'evidence_count': 0},
-          'tavily': {'working': false, 'configured': false, 'evidence_count': 0},
-        };
-        message = 'Could not check search providers: ${e.toString().replaceFirst('Exception: ', '')}';
-      });
-    } finally {
-      if (mounted) setState(() => searchChecking = false);
-    }
-  }
-
-  Future<void> testAI() async {
-    if (working) return;
-    setState(() => working = true);
-    try {
-      final result = await FreshApi(widget.backendUrl.trim()).testAIProviders();
-      final checks = result['checks'] as List? ?? const [];
-      final good = checks.whereType<Map>().where((x) => x['ok'] == true)
-          .map((x) => x['provider'].toString()).join(', ');
-      final details = checks.whereType<Map>().map((x) {
-        final provider = (x['provider'] ?? 'provider').toString();
-        if (x['ok'] == true) return '$provider: OK (${x['model'] ?? 'model responded'})';
-        return '$provider: FAILED (${x['error'] ?? 'unknown error'})';
-      }).join(' | ');
-      if (!mounted) return;
-      setState(() => message = result['ok'] == true
-          ? 'Cloud AI connected: $good. $details'
-          : 'NVIDIA connectivity test failed. Check NVIDIA_API_KEY, model access, quota and Railway logs. $details');
-    } catch (e) {
-      if (mounted) setState(() => message = 'NVIDIA/OpenRouter test failed: ${e.toString().replaceFirst('Exception: ', '')}');
-    } finally {
-      if (mounted) setState(() => working = false);
-    }
-  }
-
-  Widget _providerStatusTile(String name) {
-    final data = searchStatus[name];
-    final workingNow = data?['working'] == true;
-    final configured = data?['configured'] == true;
-    final color = data == null ? Colors.blueGrey : (workingNow ? Colors.green : Colors.red);
-    final label = data == null ? 'CHECK REQUIRED' : (workingNow ? 'WORKING' : (configured ? 'NOT WORKING' : 'NOT CONFIGURED'));
-    return Card(child: ListTile(
-      leading: Icon(Icons.circle, color: color, size: 15),
-      title: Text(name == 'exa' ? 'Exa Search' : 'Tavily Search', style: const TextStyle(fontWeight: FontWeight.w800)),
-      subtitle: Text(data == null ? 'Status has not been checked.' : '$label • ${data['evidence_count'] ?? 0} evidence items returned'),
-      trailing: Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: 11)),
-    ));
-  }
-
-  @override
-  Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.all(10),
-    children: [
-      const Section('Cloud AI — Railway Backend'),
-      const ListTile(
-        contentPadding: EdgeInsets.zero,
-        leading: Icon(Icons.cloud_done, color: Colors.cyan),
-        title: Text('NVIDIA Cloud Chat'),
-        subtitle: Text('NVIDIA is the primary cloud chat provider; OpenRouter is fallback. Configure provider credentials and model settings in Railway Variables. No AI model files are loaded from phone storage.'),
-      ),
-      FilledButton.icon(
-        onPressed: working ? null : testAI,
-        icon: const Icon(Icons.psychology),
-        label: Text(working ? 'TESTING…' : 'TEST NVIDIA CONNECTION'),
-      ),
-      const SizedBox(height: 18),
-      const Section('News & Evidence Search Status'),
-      const Text('Exa and Tavily credentials are managed on Railway. This page checks whether each provider returns evidence; no key fields are needed here.'),
-      const SizedBox(height: 8),
-      _providerStatusTile('exa'),
-      _providerStatusTile('tavily'),
-      OutlinedButton.icon(
-        onPressed: searchChecking ? null : refreshSearchStatus,
-        icon: searchChecking
-            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-            : const Icon(Icons.refresh),
-        label: Text(searchChecking ? 'CHECKING PROVIDERS…' : 'REFRESH EXA / TAVILY STATUS'),
-      ),
-      const SizedBox(height: 10),
-      Text(message),
-    ],
-  );
 }
 
 class ProCandlestickChart extends StatefulWidget {
