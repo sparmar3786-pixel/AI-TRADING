@@ -17,7 +17,7 @@ import 'quant_repositories_page.dart';
 import 'ai_chat_page.dart';
 import 'quant_engine_lab_page.dart';
 
-const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Commodities','Backtesting','API','AI Access','Data Health','API & Railway','Repository Library','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home (Prototype)','PDF Report & Repositories','Quant Research Hub','Quant & Trading Repositories','AI Chat','Quant Engine Lab'];
+const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals',,'API','AI Access','Data Health','API & Railway','Repository Library','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home (Prototype)','PDF Report & Repositories','Quant Research Hub','Quant & Trading Repositories','AI Chat','Quant Engine Lab'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
 
 void main() {
@@ -74,7 +74,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
   Map<String,dynamic> systemDiagnostics = const {};
   String? systemDiagnosticsError;
   Map<String,dynamic> signals = const {};
-  List<dynamic> commodities = const [];
   bool _refreshing = false;
   Map<String,dynamic> market = const {};
   List<dynamic> tradePlans = const [];
@@ -265,7 +264,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         storeDiagnostics = (s['store'] as Map?)?.cast<String,dynamic>() ?? {};
         signals = (s['signals'] as Map?)?.cast<String,dynamic>() ?? {};
         market = (s['market'] as Map?)?.cast<String,dynamic>() ?? {};
-        commodities = (s['commodities'] as List?) ?? [];
         tradePlans = ((s['trade_plans'] as List?) ?? const []).whereType<Map>().map((plan) => Map<String, dynamic>.from(plan)).toList();
         qualifiedCount = (s['qualified_trade_count'] as num?)?.toInt() ?? tradePlans.length;
         lastFetch = s['last_fetch']?.toString();
@@ -291,7 +289,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         storeDiagnostics = (s['store'] as Map?)?.cast<String,dynamic>() ?? {};
         signals = (s['signals'] as Map?)?.cast<String,dynamic>() ?? {};
         market = (s['market'] as Map?)?.cast<String,dynamic>() ?? {};
-        commodities = (s['commodities'] as List?) ?? [];
         tradePlans = ((s['trade_plans'] as List?) ?? const []).whereType<Map>().map((plan) => Map<String, dynamic>.from(plan)).toList();
         qualifiedCount = (s['qualified_trade_count'] as num?)?.toInt() ?? tradePlans.length;
         lastFetch = s['last_fetch']?.toString();
@@ -436,7 +433,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         IndicatorsPage(selected:selectedIndex,signal:_signal(selectedIndex),fast:emaFast,slow:emaSlow,onChanged:(f,s){setState((){emaFast=f;emaSlow=s;});refresh();},onIndex:(v)=>setState(()=>selectedIndex=v)),
         SignalPage(backendUrl:backendUrl,liveStatus:liveTrading,index:selectedIndex,signals:signals,ai:ai,tradePlans:tradePlans,market:market,onChanged:(v)=>setState(()=>selectedIndex=v)),
         RiskPage(index:selectedIndex,signal:_signal(selectedIndex),plans:tradePlans),
-        CommodityPage(items:commodities),
         BacktestingPage(backendUrl: backendUrl),
         ApiPage(backendUrl:backendUrl,feed:feed,storeDiagnostics:storeDiagnostics,market:market,onSaved:(url){setState(()=>backendUrl=url);refresh();}),
         AiAccessPage(backendUrl:backendUrl, onOpenLocalQwen: () => DefaultTabController.of(context).animateTo(tabs.indexOf('AI Chat'))),
@@ -1712,36 +1708,6 @@ class RiskPage extends StatelessWidget {
       ],
     );
   }
-}
-
-class CommodityPage extends StatelessWidget {
-  const CommodityPage({required this.items, super.key});
-  final List<dynamic> items;
-
-  @override
-  Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.all(10),
-    children: [
-      const Section('MCX Commodities — Angel One market feed'),
-      const Text('Front-expiry commodity futures. Live status is shown only when the quote timestamp is fresh; stale or missing prices are not treated as live.', style: TextStyle(fontSize: 12)),
-      if (items.isEmpty)
-        const StatusCard(text: 'No commodity quotes yet. Connect Angel One and sync the instrument master; MCX feed may be unavailable outside market hours.', good: false),
-      ...items.map((raw) {
-        final item = Map<String, dynamic>.from(raw as Map);
-        final live = item['live'] == true;
-        return Card(child: ListTile(
-          leading: Icon(Icons.show_chart, color: live ? Colors.greenAccent : Colors.orangeAccent),
-          title: Text((item['name'] ?? item['symbol'] ?? 'Commodity').toString(), style: const TextStyle(fontWeight: FontWeight.w800)),
-          subtitle: Text('Symbol: ${item['symbol'] ?? '—'} • Expiry: ${item['expiry'] ?? '—'}\nLot: ${item['lotsize'] ?? '—'} • Age: ${item['age_seconds'] ?? '—'}s • ${item['source'] ?? 'NO DATA'}'),
-          isThreeLine: true,
-          trailing: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [
-            Text(item['ltp'] == null ? '—' : '₹${_val(item['ltp'])}', style: const TextStyle(fontWeight: FontWeight.w900)),
-            Text(live ? 'LIVE' : 'STALE', style: TextStyle(fontSize: 10, color: live ? Colors.greenAccent : Colors.orangeAccent)),
-          ]),
-        ));
-      }),
-    ],
-  );
 }
 
 class ApiPage extends StatefulWidget {
