@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 import pandas as pd
 
 from quant.oi_price_action_engine import IST, OIPriceActionEngine, to_signal_data
@@ -115,7 +115,7 @@ class OIPriceActionEngineTests(unittest.TestCase):
             "ce_oi_change": 1, "pe_oi_change": 1,
         }])
         result = OIPriceActionEngine().generate(
-            candles, chain, 25000, now, option_chain_timestamp=now - __import__("datetime").timedelta(seconds=5)
+            candles, chain, 25000, now, option_chain_timestamp=now - timedelta(seconds=5)
         )
         self.assertEqual(result.decision, "WAIT")
         self.assertIn("STALE_CANDLES", result.guards)
