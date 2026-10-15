@@ -112,6 +112,7 @@ class OIPriceActionEngine:
 
     def _chain(self, chain: pd.DataFrame) -> pd.DataFrame:
         df = chain.copy()
+        df.columns = [str(c).strip().lower() for c in df.columns]
         aliases = {
             "strike": ("strike", "strikeprice", "strike_price"),
             "ce_oi": ("ce_oi", "calloi", "call_oi", "ceoi"),
