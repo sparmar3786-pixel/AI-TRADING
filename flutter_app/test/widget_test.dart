@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ai_trading_signal/main.dart';
+import 'package:ai_trading_signal/strategy_library_page.dart';
 
 void main() {
   testWidgets('Trading app starts with strategy tab and no AI tabs', (tester) async {
@@ -35,13 +36,27 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('STRATEGY LIBRARY'), findsOneWidget);
-    expect(find.text('OI Price Action'), findsOneWidget);
-    expect(find.text('Hero Zero'), findsOneWidget);
-    expect(find.text('Failed-Move / PDH-PDL'), findsOneWidget);
-    expect(find.text('EMA Crossover'), findsOneWidget);
-    expect(find.text('DAY-HL Liquidity Sweep'), findsOneWidget);
-    expect(find.text('Opening Range Breakout (ORB)'), findsOneWidget);
-    expect(find.text('VWAP Strategy'), findsOneWidget);
+    final strategyScroll = find.descendant(
+      of: find.byType(StrategyLibraryPage),
+      matching: find.byType(Scrollable),
+    ).first;
+    for (final label in <String>[
+      'OI Price Action',
+      'Hero Zero',
+      'Failed-Move / PDH-PDL',
+      'EMA Crossover',
+      'DAY-HL Liquidity Sweep',
+      'Opening Range Breakout (ORB)',
+      'VWAP Strategy',
+    ]) {
+      await tester.scrollUntilVisible(find.text(label), 250, scrollable: strategyScroll);
+      expect(find.text(label), findsOneWidget, reason: '$label must be in the Strategies tab');
+    }
+    await tester.scrollUntilVisible(
+      find.text('Live API wiring not verified'),
+      250,
+      scrollable: strategyScroll,
+    );
     expect(find.text('Live API wiring not verified'), findsWidgets);
   });
 
