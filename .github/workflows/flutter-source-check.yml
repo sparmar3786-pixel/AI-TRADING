@@ -35,7 +35,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if grep -RniE 'https?://(www\\.)?(github\\.com|gitlab\\.com|bitbucket\\.org|sourceforge\\.net)/|Repository Library|Quant Research Hub|Quant & Trading Repositories|PDF Report & Repositories' flutter_app/lib; then
+          if grep -RniE 'https?://(www\\.)?(github\\.com|githubusercontent\\.com|github\\.io|gitlab\\.com|gitlab\\.io|bitbucket\\.org|sourceforge\\.net|codeberg\\.org|git\\.sr\\.ht|huggingface\\.co)/|Repository Library|Quant Research Hub|Quant & Trading Repositories|PDF Report & Repositories' flutter_app/lib; then
             echo "Repository-link UI or repository URLs remain in active Flutter source."
             exit 1
           fi
