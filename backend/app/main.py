@@ -31,6 +31,11 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, W
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
+try:
+    from app.state_store import database_configured, delete_state, get_state, put_state
+except ModuleNotFoundError:
+    from backend.app.state_store import database_configured, delete_state, get_state, put_state
+
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -556,40 +561,65 @@ def _save_credentials(credentials: dict[str, str]) -> None:
     }, separators=(",", ":")).encode()
     nonce = os.urandom(12)
     ciphertext = AESGCM(_encryption_key()).encrypt(nonce, payload, b"AI-TRADING-ANGEL-CREDENTIALS-v1")
+    encrypted_blob = base64.urlsafe_b64encode(nonce + ciphertext).decode("ascii")
+    db_saved = put_state("angel_credentials_encrypted", {"blob": encrypted_blob})
+    file_saved = False
     path = _credential_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(path.suffix + ".tmp")
-        temporary.write_bytes(base64.urlsafe_b64encode(nonce + ciphertext))
+        temporary.write_text(encrypted_blob, encoding="ascii")
         os.chmod(temporary, 0o600)
         temporary.replace(path)
         os.chmod(path, 0o600)
-    except OSError as exc:
+        file_saved = True
+    except OSError:
+        pass
+    if not db_saved and not file_saved:
         raise HTTPException(
             status_code=503,
-            detail="Could not persist encrypted credentials. Attach a Railway persistent volume at /data or disable Remember credentials.",
-        ) from exc
+            detail="Could not persist encrypted credentials to PostgreSQL or the fallback volume.",
+        )
+
+
+def _decrypt_credentials_blob(encrypted_blob: str) -> dict[str, str]:
+    raw = base64.urlsafe_b64decode(encrypted_blob.encode("ascii"))
+    plaintext = AESGCM(_encryption_key()).decrypt(raw[:12], raw[12:], b"AI-TRADING-ANGEL-CREDENTIALS-v1")
+    value = json.loads(plaintext)
+    return {key: str(value[key]) for key in ("angel_api_key", "angel_client_code", "angel_pin") if value.get(key)}
 
 
 def _load_credentials() -> dict[str, str]:
+    db_ok, db_value = get_state("angel_credentials_encrypted")
+    if db_ok and isinstance(db_value, dict) and isinstance(db_value.get("blob"), str):
+        try:
+            return _decrypt_credentials_blob(db_value["blob"])
+        except Exception:
+            # Fall through to the encrypted volume backup without logging secret material.
+            pass
     path = _credential_path()
-    if not path.is_file():
-        return {}
     try:
-        raw = base64.urlsafe_b64decode(path.read_bytes())
-        plaintext = AESGCM(_encryption_key()).decrypt(raw[:12], raw[12:], b"AI-TRADING-ANGEL-CREDENTIALS-v1")
-        value = json.loads(plaintext)
-        return {key: str(value[key]) for key in ("angel_api_key", "angel_client_code", "angel_pin") if value.get(key)}
+        if path.is_file():
+            encrypted_blob = path.read_text(encoding="ascii").strip()
+            value = _decrypt_credentials_blob(encrypted_blob)
+            # Migrate the already-encrypted blob; never store plaintext credentials in PostgreSQL.
+            put_state("angel_credentials_encrypted", {"blob": encrypted_blob})
+            return value
     except Exception:
         # Do not log ciphertext, plaintext or exception payloads.
-        return {}
+        pass
+    return {}
+
 
 def _forget_credentials() -> None:
+    db_ok, _ = delete_state("angel_credentials_encrypted")
+    if database_configured() and not db_ok:
+        raise HTTPException(status_code=503, detail="Could not remove saved encrypted credentials from PostgreSQL.")
     path = _credential_path()
     try:
         path.unlink(missing_ok=True)
     except OSError as exc:
-        raise HTTPException(status_code=503, detail="Could not remove saved encrypted credentials from the persistent volume.") from exc
+        raise HTTPException(status_code=503, detail="Could not remove saved encrypted credentials from the fallback volume.") from exc
 
 
 def _credentials_from_env() -> dict[str, str]:
