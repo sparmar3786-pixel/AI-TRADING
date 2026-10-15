@@ -140,8 +140,6 @@ class FreshApi {
   Future<Map<String, dynamic>> systemDiagnostics() => getJson('/v1/system/diagnostics');
   Future<Map<String, dynamic>> metadata() => getJson('/v1/metadata');
   Future<Map<String, dynamic>> angelStatus() => getJson('/v1/angel/status');
-  Future<Map<String, dynamic>> testSearchProviders() =>
-      FreshApi.signal().postJson('/v1/providers/search/test', {});
 
   Future<Map<String, dynamic>> saveCredentials(
     Map<String, dynamic> body,
