@@ -26,7 +26,7 @@ def sample_intraday(*, breakout=True, volume=True):
     lows = [c - 0.5 for c in closes]
     frame = {"high": highs, "low": lows, "close": closes}
     if volume:
-        frame["volume"] = [100.0] * 25 + [500.0]
+        frame["volume"] = [100.0] * 24 + [500.0, 500.0]
     return pd.DataFrame(frame, index=pd.DatetimeIndex(times))
 
 
@@ -39,7 +39,7 @@ class FailedMoveFadeTests(unittest.TestCase):
             volume_mult=1.3,
             drop_forming_candle=True,
         )
-        self.now = datetime(2026, 10, 15, 10, 30, tzinfo=IST)
+        self.now = datetime(2026, 10, 15, 11, 30, tzinfo=IST)
 
     def test_pdh_acceptance_emits_candidate_not_actionable_decision(self):
         signal = self.engine.generate(sample_daily(), sample_intraday(), 103.2, self.now)
