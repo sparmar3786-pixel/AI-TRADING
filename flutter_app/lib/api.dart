@@ -240,7 +240,7 @@ class FreshApi {
         'notes': notes,
       });
 
-  /// NVIDIA-first cloud chat with OpenRouter fallback. Offline Qwen runs on-device.
+  /// NVIDIA-first cloud chat with OpenRouter fallback through the backend.
   Future<Map<String, dynamic>> aiChat({
     required String index,
     required String question,
