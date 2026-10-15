@@ -6,6 +6,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/app ./app
 COPY integrations /repo/integrations
 COPY quant_engine.py /repo/quant_engine.py
+COPY quant /repo/quant
 COPY strategies /repo/strategies
 COPY risk /repo/risk
 ENV PYTHONPATH=/repo
