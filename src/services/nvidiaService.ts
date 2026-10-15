@@ -50,7 +50,7 @@ class NvidiaService {
 
   public async refreshNvidiaStatus(): Promise<{ configured: boolean; active: boolean }> {
     const { apiService } = await import('./api');
-    const backendUrl = apiService.getSignalBackend().replace(/\\/+$/, '');
+    const backendUrl = apiService.getSignalBackend().replace(/\/+$/, '');
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     try {
@@ -131,7 +131,7 @@ class NvidiaService {
     modelOverride?: string
   ): Promise<{ answer: string; model: string; provider: string } | null> {
     const { apiService } = await import('./api');
-    const backendUrl = apiService.getSignalBackend().replace(/\\/+$/, '');
+    const backendUrl = apiService.getSignalBackend().replace(/\/+$/, '');
     const response = await fetch(`${backendUrl}/v1/ai/nvidia-chat`, {
       method: 'POST',
       headers: {
