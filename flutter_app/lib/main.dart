@@ -432,7 +432,12 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           );
           final chainRows = (chainResponse['option_chain'] as List?) ?? const <dynamic>[];
           if (chainRows.isNotEmpty) {
-            optionChainsByIndex[selectedIndex] = _markOptionRowsFresh(chainRows);
+            final chainIsStale = chainResponse['stale'] == true ||
+                (chainResponse['status'] == 'WAIT' && chainResponse['live'] == false);
+            optionChainsByIndex[selectedIndex] = _markOptionRowsFresh(
+              chainRows,
+              forceStale: chainIsStale,
+            );
             optionChainError = null;
           } else {
             optionChainError = (chainResponse['reason'] ?? 'Broker returned no option-chain quotes yet.').toString();
@@ -657,7 +662,12 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       final stamp = DateTime.tryParse((option['source_timestamp'] ?? option['timestamp'] ?? '').toString())?.toUtc();
       final age = stamp == null ? null : now.difference(stamp).inMilliseconds / 1000.0;
       option['age_seconds'] = age;
-      option['live'] = !forceStale && age != null && age >= 0 && age <= 60;
+      final explicitlyStale = option['stale'] == true || option['freshness'] == 'STALE';
+      final freshTimestamp = age != null && age >= 0 && age <= 60;
+      option['stale'] = forceStale || explicitlyStale || !freshTimestamp;
+      option['freshness'] = option['stale'] == true ? 'STALE' : 'FRESH';
+      option['live'] = !forceStale && !explicitlyStale && freshTimestamp;
+      if (option['stale'] == true) option['actionable'] = false;
       return option;
     }).toList();
   }
