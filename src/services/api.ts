@@ -61,10 +61,14 @@ class ApiService {
     const source = String((row as MarketRow & { source?: string; data_source?: string }).source ||
       (row as MarketRow & { data_source?: string }).data_source || '').toLowerCase();
     const trustedSource = /angel|smartapi|nse|bse|broker|exchange/.test(source);
-    const numericValues = [row.ltp, row.open, row.high, row.low, row.close, row.vwap, row.volume];
+    const requiredPriceValid = typeof row.ltp === 'number' && Number.isFinite(row.ltp) && row.ltp > 0;
+    const optionalValues = [row.open, row.high, row.low, row.close, row.vwap, row.volume, row.pcr, row.max_pain, row.india_vix]
+      .filter(value => value !== undefined && value !== null);
+    const optionalNumbersValid = optionalValues.every(value => typeof value === 'number' && Number.isFinite(value) && value >= 0);
+    const rangeValid = typeof row.high !== 'number' || typeof row.low !== 'number' ||
+      (row.high >= row.low && row.ltp <= row.high && row.ltp >= row.low);
     return trustedSource && Number.isFinite(timestamp) && ageMs >= 0 && ageMs <= maxAgeMs &&
-      numericValues.every(value => Number.isFinite(value) && value >= 0) &&
-      row.ltp > 0 && row.high >= row.low && row.ltp <= row.high && row.ltp >= row.low;
+      requiredPriceValid && optionalNumbersValid && rangeValid;
   }
 
   private getOrCreateDeviceId(): string {
