@@ -147,6 +147,31 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ok")
 
+    def test_browser_cors_preflight_allows_market_intelligence_and_cloud_ai(self):
+        origin = "https://ai-trading.example"
+        get_response = self.client.options(
+            "/v1/market-intelligence",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "x-device-id",
+            },
+        )
+        self.assertEqual(get_response.status_code, 200, get_response.text)
+        self.assertEqual(get_response.headers.get("access-control-allow-origin"), "*")
+        self.assertIn("x-device-id", get_response.headers.get("access-control-allow-headers", "").lower())
+
+        post_response = self.client.options(
+            "/v1/ai/nvidia-chat",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type,x-device-id",
+            },
+        )
+        self.assertEqual(post_response.status_code, 200, post_response.text)
+        self.assertIn("POST", post_response.headers.get("access-control-allow-methods", ""))
+
     def test_favicon_request_is_not_reported_as_a_missing_route(self):
         response = self.client.get("/favicon.ico")
         self.assertEqual(response.status_code, 204)
