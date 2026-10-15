@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, integrate-trading-research-v2-20261010, fix/commodity-footprint-ai-provider-ui, fix/enable-python-ci-and-audit, fix/python-ci-discover-existing-tests]
   pull_request:
-    branches: [main]
+    branches: [main, day-hl-liquidity-engine, remove-ai-keep-quant]
   workflow_dispatch:
 
 permissions:
@@ -46,6 +46,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Install quant-engine dependencies
+        run: python -m pip install --disable-pip-version-check pandas numpy
       - name: Detect Python regression tests
         id: detect
         shell: bash
