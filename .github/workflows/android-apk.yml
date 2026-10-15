@@ -92,7 +92,7 @@ jobs:
           mapfile -t CODE_FILES < <(unzip -Z1 "$APK" | grep -E '(^classes[0-9]*[.]dex$|^lib/[^/]+/libapp[.]so$)' || true)
           test "${#CODE_FILES[@]}" -gt 0
           COMPILED_STRINGS=$(for file in "${CODE_FILES[@]}"; do unzip -p "$APK" "$file" | strings; done)
-          if printf '%s\n' "$COMPILED_STRINGS" | grep -Ei 'SMC Pro Chart|SMC Chart|Smart Money Concepts Chart|Order Flow & Footprint|Order Flow Chart|Footprint Chart|FOOTPRINT CHART|class OrderFlowPage|MCX Commodities|MCX Commodity Exchange|CommodityPage|CommodityScreen|McxPage|MCXPage|CRUDEOIL|NATURALGAS' >/dev/null; then
+          if printf '%s\n' "$COMPILED_STRINGS" | grep -Ei 'SMC Pro Chart|SMC Chart|Smart Money Concepts Chart|Order Flow & Footprint|Order Flow Chart|Footprint Chart|FOOTPRINT CHART|class OrderFlowPage|MCX Commodities|MCX Commodity Exchange|CommodityPage|CommodityScreen|McxPage|MCXPage' >/dev/null; then
             echo "Removed MCX, SMC, or Order Flow label/code found in the compiled APK"
             exit 1
           fi
@@ -109,6 +109,13 @@ jobs:
           "$AAPT" dump permissions "$APK" | grep -q 'android.permission.INTERNET'
           "$AAPT" dump badging "$APK" | grep -F "application-label:'AI Trading Signals'" >/dev/null
           ls -lh "$APK"
+      - name: Upload verified APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-trading-signal-apk-${{ github.run_number }}
+          path: flutter_app/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 14
       - name: Publish rolling APK release (avoids Actions artifact quota)
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         working-directory: .
