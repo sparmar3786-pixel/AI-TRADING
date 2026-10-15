@@ -276,10 +276,10 @@ export const SettingsPage: React.FC = () => {
               </div>
               <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold font-mono border flex items-center gap-1 ${
                 nvidiaService.isNvidiaConfigured()
-                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                  : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                  : 'bg-rose-500/15 text-rose-300 border-rose-500/30'
               }`}>
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span className={`w-1.5 h-1.5 rounded-full ${nvidiaService.isNvidiaConfigured() ? "bg-amber-400" : "bg-rose-400"}`}></span>
                 {nvidiaService.isNvidiaConfigured() ? 'NVIDIA KEY CONFIGURED • NOT VERIFIED' : 'NVIDIA CLOUD NOT VERIFIED'}
               </span>
             </div>
