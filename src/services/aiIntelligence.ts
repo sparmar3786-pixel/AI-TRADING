@@ -31,7 +31,7 @@ export async function generateMarketIntelligenceAnswer(params: {
 
   // NVIDIA is the primary provider and inference runs through Railway so credentials stay server-side.
   // Do not call NVIDIA directly from the browser or silently hide backend errors.
-  const backendUrl = apiService.getSignalBackend().replace(/\\/+$/, '');
+  const backendUrl = apiService.getSignalBackend().replace(/\/+$/, '');
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 20000);
   let response: Response;
