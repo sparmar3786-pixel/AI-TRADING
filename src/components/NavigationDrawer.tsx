@@ -11,14 +11,12 @@ import {
   Flame,
   Activity,
   Cpu,
-  LineChart,
   BrainCircuit,
   Wallet,
   Settings,
   Database,
   History,
   FileSpreadsheet,
-  Gauge,
 } from 'lucide-react';
 import { useTrading } from '../context/TradingContext';
 
@@ -41,7 +39,6 @@ export const NavigationDrawer: React.FC = () => {
         { id: 'Option Chain', label: 'Option Chain & Greeks', icon: Table2 },
         { id: 'OI Lab', label: 'OI Lab & PCR Analysis', icon: BarChart3 },
         { id: 'Indicators', label: 'Technical Indicators', icon: Sliders },
-        { id: 'SMC Chart', label: 'SMC Pro Chart', icon: LineChart },
         { id: 'Commodities', label: 'MCX Commodities', icon: Flame },
       ],
     },
@@ -50,7 +47,6 @@ export const NavigationDrawer: React.FC = () => {
       items: [
         { id: 'Signals', label: 'Live Signals (10m Gate)', icon: Zap },
         { id: '5-Layer Quant', label: '5-Layer Quant Engine', icon: Activity },
-        { id: 'Order Flow', label: 'Order Flow & Footprint', icon: Gauge },
         { id: 'Strategy Library', label: 'Strategy Library', icon: FileSpreadsheet },
       ],
     },
