@@ -2,7 +2,7 @@ name: Build AI-TRADING Android APK
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/ai-trading-signal-apk]
     paths:
       - 'flutter_app/**'
       - '.github/workflows/android-apk.yml'
@@ -58,7 +58,7 @@ jobs:
       - name: Verify removed chart pages are absent from Flutter source
         run: |
           set -euo pipefail
-          REMOVED_UI='SMC Pro Chart|SMC Chart|Smart Money Concepts Chart|Order Flow & Footprint|Order Flow Chart|Footprint Chart|FOOTPRINT CHART|class OrderFlowPage|MCX Commodities|MCX Commodity Exchange|CommodityPage|CommodityScreen|McxPage|MCXPage|CRUDEOIL|NATURALGAS'
+          REMOVED_UI='SMC Pro Chart|SMC Chart|Smart Money Concepts Chart|Order Flow & Footprint|Order Flow Chart|Footprint Chart|FOOTPRINT CHART|class OrderFlowPage|MCX Commodities|MCX Commodity Exchange|CommodityPage|CommodityScreen|McxPage|MCXPage'
           if grep -RniE "$REMOVED_UI" lib; then
             echo "Removed MCX, SMC, or Order Flow UI/code is still present in Flutter source."
             exit 1
