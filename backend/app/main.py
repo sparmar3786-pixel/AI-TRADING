@@ -518,6 +518,16 @@ def _ensure_market_intelligence_scheduler() -> None:
 
 @app.on_event("startup")
 def _start_market_intelligence_scheduler_on_startup() -> None:
+    # Best-effort migration copies only encrypted credentials and application state.
+    # The mounted volume remains a fallback until diagnostics confirms DB parity.
+    if database_configured():
+        try:
+            _load_credentials()
+            _load_signal_outcomes()
+            _load_paper_trades()
+            logger.info("persistent state migration checked; credential payloads remain encrypted")
+        except Exception:
+            logger.warning("persistent state migration deferred; volume fallback remains enabled")
     enabled = os.getenv("MARKET_INTELLIGENCE_AUTO_REFRESH", "true").strip().lower()
     if enabled not in {"0", "false", "no", "off"}:
         _ensure_market_intelligence_scheduler()
@@ -2239,6 +2249,46 @@ def angel_connect(body: ConnectRequest, _: str = Depends(_device)) -> dict[str, 
         }
 
 
+def _safe_json_list_count(path: Path) -> int | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return len(value) if isinstance(value, list) else None
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def _storage_diagnostics() -> dict[str, Any]:
+    db_ok, _ = get_state("__healthcheck__")
+    creds_ok, creds = get_state("angel_credentials_encrypted")
+    outcomes_ok, outcomes = get_state("signal_outcomes")
+    paper_ok, paper = get_state("paper_trades")
+    credential_file = _credential_path().is_file()
+    outcomes_file = _signal_outcome_path()
+    paper_file = _paper_trade_path()
+    outcomes_count = _safe_json_list_count(outcomes_file) if outcomes_file.is_file() else 0
+    paper_count = _safe_json_list_count(paper_file) if paper_file.is_file() else 0
+    outcomes_parity = not outcomes_file.is_file() or (outcomes_ok and isinstance(outcomes, list) and len(outcomes) >= (outcomes_count or 0))
+    paper_parity = not paper_file.is_file() or (paper_ok and isinstance(paper, list) and len(paper) >= (paper_count or 0))
+    credentials_parity = not credential_file or (creds_ok and isinstance(creds, dict) and isinstance(creds.get("blob"), str))
+    ready = database_configured() and db_ok and outcomes_parity and paper_parity and credentials_parity
+    return {
+        "database_configured": database_configured(),
+        "postgres_reachable": db_ok,
+        "signal_outcomes_in_postgres": outcomes_ok and isinstance(outcomes, list),
+        "signal_outcomes_db_count": len(outcomes) if isinstance(outcomes, list) else None,
+        "paper_trades_in_postgres": paper_ok and isinstance(paper, list),
+        "paper_trades_db_count": len(paper) if isinstance(paper, list) else None,
+        "encrypted_credentials_in_postgres": creds_ok and isinstance(creds, dict) and isinstance(creds.get("blob"), str),
+        "legacy_volume_files": {
+            "encrypted_credentials": credential_file,
+            "signal_outcomes": outcomes_file.is_file(),
+            "paper_trades": paper_file.is_file(),
+        },
+        "ready_to_detach_volume": ready,
+        "note": "Do not detach /data until ready_to_detach_volume is true and the migration has been independently verified.",
+    }
+
+
 @app.get("/v1/system/diagnostics")
 def diagnostics(_: str = Depends(_device)) -> dict[str, Any]:
     adapter = _current_adapter()
@@ -2263,6 +2313,7 @@ def diagnostics(_: str = Depends(_device)) -> dict[str, Any]:
             "cycle_age_seconds": round(time.monotonic() - _signal_cache_at, 1) if _signal_cache else None,
             "cycle_fresh": bool(_signal_cache and time.monotonic() - _signal_cache_at < SIGNAL_CACHE_SECONDS),
         },
+        "storage": _storage_diagnostics(),
         "instrument_master": {"row_count": len(_master_rows), "cached": bool(_master_rows)},
         "market_data": {
             "snapshot_count": len((_signal_cache or {}).get("market", {})),
