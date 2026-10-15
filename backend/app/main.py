@@ -3858,7 +3858,9 @@ def _signal_outcome_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
     net_losses = sum(1 for value in net_values if value < 0)
     net_break_even = sum(1 for value in net_values if value == 0)
     gross_points = [
-        float(row["exit_price"]) - float(row["entry_price"])
+        (float(row["entry_price"]) - float(row["exit_price"]))
+        if row.get("instrument_type") == "MCX_FUTURE" and row.get("decision") == "SELL FUTURE"
+        else (float(row["exit_price"]) - float(row["entry_price"]))
         for row in closed
         if _number(row.get("exit_price")) is not None and _number(row.get("entry_price")) is not None
     ]
@@ -3890,10 +3892,13 @@ def _signal_outcome_report(rows: list[dict[str, Any]], persistence: dict[str, An
     by_instrument.setdefault("NIFTY", [])
     by_instrument.setdefault("BANKNIFTY", [])
     closed = sum(1 for row in rows if row.get("status") == "CLOSED" and row.get("exit_reason") in {"TARGET", "STOP_LOSS"})
+    mcx_rows = [row for row in rows if row.get("instrument_type") == "MCX_FUTURE"]
+    mcx_closed = sum(1 for row in mcx_rows if row.get("status") == "CLOSED" and row.get("exit_reason") in {"TARGET", "STOP_LOSS"})
     mcx_note = {
-        "status": "NOT_TRACKED_BY_INDEX_OPTION_SIGNAL_ENGINE",
-        "closed_count": 0,
-        "message": "MCX requires its own live futures/commodity signal and quote-matching pipeline; do not interpret zero as 0% accuracy.",
+        "status": "OBSERVED_QUOTE_OUTCOMES" if mcx_closed else "UNVERIFIED_NO_CLOSED_MCX_OUTCOMES",
+        "metrics": _signal_outcome_metrics(mcx_rows),
+        "instrument_count": len({str(row.get("index") or "").upper() for row in mcx_rows}),
+        "message": "MCX futures are shadow-tracked from fresh Angel One quotes; target/stop touches are observed, not broker fills. One lot is assumed unless a quantity is explicitly configured.",
     }
     return {
         "status": "ok",
