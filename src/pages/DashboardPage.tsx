@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   TrendingUp,
   TrendingDown,
@@ -20,6 +20,13 @@ import { INDEX_CONFIG } from '../services/api';
 import { nvidiaService } from '../services/nvidiaService';
 
 export const DashboardPage: React.FC = () => {
+  const [nvidiaBackendStatus, setNvidiaBackendStatus] = useState<{ configured: boolean; active: boolean }>({ configured: false, active: false });
+  useEffect(() => {
+    let mounted = true;
+    void nvidiaService.refreshNvidiaStatus().then(status => { if (mounted) setNvidiaBackendStatus(status); });
+    return () => { mounted = false; };
+  }, []);
+
   const {
     selectedIndex,
     market,
@@ -108,11 +115,13 @@ export const DashboardPage: React.FC = () => {
                   NVIDIA AI Market Intelligence
                 </span>
                 <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold font-mono border ${
-                  nvidiaService.isNvidiaConfigured()
-                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                    : 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                  nvidiaBackendStatus.active
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                    : nvidiaBackendStatus.configured
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                      : 'bg-rose-500/15 text-rose-300 border-rose-500/30'
                 }`}>
-                  {nvidiaService.isNvidiaConfigured() ? 'NVIDIA KEY CONFIGURED • NOT VERIFIED' : 'NVIDIA CLOUD NOT VERIFIED'}
+                  {nvidiaBackendStatus.active ? 'NVIDIA INFERENCE ACTIVE' : nvidiaBackendStatus.configured ? 'NVIDIA CONFIGURED • INFERENCE UNVERIFIED' : 'NVIDIA CLOUD NOT VERIFIED'}
                 </span>
               </div>
               <p className="text-[10px] text-slate-300 mt-0.5 line-clamp-1 font-sans">
