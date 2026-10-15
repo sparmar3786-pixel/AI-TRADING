@@ -213,21 +213,21 @@ void main() {
     expect(find.text('SIGNAL ENGINE'), findsOneWidget);
     final engineList = find.byKey(const ValueKey('trade-engine-primary-list'));
     expect(engineList, findsOneWidget);
-    final riskLayer = find.text('RISK & 10-MINUTE STABILITY');
-    await tester.ensureVisible(riskLayer);
-    expect(riskLayer, findsOneWidget);
-    final trendLayer = find.text('TREND & SENTIMENT');
-    await tester.ensureVisible(trendLayer);
-    expect(trendLayer, findsOneWidget);
-    final optionLayer = find.text('OPTION CHAIN & ORDER FLOW');
-    await tester.ensureVisible(optionLayer);
-    expect(optionLayer, findsOneWidget);
-    final monitorLayer = find.text('READ-ONLY BROKER MONITOR');
-    await tester.ensureVisible(monitorLayer);
-    expect(monitorLayer, findsOneWidget);
-    final orderBookButton = find.text('LOAD / REFRESH ANGEL ONE ORDER BOOK');
-    await tester.ensureVisible(orderBookButton);
-    expect(orderBookButton, findsOneWidget);
+    Future<void> scrollToText(Finder target) async {
+      // These widgets are lazily built by the ListView, so ensureVisible cannot
+      // find them until scrolling has brought them into the widget tree.
+      for (var attempt = 0; attempt < 12 && target.evaluate().isEmpty; attempt++) {
+        await tester.drag(engineList, const Offset(0, -500));
+        await tester.pumpAndSettle();
+      }
+      expect(target, findsOneWidget);
+    }
+
+    await scrollToText(find.text('RISK & 10-MINUTE STABILITY'));
+    await scrollToText(find.text('TREND & SENTIMENT'));
+    await scrollToText(find.text('OPTION CHAIN & ORDER FLOW'));
+    await scrollToText(find.text('READ-ONLY BROKER MONITOR'));
+    await scrollToText(find.text('LOAD / REFRESH ANGEL ONE ORDER BOOK'));
   });
 
   testWidgets('Pro chart clearly reports missing candles instead of fabricating data', (tester) async {
