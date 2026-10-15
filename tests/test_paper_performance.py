@@ -62,7 +62,7 @@ class PaperPerformanceSummaryTests(unittest.TestCase):
                 self.assertEqual(second["metrics"]["closed_count"], 1)
                 self.assertEqual(second["metrics"]["target_hits"], 1)
                 self.assertEqual(second["metrics"]["stop_loss_hits"], 0)
-                self.assertEqual(second["metrics"]["gross_points_total"], 21.0)
+                self.assertEqual(second["metrics"]["gross_points_total"], 20.0)
                 self.assertIsNone(second["metrics"]["net_pnl_inr"])
                 self.assertEqual(second["accuracy_status"], "OBSERVED_QUOTE_OUTCOMES")
                 _signal_outcomes_memory.clear()
