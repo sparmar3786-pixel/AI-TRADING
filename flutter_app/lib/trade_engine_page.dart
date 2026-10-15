@@ -384,5 +384,4 @@ class _TradeEnginePageState extends State<TradeEnginePage> {
     padding: const EdgeInsets.symmetric(vertical: 6),
     child: Row(children: [Expanded(child: Text(label, style: const TextStyle(color: Colors.white70))), Flexible(child: Text(value, textAlign: TextAlign.end, style: const TextStyle(fontWeight: FontWeight.w800)))]),
   );
-
-
+}
