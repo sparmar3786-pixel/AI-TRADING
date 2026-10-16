@@ -24,23 +24,53 @@ class _StrategyLibraryPageState extends State<StrategyLibraryPage> {
   String? _suiteRunError;
 
   Future<void> _runSuite(Map<String, dynamic> marketRow) async {
-    final timeframes = Map<String, dynamic>.from(marketRow['timeframes'] as Map? ?? const {});
-    List? raw;
-    for (final key in ['15m', '15min', '5m', '5min', '1m', '1min']) {
-      if (timeframes[key] is List) { raw = timeframes[key] as List; break; }
-    }
-    raw ??= marketRow['candles'] is List ? marketRow['candles'] as List : null;
-    final candles = (raw ?? const []).whereType<Map>().map((row) => Map<String, dynamic>.from(row)).where((row) => row['high'] is num && row['low'] is num && row['close'] is num).toList();
-    if (candles.isEmpty) {
-      setState(() { _suiteRunError = 'No usable real OHLC candles in the current market snapshot. The strategy suite was not executed.'; _suiteRun = const {}; });
-      return;
-    }
-    setState(() { _runningSuite = true; _suiteRunError = null; _suiteRun = const {}; });
+    // Strategy Library must consume the same canonical signal snapshot as
+    // Dashboard, Signals, Risk and Trading Setup. The historical
+    // /v1/strategies/evaluate route is research-only and must not be presented
+    // as the live strategy engine.
+    setState(() {
+      _runningSuite = true;
+      _suiteRunError = null;
+      _suiteRun = const {};
+    });
     try {
-      final result = await FreshApi().postJson('/v1/strategies/evaluate', {'candles': candles, 'min_consensus': 3}, timeout: const Duration(seconds: 20));
-      if (mounted) setState(() { _suiteRun = result; });
+      final payload = await FreshApi().getJson(
+        '/v1/signals',
+        timeout: const Duration(seconds: 80),
+      );
+      final allSignals = Map<String, dynamic>.from(
+        payload['signals'] as Map? ?? const {},
+      );
+      final row = Map<String, dynamic>.from(
+        allSignals[widget.selectedIndex] as Map? ?? const {},
+      );
+      final suite = Map<String, dynamic>.from(
+        row['strategy_suite'] as Map? ?? const {},
+      );
+      if (suite.isEmpty) {
+        throw StateError(
+          'The live /v1/signals response did not include strategy_suite for '
+          '${widget.selectedIndex}. No research-only result was substituted.',
+        );
+      }
+      if (mounted) {
+        setState(() {
+          _suiteRun = <String, dynamic>{
+            ...suite,
+            'source': '/v1/signals',
+            'index': widget.selectedIndex,
+            'data_fresh': row['data_fresh'] == true,
+            'decision': row['decision'] ?? 'WAIT',
+          };
+        });
+      }
     } catch (error) {
-      if (mounted) setState(() { _suiteRunError = error.toString(); });
+      if (mounted) {
+        setState(() {
+          _suiteRunError = error.toString();
+          _suiteRun = const {};
+        });
+      }
     } finally {
       if (mounted) setState(() { _runningSuite = false; });
     }
