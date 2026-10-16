@@ -1,4 +1,5 @@
 """Parmar strategy API: inventory plus fail-closed evaluation boundary.
+The deployed branch also ships the quant source modules, but source presence is not live wiring.
 
 This module intentionally does not fabricate market data or register unverified
 strategy adapters. Existing broker, freshness, risk and stability checks remain
