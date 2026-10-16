@@ -258,7 +258,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('TRADE ENGINE'), findsOneWidget);
-    expect(find.text('SIGNAL ENGINE'), findsOneWidget);
+    expect(find.text('SIGNAL CANDIDATE'), findsOneWidget);
+    expect(find.text('DATA QUALITY & FRESHNESS'), findsOneWidget);
     final engineList = find.byKey(const ValueKey('trade-engine-primary-list'));
     expect(engineList, findsOneWidget);
     final engineScrollable = find.descendant(
@@ -266,9 +267,12 @@ void main() {
       matching: find.byType(Scrollable),
     );
     expect(engineScrollable, findsOneWidget);
-    final riskLayer = find.text('RISK & 10-MINUTE STABILITY');
+    final riskLayer = find.text('RISK LEVELS');
     await tester.scrollUntilVisible(riskLayer, 250, scrollable: engineScrollable);
     expect(riskLayer, findsOneWidget);
+    final stabilityGate = find.text('600-SECOND CANDIDATE STABILITY');
+    await tester.scrollUntilVisible(stabilityGate, 250, scrollable: engineScrollable);
+    expect(stabilityGate, findsOneWidget);
     final monitorLayer = find.text('READ-ONLY BROKER MONITOR');
     await tester.scrollUntilVisible(monitorLayer, 250, scrollable: engineScrollable);
     expect(monitorLayer, findsOneWidget);
