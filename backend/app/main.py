@@ -46,6 +46,8 @@ from integrations.angelone_stream import AngelOneStream, EXCHANGE_TYPES
 from integrations.news_sentiment import cached_market_news_sentiment, fetch_market_news_sentiment
 from quant_engine import evaluate_five_layer_signal, evaluate_futures_signal
 from quant.hero_zero import HeroZeroEngine, hero_zero_to_signal_data
+from quant.orb_engine import OpeningRangeBreakoutEngine
+from quant.vwap_strategy import VWAPStrategyEngine
 
 from strategies.technical import atr as technical_atr, ema as technical_ema, rsi as technical_rsi, rsi_reversion, sma as technical_sma
 from strategies.advanced import bollinger_bands, macd as advanced_macd, donchian_channels
@@ -1732,18 +1734,55 @@ def _index_snapshot(
         **dict(result.get("performance") or {}),
         "five_layer_validation_ms": round((time.perf_counter() - engine_started) * 1000, 2),
     }
-    # Publish one normalized engine contract consumed by Dashboard, Signals,
-    # Risk, Trading Setup, the five-layer page and Quant Engine Lab.
+    # Keep the five deterministic validation layers separate from the
+    # independent 10-minute confirmation gate. The latter is not a sixth layer.
     engine_layers = dict(result.get("layers") or {})
-    passed_layers = sum(1 for layer in engine_layers.values() if isinstance(layer, dict) and layer.get("pass") is True)
+    confirmation_layer = dict(engine_layers.get("confirmation") or {})
+    five_layer_keys = ("data_quality", "trend_sentiment", "order_flow", "option_selection", "risk_levels")
+    layer_labels = {
+        "data_quality": "Data freshness & price integrity",
+        "trend_sentiment": "Multi-timeframe trend & sentiment",
+        "order_flow": "Bid/ask depth & spread",
+        "option_selection": "Option contract & liquidity",
+        "risk_levels": "Option ATR risk levels",
+    }
+    display_layers: dict[str, dict[str, Any]] = {}
+    for layer_key in five_layer_keys:
+        raw_layer = engine_layers.get(layer_key)
+        raw_layer = raw_layer if isinstance(raw_layer, dict) else {}
+        passed = raw_layer.get("pass") is True
+        if layer_key == "data_quality":
+            detail = str(raw_layer.get("reason") or raw_layer.get("reason_code") or "Fresh exchange timestamp and positive LTP required.")
+        elif layer_key == "trend_sentiment":
+            detail = f"Trend={raw_layer.get('trend', 'UNKNOWN')}; sentiment={raw_layer.get('sentiment_direction', 'UNKNOWN')}; indicator checks={raw_layer.get('indicator_checks', {})}"
+        elif layer_key == "order_flow":
+            detail = f"Spread={raw_layer.get('spread_pct', 'unknown')}%; depth/flow direction={raw_layer.get('direction', 'UNKNOWN')}; measure={raw_layer.get('measure', 'unknown')}"
+        elif layer_key == "option_selection":
+            detail = f"Eligible contracts={raw_layer.get('candidate_count', 0)}; selected strike={raw_layer.get('strike', 'none')}; spread={raw_layer.get('spread_pct', 'unknown')}"
+        else:
+            detail = str(raw_layer.get("method") or "Valid option ATR, positive stop and target required.")
+        display_layers[layer_key] = {
+            **raw_layer,
+            "name": layer_labels[layer_key],
+            "status": "PASS" if passed else "FAIL",
+            "detail": detail,
+            "score": None,
+        }
+    passed_layers = sum(1 for key in five_layer_keys if (engine_layers.get(key) or {}).get("pass") is True)
+    data_fresh = (engine_layers.get("data_quality") or {}).get("pass") is True
     result["five_layer_engine"] = {
-        "layers": engine_layers, "decision": result.get("decision", "WAIT"),
-        "passed_layers": passed_layers, "total_layers": len(engine_layers),
-        "score_semantics": "passed deterministic checks, not probability of profit",
+        "layers": display_layers,
+        "decision": result.get("decision", "WAIT"),
+        "passed_layers": passed_layers,
+        "total_layers": 5,
+        "confirmation": confirmation_layer,
+        "timestamp": observed,
+        "data_fresh": data_fresh,
+        "score_semantics": "count of five passed deterministic checks; not probability of profit",
     }
     result["quant_engine"] = result["five_layer_engine"]
     result["quant_score"] = passed_layers
-    result["quant_score_semantics"] = "count of passed deterministic layers; not a win probability"
+    result["quant_score_semantics"] = "count of passed deterministic validation layers out of five; not a win probability"
     result["trend_sentiment"] = engine_layers.get("trend_sentiment", {})
     result["option_validation"] = engine_layers.get("option_selection", {})
     result["risk_validation"] = engine_layers.get("risk_levels", {})
