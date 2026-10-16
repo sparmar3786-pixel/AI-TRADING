@@ -111,7 +111,7 @@ jobs:
           fi
 
           grep -Eq 'minSdk[[:space:]]*=[[:space:]]*26([[:space:]]|$)' "$GRADLE" || {
-            echo "Could not enforce minSdk 26 for llama_flutter_android"
+            echo "Could not enforce Android minSdk 26"
             exit 1
           }
           grep -n 'minSdk' "$GRADLE"
