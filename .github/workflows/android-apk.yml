@@ -194,8 +194,17 @@ jobs:
               echo "Forbidden local/emulator backend URL found in $APK"
               exit 1
             fi
-            printf '%s\n' "$COMPILED_STRINGS" | grep -F 'nse-algo-backend-final-production.up.railway.app' >/dev/null
-            printf '%s\n' "$COMPILED_STRINGS" | grep -F 'ai-trading-signals-api-production.up.railway.app' >/dev/null
+            # Dart AOT may fold/omit URL literals; validate compile-time defines and source consumers instead.
+            WORKFLOW="../.github/workflows/android-apk.yml"
+            CONFIG="lib/config.dart"
+            API="lib/api.dart"
+            grep -F -- '--dart-define=BACKEND_URL=https://nse-algo-backend-final-production.up.railway.app' "$WORKFLOW" >/dev/null || { echo "Build configuration missing BACKEND_URL define"; exit 1; }
+            grep -F "String.fromEnvironment(" "$CONFIG" >/dev/null
+            grep -F "'BACKEND_URL'" "$CONFIG" >/dev/null
+            grep -F "AppConfig.backendUrl" "$API" >/dev/null
+            grep -F -- '--dart-define=SIGNAL_BACKEND_URL=https://ai-trading-signals-api-production.up.railway.app' "$WORKFLOW" >/dev/null || { echo "Build configuration missing SIGNAL_BACKEND_URL define"; exit 1; }
+            grep -F "'SIGNAL_BACKEND_URL'" "$CONFIG" >/dev/null
+            grep -F "AppConfig.signalBackendUrl" "$API" >/dev/null
             if printf '%s\n' "$COMPILED_STRINGS" | grep -E 'OPENAI_API_KEY|OPEN_AI_API_KEY|OPENAI_MODEL|api[.]openai[.]com' >/dev/null; then
               echo "Direct OpenAI provider configuration unexpectedly found in $APK"
               exit 1
