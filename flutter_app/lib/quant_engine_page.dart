@@ -97,18 +97,29 @@ class QuantEnginePage extends StatelessWidget {
     final reportedStatus = (engine['decision'] ?? engine['verdict'] ?? engine['status'] ?? 'WAIT').toString().toUpperCase();
     // Prefer server-owned stability metadata and merge the nested layer summary.
     // A CONFIRMED label alone is insufficient if the 600-second timer cannot be verified.
+    final rootStability = _map(signal['signal_stability']);
+    final nestedConfirmation = _map(engine['confirmation']);
     final confirmation = <String, dynamic>{
-      ..._map(signal['signal_stability']),
-      ..._map(engine['confirmation']),
+      ...rootStability,
+      ...nestedConfirmation,
     };
     final stabilityState = (confirmation['state'] ?? 'NOT VERIFIED').toString().toUpperCase();
-    final requiredSeconds = (confirmation['required_seconds'] as num?)?.toInt() ?? 0;
-    final sinceUtc = DateTime.tryParse((confirmation['since_utc'] ?? '').toString());
+    final rootRequiredSeconds = (rootStability['required_seconds'] as num?)?.toInt() ?? 0;
+    final nestedRequiredSeconds = (nestedConfirmation['required_seconds'] as num?)?.toInt() ?? 0;
+    final requiredSeconds = nestedRequiredSeconds;
+    final stabilityStateConsistent = rootStability.isNotEmpty &&
+        nestedConfirmation.isNotEmpty &&
+        (rootStability['state'] ?? '').toString().toUpperCase() ==
+            (nestedConfirmation['state'] ?? '').toString().toUpperCase();
+    final sinceUtc = DateTime.tryParse((rootStability['since_utc'] ?? '').toString());
     final elapsedSeconds = sinceUtc == null
         ? null
         : DateTime.now().toUtc().difference(sinceUtc.toUtc()).inSeconds;
-    final timerVerified = requiredSeconds >= 600 &&
-        elapsedSeconds != null && elapsedSeconds >= requiredSeconds;
+    final timerVerified = stabilityStateConsistent &&
+        rootRequiredSeconds >= 600 &&
+        nestedRequiredSeconds >= 600 &&
+        rootRequiredSeconds == nestedRequiredSeconds &&
+        elapsedSeconds != null && elapsedSeconds >= nestedRequiredSeconds;
     final candidateConfirmed = {'CALL BUY', 'PUT BUY'}.contains(reportedStatus) &&
         allLayersPass && stabilityState == 'CONFIRMED' && timerVerified;
     final anyLayerBlocked = parsedLayers.any((layer) =>
