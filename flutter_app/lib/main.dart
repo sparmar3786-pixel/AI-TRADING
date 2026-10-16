@@ -9,7 +9,7 @@ import 'config.dart';
 import 'broker_home_prototype_page.dart';
 import 'strategy_library_page.dart';
 
-const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Backtesting','API','Data Health','API & Railway','Broker Home','Strategies'];
+const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Backtesting','API','Data Health','API & Railway','Broker Home','Parmar'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
 
 void main() {
