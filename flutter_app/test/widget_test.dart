@@ -35,9 +35,9 @@ void main() {
 
     expect(find.text('STRATEGY LIBRARY'), findsOneWidget);
 
-    // ListView builds rows lazily. Scroll each strategy card into the viewport
-    // before asserting its text; otherwise off-screen cards do not exist in the
-    // widget tree yet and the test fails even though the library contains them.
+    // StrategyLibraryPage uses ListView(children: ...), not ListView.builder.
+    // All strategy cards are built immediately, so do not scroll a TabBar
+    // Scrollable (which caused StateError: No element in CI).
     final strategyLabels = <String>[
       'OI Price Action',
       'Hero Zero',
@@ -47,25 +47,14 @@ void main() {
       'Opening Range Breakout (ORB)',
       'VWAP Strategy',
     ];
-    final verticalScrollable = find.byType(Scrollable).last;
     for (final label in strategyLabels) {
-      await tester.scrollUntilVisible(
-        find.text(label),
-        250,
-        scrollable: verticalScrollable,
-      );
-      await tester.pumpAndSettle();
       expect(find.text(label), findsOneWidget, reason: 'Missing strategy card: $label');
     }
-    // The integration disclaimer is inside lazily built cards too; bring one
-    // into view before asserting it exists in the rendered widget tree.
-    await tester.scrollUntilVisible(
+    expect(
       find.textContaining('Live API wiring not verified'),
-      250,
-      scrollable: verticalScrollable,
+      findsWidgets,
+      reason: 'Strategy cards must disclose that live API wiring is unverified',
     );
-    await tester.pumpAndSettle();
-    expect(find.textContaining('Live API wiring not verified'), findsWidgets);
   });
 
   testWidgets('SMC, MCX and Order Flow chart pages are completely absent', (tester) async {
