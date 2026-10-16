@@ -60,6 +60,48 @@ void main() {
     expect(find.text('Live API wiring not verified'), findsWidgets);
   });
 
+  testWidgets('Strategy Library shows ORB/VWAP backend candidates but keeps them non-actionable', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: StrategyLibraryPage(
+        selectedIndex: 'NIFTY',
+        signals: {
+          'NIFTY': {
+            'strategy_candidates': {
+              'orb': {
+                'candidate_decision': 'CALL BUY',
+                'decision': 'WAIT',
+                'entry': 25000.0,
+                'stop_loss': 24900.0,
+                'target': 25200.0,
+                'data_fresh': true,
+                'reasons': ['Opening range breakout confirmed'],
+                'guards': ['OPTION_CONTRACT_MAPPING_REQUIRED'],
+                'live_validation': {
+                  'verdict': 'PENDING',
+                  'blocks': ['Five-layer quant validation required'],
+                },
+              },
+              'vwap': {
+                'decision': 'WAIT',
+                'data_fresh': false,
+                'reasons': ['No confirmed VWAP cross'],
+                'guards': ['NO_VALID_SETUP'],
+                'live_validation': {'verdict': 'FAIL', 'blocks': []},
+              },
+            },
+          },
+        },
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Candidate: CALL BUY • Approved decision: WAIT'), findsOneWidget);
+    expect(find.textContaining('Underlying entry: 25000.0 • SL: 24900.0 • Target: 25200.0'), findsOneWidget);
+    expect(find.textContaining('Five-layer quant validation required'), findsOneWidget);
+    expect(find.text('Candidate: WAIT • Approved decision: WAIT'), findsOneWidget);
+    expect(find.textContaining('Underlying spot levels only—not option-premium prices'), findsWidgets);
+  });
+
   testWidgets('SMC, MCX and Order Flow chart pages are completely absent', (tester) async {
     const removedLabels = <String>[
       'SMC Pro Chart', 'SMC Chart', 'Smart Money Concepts Chart',
