@@ -46,7 +46,7 @@ class ORBEngineTests(unittest.TestCase):
 
 class VWAPEngineTests(unittest.TestCase):
     def test_vwap_cross_candidate_has_risk_levels(self):
-        frame = candles([100, 99.8, 99.5, 99.4, 99.3, 99.6, 100.5, 101.5],
+        frame = candles([100, 99.8, 99.5, 99.4, 99.3, 99.2, 100.5, 101.5],
                         [100, 100, 110, 120, 130, 150, 250, 300])
         result = VWAPStrategyEngine(use_volume_filter=True, volume_mult=1.0).generate(
             frame, 25012, datetime(2026, 10, 15, 10, 0, tzinfo=IST))
