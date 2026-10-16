@@ -1839,9 +1839,14 @@ def _index_snapshot(
         "indicator_summary": {"timeframes": timeframe_closes, "five_minute_trend": trend, **indicators},
         "option_chain_count": len(normalized_options),
         "signal_stability": {
+            **dict(result.get("signal_stability") or {}),
             "state": result.get("confirmation", {}).get("state", "BLOCKED"),
             "required_minutes": 10,
             "required_seconds": 600,
+            "max_refresh_gap_seconds": 60,
+            "candidate_key": (result.get("confirmation_state") or {}).get("candidate_key"),
+            "since_utc": (result.get("confirmation_state") or {}).get("since_utc"),
+            "last_seen_utc": (result.get("confirmation_state") or {}).get("last_seen_utc"),
         },
     })
     # Run ORB/VWAP against the same completed, exchange-sourced 5-minute candles
