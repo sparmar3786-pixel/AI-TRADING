@@ -911,7 +911,20 @@ def _quote_timestamp(quote: dict[str, Any]) -> str | None:
     return None
 
 
-def _quotes(adapter: AngelOneReadOnly, exchange: str, tokens: list[str]) -> dict[str, dict[str, Any]]:
+def _quotes(
+    adapter: AngelOneReadOnly,
+    exchange: str,
+    tokens: list[str],
+    *,
+    require_depth: bool = True,
+    max_stream_age_seconds: float = 10.0,
+) -> dict[str, dict[str, Any]]:
+    """Read fresh WebSocket ticks first, falling back to real REST quotes.
+
+    Spot market status needs a fresh LTP/timestamp; depth is an independent
+    signal-quality input. Option contracts still require a real two-sided book
+    before a WebSocket tick can replace a REST FULL quote.
+    """
     if not tokens:
         return {}
     unique_tokens = list(dict.fromkeys(str(token) for token in tokens if str(token)))
@@ -920,13 +933,14 @@ def _quotes(adapter: AngelOneReadOnly, exchange: str, tokens: list[str]) -> dict
     if _stream is not None and exchange_type is not None:
         _stream.subscribe(exchange_type, unique_tokens)
         for token in unique_tokens:
-            tick = _stream.get_tick(token, max_age_seconds=60.0)
-            if not tick or _number(tick.get("ltp")) is None:
+            tick = _stream.get_tick(token, max_age_seconds=max_stream_age_seconds)
+            if not tick or (_number(tick.get("ltp")) or 0) <= 0:
+                continue
+            # Never use server receive time to disguise a missing exchange timestamp.
+            if not _quote_timestamp(tick):
                 continue
             bid, ask, _, _ = _book(tick)
-            # Use a broker tick only when it includes a two-sided book. Otherwise
-            # fall back to rate-limited REST FULL quotes; never synthesize depth.
-            if bid is not None and ask is not None:
+            if not require_depth or (bid is not None and ask is not None and bid > 0 and ask >= bid):
                 output[token] = tick
     missing = [token for token in unique_tokens if token not in output]
     # SmartAPI market-data accepts at most 50 tokens per exchange in one request.
@@ -1221,8 +1235,8 @@ def _live_validation_contract(
     risk_layer = dict(engine_layers.get("risk_levels") or {})
     age = _number(data_layer.get("age_seconds"))
     option_age = _number(option_age_seconds)
-    fresh_market = data_layer.get("pass") is True and age is not None and 0 <= age <= 60
-    valid_option_quote = option_layer.get("pass") is True and option_age is not None and 0 <= option_age <= 60
+    fresh_market = data_layer.get("pass") is True and age is not None and 0 <= age <= 15
+    valid_option_quote = option_layer.get("pass") is True and option_age is not None and 0 <= option_age <= 15
     entry = _number(result.get("entry"))
     stop = _number(result.get("stop_loss"))
     target = _number(result.get("target"))
@@ -1662,7 +1676,7 @@ def _index_snapshot(
     result = evaluate_five_layer_signal(
         snapshot,
         confirmation_state=_confirmation_states.get(index),
-        max_data_age_seconds=60.0,
+        max_data_age_seconds=15.0,
         confirmation_seconds=600,
         max_confirmation_gap_seconds=60,
     )
@@ -1741,7 +1755,12 @@ def _index_snapshot(
         "target": result.get("target"),
         "signal_only": True,
     }
-    option_age_seconds = next((item.get("age_seconds") for item in chain_payload if item.get("strike") == result.get("strike")), None)
+    selected_kind = str(selected.get("option_type") or "").upper() if selected else ""
+    option_age_seconds = next((
+        item.get("age_seconds") for item in chain_payload
+        if item.get("strike") == result.get("strike")
+        and str(item.get("option_type") or "").upper() == selected_kind
+    ), None)
     live_validation = _live_validation_contract(result, engine_layers, option_age_seconds)
     if live_validation["verdict"] != "PASS":
         if result.get("decision") in ("CALL BUY", "PUT BUY"):
@@ -2925,7 +2944,11 @@ def _get_signals_uncached(force: bool = False) -> dict[str, Any]:
             by_exchange.setdefault(str(contract["exchange"]), []).append((index, contract))
         for exchange, contracts in by_exchange.items():
             try:
-                batch = _quotes(adapter, exchange, [str(contract["token"]) for _, contract in contracts])
+                batch = _quotes(
+                    adapter, exchange,
+                    [str(contract["token"]) for _, contract in contracts],
+                    require_depth=False, max_stream_age_seconds=15.0,
+                )
                 for index, contract in contracts:
                     quote = batch.get(str(contract["token"]))
                     if quote is not None:
@@ -2959,7 +2982,10 @@ def _get_signals_uncached(force: bool = False) -> dict[str, Any]:
                 }
                 try:
                     index_config = INDEXES[index]
-                    fallback_quotes = _quotes(adapter, index_config["exchange"], [str(index_config["token"])])
+                    fallback_quotes = _quotes(
+                        adapter, index_config["exchange"], [str(index_config["token"])],
+                        require_depth=False, max_stream_age_seconds=15.0,
+                    )
                     spot_fallback = fallback_quotes.get(str(index_config["token"]))
                     if spot_fallback is None:
                         spot_fallback = next((value for key, value in fallback_quotes.items() if str(key) == str(index_config["token"])), None)
