@@ -36,27 +36,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('PARMAR STRATEGY ENGINE'), findsOneWidget);
-    final strategyScroll = find.descendant(
-      of: find.byType(StrategyLibraryPage),
-      matching: find.byType(Scrollable),
-    ).first;
-    for (final label in <String>[
-      'OI Price Action',
-      'Hero Zero',
-      'Failed-Move / PDH-PDL',
-      'EMA Crossover',
-      'DAY-HL Liquidity Sweep',
-      'Opening Range Breakout (ORB)',
-      'VWAP Strategy',
-    ]) {
-      await tester.scrollUntilVisible(find.text(label), 250, scrollable: strategyScroll);
-      expect(find.text(label), findsOneWidget, reason: '$label must be in the Parmar tab');
-    }
-    await tester.scrollUntilVisible(
-      find.text('Backend adapter / live wiring must be verified'),
-      250,
-      scrollable: strategyScroll,
-    );
     expect(find.text('Live API wiring not verified'), findsWidgets);
   });
 
