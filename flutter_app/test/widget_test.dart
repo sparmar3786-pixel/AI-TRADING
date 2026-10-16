@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ai_trading_signal/main.dart';
-import 'package:ai_trading_signal/strategy_library_page.dart';
 
 void main() {
   testWidgets('Trading app starts with strategy tab and no AI tabs', (tester) async {
