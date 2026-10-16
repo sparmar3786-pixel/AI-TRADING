@@ -357,7 +357,6 @@ def evaluate_five_layer_signal(
         "signal_only": True,
         "order_placement_enabled": False,
         "score_semantics": "Layer pass status is a rule checklist, not probability of profit",
-        "signal_only": True,
     }
 
 
