@@ -313,4 +313,49 @@ void main() {
     // Layer-level PASS labels may be present; the overall quant verdict must stay WAIT.
   });
 
+  testWidgets('Quant Engine rejects conflicting top-level and nested stability states', (tester) async {
+    tester.view.physicalSize = const Size(1200, 4000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final timestamp = DateTime.now().toUtc().toIso8601String();
+    final since = DateTime.now().toUtc().subtract(const Duration(seconds: 700)).toIso8601String();
+    final layers = <String, dynamic>{
+      'data_quality': {'name': 'Data freshness', 'status': 'PASS', 'detail': 'Fresh timestamp.'},
+      'trend_sentiment': {'name': 'Trend & sentiment', 'status': 'PASS', 'detail': 'Trend aligned.'},
+      'order_flow': {'name': 'Order-flow validation', 'status': 'PASS', 'detail': 'Depth valid.'},
+      'option_selection': {'name': 'Option selection & liquidity', 'status': 'PASS', 'detail': 'Contract valid.'},
+      'risk_levels': {'name': 'Risk & 10-minute stability', 'status': 'PASS', 'detail': 'Risk levels valid.'},
+    };
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: QuantEnginePage(
+          selectedIndex: 'NIFTY',
+          signals: {
+            'NIFTY': {
+              'decision': 'CALL BUY',
+              'signal_stability': {
+                'state': 'BLOCKED', 'required_seconds': 600, 'since_utc': since,
+              },
+              'quant_engine': {
+                'layers': layers, 'decision': 'CALL BUY', 'timestamp': timestamp,
+                'data_fresh': true,
+                'confirmation': {'state': 'CONFIRMED', 'required_seconds': 600},
+              },
+            },
+          },
+          market: {'NIFTY': {'live': true, 'age_seconds': 1}},
+          marketOpen: true,
+          onIndexChanged: (_) {},
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('WAIT'), findsOneWidget);
+    expect(find.textContaining('timer unverified'), findsNothing);
+    expect(find.textContaining('Backend says CONFIRMED, but the 600-second timer evidence is missing'), findsOneWidget);
+  });
+
 }
