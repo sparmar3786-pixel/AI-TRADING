@@ -38,6 +38,23 @@ Map<String, dynamic> _response({
           'selection_grade': 'A', 'strike': 25000, 'expiry': expiry,
           'entry': entry, 'exit': target, 'stop_loss': stop, 'target': target,
         },
+        'hero_zero': <String, dynamic>{
+          'candidate_decision': 'CALL BUY',
+          'decision': 'WAIT',
+          'strike': 25100,
+          'expiry': expiry,
+          'option_side': 'CE',
+          'entry': 10,
+          'stop_loss': 5,
+          'target': 20,
+          'data_fresh': true,
+          'live_validation': <String, dynamic>{
+            'verdict': 'CANDIDATE_ONLY',
+            'decision': 'WAIT',
+            'blocks': <String>[],
+          },
+          'guards': <String>['DOWNSTREAM_RISK_GATE_REQUIRED'],
+        },
       },
     },
     'trade_plans': <Map<String, dynamic>>[
@@ -147,6 +164,29 @@ void main() {
       apiOnline: true, signalsEndpointOnline: true, marketOpen: true,
       marketRow: <String, dynamic>{'live': true, 'age_seconds': 1},
     ), isTrue);
+  });
+
+  test('stale parent index data clears nested Hero Zero candidate levels too', () {
+    final result = applyServerSignalSafetyGate(_response(live: false));
+    final signal = (result['signals'] as Map)['NIFTY'] as Map;
+    final heroZero = signal['hero_zero'] as Map;
+    expect(heroZero['candidate_decision'], isNull);
+    expect(heroZero['strike'], isNull);
+    expect(heroZero['expiry'], isNull);
+    expect(heroZero['entry'], isNull);
+    expect(heroZero['stop_loss'], isNull);
+    expect(heroZero['target'], isNull);
+    expect(heroZero['live_validation']['verdict'], 'BLOCKED');
+  });
+
+  test('fresh Hero Zero remains candidate-only, never a canonical actionable signal', () {
+    final result = applyServerSignalSafetyGate(_response());
+    final signal = (result['signals'] as Map)['NIFTY'] as Map;
+    final heroZero = signal['hero_zero'] as Map;
+    expect(heroZero['candidate_decision'], 'CALL BUY');
+    expect(heroZero['strike'], 25100);
+    expect(heroZero['live_validation']['verdict'], 'CANDIDATE_ONLY');
+    expect(signal['decision'], 'CALL BUY');
   });
 
 }

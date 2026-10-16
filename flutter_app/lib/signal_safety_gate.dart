@@ -18,6 +18,45 @@ Map<String, dynamic> applyServerSignalSafetyGate(Map<String, dynamic> response) 
     final guards = (row['guards'] as List?) ?? const <dynamic>[];
     final marketRow = Map<String, dynamic>.from((market[entry.key] ?? market[index]) as Map? ?? const {});
     final quoteAge = _safeFiniteNumber(marketRow['age_seconds']);
+
+    // Hero Zero is a separate candidate (never an order), but its visible
+    // premium/strike levels must also disappear when the parent index snapshot
+    // is stale, unverified, or older than the allowed quote-age window.
+    final heroZeroValue = row['hero_zero'];
+    if (heroZeroValue is Map) {
+      final heroZero = Map<String, dynamic>.from(heroZeroValue);
+      final heroFresh = responseLive &&
+          marketRow['live'] == true &&
+          quoteAge != null &&
+          quoteAge >= 0 &&
+          quoteAge <= 60 &&
+          row['data_fresh'] == true &&
+          heroZero['data_fresh'] == true;
+      if (!heroFresh) {
+        for (final key in const [
+          'strike', 'expiry', 'entry', 'exit', 'stop_loss', 'target',
+          'option_type', 'option_side',
+        ]) {
+          heroZero[key] = null;
+        }
+        heroZero['candidate_decision'] = null;
+        heroZero['decision'] = 'WAIT';
+        heroZero['data_fresh'] = false;
+        final heroValidation = Map<String, dynamic>.from(
+          heroZero['live_validation'] as Map? ?? const {},
+        );
+        heroValidation['verdict'] = 'BLOCKED';
+        heroValidation['decision'] = 'WAIT';
+        final heroBlocks = List<dynamic>.from(heroValidation['blocks'] as List? ?? const []);
+        heroBlocks.add('HERO_ZERO_BLOCKED_STALE_OR_UNVERIFIED_PARENT_DATA');
+        heroValidation['blocks'] = heroBlocks.map((value) => value.toString()).toSet().toList();
+        heroZero['live_validation'] = heroValidation;
+        final heroGuards = List<dynamic>.from(heroZero['guards'] as List? ?? const []);
+        heroGuards.add('HERO_ZERO_STALE_OR_UNVERIFIED_PARENT_DATA');
+        heroZero['guards'] = heroGuards.map((value) => value.toString()).toSet().toList();
+      }
+      row['hero_zero'] = heroZero;
+    }
     final strike = _safeFiniteNumber(row['strike']);
     final entryPrice = _safeFiniteNumber(row['entry']);
     final stop = _safeFiniteNumber(row['stop_loss']);
