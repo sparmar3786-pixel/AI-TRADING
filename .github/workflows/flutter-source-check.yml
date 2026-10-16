@@ -39,6 +39,10 @@ jobs:
             echo "Repository-link UI or repository URLs remain in active Flutter source."
             exit 1
           fi
+          if grep -niE 'stream_chat_flutter_ai|llama_flutter_android|gguf|qwen|llama|openrouter|nvidia|gemini|ai[_-]provider|ai[_-]chat' flutter_app/pubspec.yaml; then
+            echo "AI/model dependency remains in APK pubspec.yaml."
+            exit 1
+          fi
           if grep -RniE 'llama_flutter_android|LlamaController|file_picker|\\.gguf|GGUF model|offline Qwen' flutter_app/lib flutter_app/pubspec.yaml; then
             echo "On-device GGUF/Qwen model code or dependency remains in the APK source."
             exit 1
