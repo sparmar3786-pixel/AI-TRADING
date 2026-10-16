@@ -49,9 +49,11 @@ void main() {
       'Opening Range Breakout (ORB)',
       'VWAP Strategy',
     ]) {
-      final labelFinder = (label == 'Opening Range Breakout (ORB)' || label == 'VWAP Strategy')
-          ? find.text(label).last
-          : find.text(label);
+      final labelFinder = label == 'Opening Range Breakout (ORB)'
+          ? find.text('Source: quant/orb_engine.py')
+          : (label == 'VWAP Strategy'
+              ? find.text('Source: quant/vwap_strategy.py')
+              : find.text(label));
       await tester.scrollUntilVisible(labelFinder, 250, scrollable: strategyScroll);
       expect(labelFinder, findsOneWidget, reason: '$label must be in the Strategies tab');
     }
