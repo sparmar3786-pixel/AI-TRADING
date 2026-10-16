@@ -11,7 +11,7 @@ void main() {
     expect(tabs, contains('Dashboard'));
     expect(tabs, contains('Market'));
     expect(tabs, contains('Signals'));
-    expect(tabs, contains('Strategies'));
+    expect(tabs, contains('Parmar'));
     expect(tabs, contains('API'));
     expect(tabs, isNot(contains('AI Access')));
     expect(tabs, isNot(contains('AI Chat')));
@@ -21,21 +21,21 @@ void main() {
     expect(find.byKey(const ValueKey('open-navigation-menu')), findsOneWidget);
   });
 
-  testWidgets('Strategies tab lists all known engines and discloses integration limits', (tester) async {
+  testWidgets('Parmar tab lists all known engines and discloses integration limits', (tester) async {
     await tester.pumpWidget(const FreshApp());
     await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(find.byKey(const ValueKey('open-navigation-menu')));
     await tester.pumpAndSettle();
     final drawerScroll = find.descendant(of: find.byType(Drawer), matching: find.byType(Scrollable)).first;
     await tester.scrollUntilVisible(
-      find.byKey(const ValueKey('drawer-tab-Strategies')),
+      find.byKey(const ValueKey('drawer-tab-Parmar')),
       250,
       scrollable: drawerScroll,
     );
-    await tester.tap(find.byKey(const ValueKey('drawer-tab-Strategies')));
+    await tester.tap(find.byKey(const ValueKey('drawer-tab-Parmar')));
     await tester.pumpAndSettle();
 
-    expect(find.text('STRATEGY LIBRARY'), findsOneWidget);
+    expect(find.text('PARMAR STRATEGY ENGINE'), findsOneWidget);
     final strategyScroll = find.descendant(
       of: find.byType(StrategyLibraryPage),
       matching: find.byType(Scrollable),
@@ -50,10 +50,10 @@ void main() {
       'VWAP Strategy',
     ]) {
       await tester.scrollUntilVisible(find.text(label), 250, scrollable: strategyScroll);
-      expect(find.text(label), findsOneWidget, reason: '$label must be in the Strategies tab');
+      expect(find.text(label), findsOneWidget, reason: '$label must be in the Parmar tab');
     }
     await tester.scrollUntilVisible(
-      find.text('Live API wiring not verified'),
+      find.text('Backend adapter / live wiring must be verified'),
       250,
       scrollable: strategyScroll,
     );
