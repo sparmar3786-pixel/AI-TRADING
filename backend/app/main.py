@@ -1482,6 +1482,44 @@ def _completed_candle_rows(
             completed.append(row)
     return completed
 
+def _completed_source_candle_rows(
+    rows: list[Any],
+    timeframe_minutes: int = 5,
+    *,
+    now: datetime | None = None,
+) -> list[list[Any]]:
+    """Normalize broker OHLCV rows and drop incomplete/invalid source candles."""
+    normalized: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, (list, tuple)) or len(row) < 6:
+            continue
+        stamp = _iso(row[0])
+        values = [_number(row[index]) for index in (1, 2, 3, 4)]
+        opened, high, low, closed = values
+        volume = _number(row[5])
+        if (
+            not stamp
+            or any(value is None or value <= 0 for value in values)
+            or high < low
+            or not (low <= opened <= high and low <= closed <= high)
+            or (volume is not None and volume < 0)
+        ):
+            continue
+        normalized.append({
+            "timestamp": stamp,
+            "open": opened,
+            "high": high,
+            "low": low,
+            "close": closed,
+            "volume": volume,
+        })
+    completed = _completed_candle_rows(normalized, timeframe_minutes, now=now)
+    return [
+        [row["timestamp"], row["open"], row["high"], row["low"], row["close"], row["volume"]]
+        for row in completed
+    ]
+
+
 
 def _index_snapshot(
     adapter: AngelOneReadOnly,
@@ -1516,7 +1554,12 @@ def _index_snapshot(
     if not spot_ts:
         raise RuntimeError("Angel One quote omitted its exchange feed timestamp; fail-closed freshness gate")
     candle_result = candle_future.result()
-    candle_rows = candle_result.get("candles") or []
+    # Every deterministic indicator/trend/signal calculation consumes completed
+    # exchange candles only. Do this before deriving closes/timeframes, not just
+    # later when preparing the chart payload.
+    candle_rows = _completed_source_candle_rows(
+        candle_result.get("candles") or [], timeframe_minutes=5
+    )
     try:
         daily_candle_rows = (daily_future.result(timeout=15).get("candles") or [])
     except Exception:
@@ -3035,7 +3078,16 @@ def _get_signals_uncached(force: bool = False) -> dict[str, Any]:
                                 chart_closes.append(closed)
                                 chart_highs.append(high)
                                 chart_lows.append(low)
+                            # Keep fallback charts/indicators aligned to completed bars.
+                            chart_rows = _completed_candle_rows(chart_rows, timeframe_minutes=5)
                             chart_rows = chart_rows[-250:]
+                            chart_closes = [row["close"] for row in chart_rows]
+                            chart_highs = [row["high"] for row in chart_rows]
+                            chart_lows = [row["low"] for row in chart_rows]
+                            completed_indicator_rows = [
+                                [row["timestamp"], row["open"], row["high"], row["low"], row["close"], row["volume"]]
+                                for row in chart_rows
+                            ]
                             chart_1h_rows = _aggregate_hourly_chart_rows(chart_rows)
                             chart_1d_rows: list[dict[str, Any]] = []
                             try:
@@ -3077,7 +3129,9 @@ def _get_signals_uncached(force: bool = False) -> dict[str, Any]:
                                     })
                             market_row["timeframes"] = {"1m": [], "5m": chart_rows, "15m": chart_15m_rows, "1H": chart_1h_rows, "1D": chart_1d_rows, "1W": chart_1w_rows}
                             if len(chart_closes) >= 30:
-                                market_row["indicators"] = _indicator_snapshot(chart_closes, candle_payload.get("candles") or [], [])
+                                market_row["indicators"] = _indicator_snapshot(
+                                    chart_closes, completed_indicator_rows, []
+                                )
                         except Exception:
                             # Missing history remains missing; the valid spot quote is retained.
                             pass
