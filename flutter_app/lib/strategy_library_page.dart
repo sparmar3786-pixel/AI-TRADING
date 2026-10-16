@@ -3,7 +3,10 @@ import 'package:flutter/material.dart';
 /// Makes the strategy inventory visible without falsely presenting source files
 /// as live, validated or order-ready strategies.
 class StrategyLibraryPage extends StatelessWidget {
-  const StrategyLibraryPage({super.key});
+  const StrategyLibraryPage({this.signals = const {}, this.selectedIndex = 'NIFTY', super.key});
+
+  final Map<String, dynamic> signals;
+  final String selectedIndex;
 
   static const _items = <_StrategyItem>[
     _StrategyItem(
@@ -58,16 +61,22 @@ class StrategyLibraryPage extends StatelessWidget {
   ];
 
   @override
-  Widget build(BuildContext context) => ListView(
+  Widget build(BuildContext context) {
+    final signal = Map<String, dynamic>.from(signals[selectedIndex] as Map? ?? const {});
+    final candidates = Map<String, dynamic>.from(signal['strategy_candidates'] as Map? ?? const {});
+    return ListView(
     padding: const EdgeInsets.all(12),
     children: [
       const Text('STRATEGY LIBRARY', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
       const SizedBox(height: 6),
       const Text(
-        'Source presence is not live integration. The five listed strategy/detector sources are not executed by Flutter itself: live APK signals require verified backend routing, fresh-data checks, risk validation and the 10-minute stability gate.',
+        'Source presence is not live integration. ORB/VWAP candidates are read from the shared backend signal response; they remain WAIT until option-premium mapping, five-layer validation, risk checks and the 10-minute stability gate pass.',
         style: TextStyle(color: Colors.white70),
       ),
       const SizedBox(height: 12),
+      _CandidateCard(title: 'Opening Range Breakout (ORB)', candidate: Map<String, dynamic>.from(candidates['orb'] as Map? ?? const {})),
+      _CandidateCard(title: 'VWAP Strategy', candidate: Map<String, dynamic>.from(candidates['vwap'] as Map? ?? const {})),
+      const SizedBox(height: 4),
       for (final item in _items) _StrategyCard(item: item),
       const SizedBox(height: 8),
       const Card(
@@ -81,6 +90,54 @@ class StrategyLibraryPage extends StatelessWidget {
       ),
     ],
   );
+  }
+}
+
+class _CandidateCard extends StatelessWidget {
+  const _CandidateCard({required this.title, required this.candidate});
+  final String title;
+  final Map<String, dynamic> candidate;
+
+  @override
+  Widget build(BuildContext context) {
+    final direction = (candidate['candidate_decision'] ?? 'WAIT').toString();
+    final approved = (candidate['decision'] ?? 'WAIT').toString();
+    final fresh = candidate['data_fresh'] == true;
+    final reasons = (candidate['reasons'] as List? ?? const []).map((v) => v.toString()).toList();
+    final guards = (candidate['guards'] as List? ?? const []).map((v) => v.toString()).toList();
+    final validation = Map<String, dynamic>.from(candidate['live_validation'] as Map? ?? const {});
+    final blocks = (validation['blocks'] as List? ?? const []).map((v) => v.toString()).toList();
+    String value(dynamic raw) => raw == null ? '—' : raw.toString();
+    return Card(
+      margin: const EdgeInsets.only(bottom: 9),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Expanded(child: Text(title, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            Text(fresh ? 'FRESH INPUT' : 'DATA REQUIRED',
+              style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900,
+                color: fresh ? Colors.greenAccent : Colors.orangeAccent)),
+          ]),
+          const SizedBox(height: 6),
+          Text('Candidate: $direction • Approved decision: $approved',
+            style: const TextStyle(fontWeight: FontWeight.w800)),
+          Text('Underlying entry: ${value(candidate['entry'])} • SL: ${value(candidate['stop_loss'])} • Target: ${value(candidate['target'])}',
+            style: const TextStyle(fontSize: 12, color: Colors.white70)),
+          const SizedBox(height: 5),
+          Text('Reason: ${reasons.isEmpty ? 'No candidate result returned by backend.' : reasons.join(' • ')}',
+            style: const TextStyle(fontSize: 11, color: Colors.white70)),
+          if (blocks.isNotEmpty)
+            Text('Blocked by: ${blocks.join(' • ')}', style: const TextStyle(fontSize: 11, color: Colors.orangeAccent)),
+          if (guards.isNotEmpty)
+            Text('Guards: ${guards.join(' • ')}', style: const TextStyle(fontSize: 10, color: Colors.white54)),
+          const SizedBox(height: 4),
+          const Text('Underlying spot levels only—not option-premium prices. Candidate is never actionable from this card.',
+            style: TextStyle(fontSize: 10, color: Colors.orangeAccent)),
+        ]),
+      ),
+    );
+  }
 }
 
 class _StrategyItem {
