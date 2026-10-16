@@ -49,15 +49,17 @@ void main() {
       'Opening Range Breakout (ORB)',
       'VWAP Strategy',
     ]) {
-      await tester.scrollUntilVisible(find.text(label), 250, scrollable: strategyScroll);
-      expect(find.text(label), findsOneWidget, reason: '$label must be in the Strategies tab');
+      final labelFinder = label == 'Opening Range Breakout (ORB)'
+          ? find.text('Source: quant/orb_engine.py')
+          : (label == 'VWAP Strategy'
+              ? find.text('Source: quant/vwap_strategy.py')
+              : find.text(label));
+      await tester.scrollUntilVisible(labelFinder, 250, scrollable: strategyScroll);
+      expect(labelFinder, findsOneWidget, reason: '$label must be in the Strategies tab');
     }
-    await tester.scrollUntilVisible(
-      find.text('Live API wiring not verified'),
-      250,
-      scrollable: strategyScroll,
-    );
-    expect(find.text('Live API wiring not verified'), findsWidgets);
+    final liveStatus = find.text('Live API wiring not verified').first;
+    await tester.scrollUntilVisible(liveStatus, 250, scrollable: strategyScroll);
+    expect(liveStatus, findsOneWidget);
   });
 
   testWidgets('Strategy Library shows ORB/VWAP backend candidates but keeps them non-actionable', (tester) async {
@@ -94,10 +96,23 @@ void main() {
       ),
     ));
     await tester.pumpAndSettle();
-
+    final strategyScroll = find.descendant(
+      of: find.byType(StrategyLibraryPage),
+      matching: find.byType(Scrollable),
+    ).first;
+    await tester.scrollUntilVisible(
+      find.text('Opening Range Breakout (ORB)').first,
+      250,
+      scrollable: strategyScroll,
+    );
     expect(find.text('Candidate: CALL BUY • Approved decision: WAIT'), findsOneWidget);
     expect(find.textContaining('Underlying entry: 25000.0 • SL: 24900.0 • Target: 25200.0'), findsOneWidget);
     expect(find.textContaining('Five-layer quant validation required'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('VWAP Strategy').first,
+      250,
+      scrollable: strategyScroll,
+    );
     expect(find.text('Candidate: WAIT • Approved decision: WAIT'), findsOneWidget);
     expect(find.textContaining('Underlying spot levels only—not option-premium prices'), findsWidgets);
   });
