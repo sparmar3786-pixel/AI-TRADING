@@ -7,6 +7,7 @@ class StrategyLibraryPage extends StatelessWidget {
 
   static const _items = <_StrategyItem>[
     _StrategyItem(
+      key: 'strategy-card-oi-price-action',
       name: 'OI Price Action',
       source: 'quant/oi_price_action_engine.py',
       state: 'ENGINE SOURCE PRESENT',
@@ -14,6 +15,7 @@ class StrategyLibraryPage extends StatelessWidget {
       detail: 'Uses option-chain OI/PCR, price structure and candle/ATR confluence. Missing/stale OI data must return WAIT.',
     ),
     _StrategyItem(
+      key: 'strategy-card-hero-zero',
       name: 'Hero Zero',
       source: 'quant/hero_zero.py',
       state: 'ENGINE SOURCE PRESENT',
@@ -21,6 +23,7 @@ class StrategyLibraryPage extends StatelessWidget {
       detail: 'High-risk expiry-day setup with time-window and premium guards. Candidate only; never an order approval.',
     ),
     _StrategyItem(
+      key: 'strategy-card-failed-move-pdh-pdl',
       name: 'Failed-Move / PDH-PDL',
       source: 'quant/failed_move_fade.py',
       state: 'SOURCE BUNDLED',
@@ -28,6 +31,7 @@ class StrategyLibraryPage extends StatelessWidget {
       detail: 'Detects acceptance beyond previous-day high/low. Stale candles or failed validation must result in WAIT.',
     ),
     _StrategyItem(
+      key: 'strategy-card-ema-crossover',
       name: 'EMA Crossover',
       source: 'quant/ema_quant_engine.py',
       state: 'SOURCE BUNDLED',
@@ -35,6 +39,7 @@ class StrategyLibraryPage extends StatelessWidget {
       detail: 'EMA trend candidate with RSI/ATR filters. Must be merged, connected to the backend and tested before live use.',
     ),
     _StrategyItem(
+      key: 'strategy-card-day-hl-liquidity-sweep',
       name: 'DAY-HL Liquidity Sweep',
       source: 'quant/day_hl_liquidity.py',
       state: 'DETECTOR SOURCE PRESENT',
@@ -42,6 +47,7 @@ class StrategyLibraryPage extends StatelessWidget {
       detail: 'Day-high/day-low liquidity event detector. Needs confirmed entry, invalidation, exit and risk mapping.',
     ),
     _StrategyItem(
+      key: 'strategy-card-orb',
       name: 'Opening Range Breakout (ORB)',
       source: 'No verified standalone engine on main',
       state: 'NOT IMPLEMENTED',
@@ -49,6 +55,7 @@ class StrategyLibraryPage extends StatelessWidget {
       detail: 'Must not be presented as active until implementation, tests and backend routing are present.',
     ),
     _StrategyItem(
+      key: 'strategy-card-vwap',
       name: 'VWAP Strategy',
       source: 'Indicator output is not a strategy engine',
       state: 'NOT IMPLEMENTED',
@@ -59,6 +66,7 @@ class StrategyLibraryPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ListView(
+    key: const ValueKey('strategy-library-list'),
     padding: const EdgeInsets.all(12),
     children: [
       const Text('PARMAR STRATEGY ENGINE', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
@@ -93,7 +101,7 @@ class StrategyLibraryPage extends StatelessWidget {
         style: TextStyle(color: Colors.white70),
       ),
       const SizedBox(height: 12),
-      for (final item in _items) _StrategyCard(item: item),
+      for (final item in _items) _StrategyCard(key: ValueKey(item.key), item: item),
       const SizedBox(height: 8),
       const Card(
         child: Padding(
@@ -110,12 +118,14 @@ class StrategyLibraryPage extends StatelessWidget {
 
 class _StrategyItem {
   const _StrategyItem({
+    required this.key,
     required this.name,
     required this.source,
     required this.state,
     required this.live,
     required this.detail,
   });
+  final String key;
   final String name;
   final String source;
   final String state;
@@ -132,6 +142,7 @@ class _StrategyCard extends StatelessWidget {
     final ready = item.state.contains('SOURCE PRESENT');
     final color = ready ? Colors.orangeAccent : Colors.redAccent;
     return Card(
+      key: key,
       margin: const EdgeInsets.only(bottom: 9),
       child: Padding(
         padding: const EdgeInsets.all(12),
