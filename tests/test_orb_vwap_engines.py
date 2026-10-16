@@ -46,10 +46,11 @@ class ORBEngineTests(unittest.TestCase):
 
 class VWAPEngineTests(unittest.TestCase):
     def test_vwap_cross_candidate_has_risk_levels(self):
-        frame = candles([100, 99.8, 99.5, 99.4, 99.3, 99.2, 100.5, 101.5],
-                        [100, 100, 110, 120, 130, 150, 250, 300])
+        closes = [100, 99.8, 99.5, 99.4, 99.3, 99.2] + [99.2] * 11 + [100.5, 101.5]
+        volumes = [100, 100, 110, 120, 130, 150] + [100] * 11 + [250, 300]
+        frame = candles(closes, volumes)
         result = VWAPStrategyEngine(use_volume_filter=True, volume_mult=1.0).generate(
-            frame, 25012, datetime(2026, 10, 15, 9, 51, tzinfo=IST))
+            frame, 25012, datetime(2026, 10, 15, 10, 46, tzinfo=IST))
         self.assertEqual(result.candidate_decision, "CALL BUY")
         self.assertIsNotNone(result.vwap)
         self.assertLess(result.stop_loss, result.entry)
@@ -57,8 +58,9 @@ class VWAPEngineTests(unittest.TestCase):
         self.assertEqual(result.live_validation["verdict"], "PENDING")
 
     def test_missing_volume_fails_closed(self):
-        frame = candles([100, 99.8, 99.5, 99.4, 99.3, 99.6, 100.5, 101.5]).drop(columns="volume")
-        result = VWAPStrategyEngine().generate(frame, 25012, datetime(2026, 10, 15, 9, 51, tzinfo=IST))
+        closes = [100, 99.8, 99.5, 99.4, 99.3, 99.2] + [99.2] * 11 + [100.5, 101.5]
+        frame = candles(closes).drop(columns="volume")
+        result = VWAPStrategyEngine().generate(frame, 25012, datetime(2026, 10, 15, 10, 46, tzinfo=IST))
         self.assertEqual(result.decision, "WAIT")
 
     def test_outside_window_waits(self):
