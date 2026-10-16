@@ -40,7 +40,6 @@ class EvaluateRequest(BaseModel):
     market_snapshot: dict[str, Any] = Field(default_factory=dict)
 
 
-@router.get("/strategies")
 _ENGINE_MODULES = {
     "oi_price_action": ("quant.oi_price_action_engine", "SOURCE_ONLY"),
     "hero_zero": ("quant.hero_zero", "SOURCE_ONLY"),
@@ -61,6 +60,7 @@ def _module_available(module_name: str | None) -> bool:
         return False
 
 
+@router.get("/strategies")
 def list_parmar_strategies(x_device_id: str = Header(default="")) -> dict[str, Any]:
     _check_device(x_device_id)
     strategies = []
