@@ -238,6 +238,20 @@ class FreshApi {
         'notes': notes,
       });
 
+  /// Parmar suite endpoints live on the AI-TRADING signal backend.
+  Future<Map<String, dynamic>> parmarStrategies() =>
+      FreshApi.signal().getJson('/v1/parmar/strategies');
+
+  Future<Map<String, dynamic>> evaluateParmarStrategy({
+    required String strategyId,
+    required String index,
+    Map<String, dynamic> marketSnapshot = const <String, dynamic>{},
+  }) => FreshApi.signal().postJson('/v1/parmar/evaluate', {
+        'strategy_id': strategyId,
+        'index': index,
+        'market_snapshot': marketSnapshot,
+      });
+
   /// Historical candle fetches are bounded server-side to 45 seconds.
   Future<Map<String, dynamic>> historicalBacktest(
     Map<String, dynamic> body,
