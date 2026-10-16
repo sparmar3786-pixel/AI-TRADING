@@ -61,12 +61,9 @@ void main() {
       );
     }
 
-    // Present on multiple SOURCE BUNDLED cards (e.g. OI Price Action).
-    expect(
-      find.textContaining('Live API wiring not verified'),
-      findsWidgets,
-      reason: 'Strategy cards must disclose that live API wiring is unverified',
-    );
+    expect(find.textContaining('SOURCE BUNDLED'), findsWidgets);
+    expect(find.textContaining('research inventory'), findsOneWidget);
+    expect(find.textContaining('NOT IMPLEMENTED'), findsWidgets);
   });
 
   testWidgets('SMC, MCX and Order Flow chart pages are completely absent', (tester) async {
