@@ -181,14 +181,14 @@ jobs:
         run: flutter test
       - name: Build release APK
         working-directory: flutter_app
-        run: flutter build apk --release --no-tree-shake-icons --dart-define=BACKEND_URL=https://ai-trading-signals-api-production.up.railway.app --dart-define=SIGNAL_BACKEND_URL=https://ai-trading-signals-api-production.up.railway.app
+        run: flutter build apk --release --no-tree-shake-icons --dart-define=BACKEND_URL=https://nse-algo-backend-final-production.up.railway.app --dart-define=SIGNAL_BACKEND_URL=https://ai-trading-signals-api-production.up.railway.app
       - name: Build optimized ARM64 APK
         working-directory: flutter_app
         run: |
           set -euo pipefail
           APK_DIR="build/app/outputs/flutter-apk"
           cp "$APK_DIR/app-release.apk" /tmp/ai-trading-universal.apk
-          flutter build apk --release --split-per-abi --no-tree-shake-icons --dart-define=BACKEND_URL=https://ai-trading-signals-api-production.up.railway.app --dart-define=SIGNAL_BACKEND_URL=https://ai-trading-signals-api-production.up.railway.app
+          flutter build apk --release --split-per-abi --no-tree-shake-icons --dart-define=BACKEND_URL=https://nse-algo-backend-final-production.up.railway.app --dart-define=SIGNAL_BACKEND_URL=https://ai-trading-signals-api-production.up.railway.app
           test -s "$APK_DIR/app-arm64-v8a-release.apk"
           cp /tmp/ai-trading-universal.apk "$APK_DIR/app-release.apk"
           ls -lh "$APK_DIR/app-release.apk" "$APK_DIR/app-arm64-v8a-release.apk"
@@ -206,6 +206,10 @@ jobs:
             mapfile -t CODE_FILES < <(unzip -Z1 "$APK" | grep -E '(^classes[0-9]*[.]dex$|^lib/[^/]+/libapp[.]so$)' || true)
             test "${#CODE_FILES[@]}" -gt 0
             COMPILED_STRINGS=$(for file in "${CODE_FILES[@]}"; do unzip -p "$APK" "$file" | strings; done)
+            if printf '%s\\n' "$COMPILED_STRINGS" | grep -Ei 'stream_chat_flutter_ai|llama_flutter_android|LlamaController|[.]gguf|GGUF model|offline Qwen|OpenRouter|NVIDIA|Gemini|/v1/ai/|/v1/providers/ai|AI Access|AI Chat' >/dev/null; then
+              echo "AI provider/chat/model code found in $APK; APK must be AI-free."
+              exit 1
+            fi
             if printf '%s\n' "$COMPILED_STRINGS" | grep -Ei 'SMC Pro Chart|SMC Chart|Smart Money Concepts Chart|Order Flow & Footprint|Order Flow Chart|Footprint Chart|FOOTPRINT CHART|MCX|Commodities|CRUDEOIL|NATURALGAS|CommodityPage' >/dev/null; then
               echo "Removed SMC, Order Flow, or MCX UI found in $APK"
               exit 1
