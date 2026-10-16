@@ -134,7 +134,7 @@ class _StrategyItem {
 }
 
 class _StrategyCard extends StatelessWidget {
-  const _StrategyCard({required this.item});
+  const _StrategyCard({super.key, required this.item});
   final _StrategyItem item;
 
   @override
