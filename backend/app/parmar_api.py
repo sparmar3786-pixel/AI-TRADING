@@ -20,8 +20,8 @@ STRATEGIES: tuple[dict[str, Any], ...] = (
     {"id": "failed_move_pdh_pdl", "name": "Failed Move / PDH-PDL", "source": "quant/failed_move_fade.py", "status": "SOURCE_PRESENT_ADAPTER_PENDING"},
     {"id": "ema_crossover", "name": "EMA Crossover", "source": "quant/ema_quant_engine.py", "status": "SOURCE_PRESENT_ADAPTER_PENDING"},
     {"id": "day_hl_liquidity_sweep", "name": "Day HL Liquidity Sweep", "source": "quant/day_hl_liquidity.py", "status": "DETECTOR_ADAPTER_PENDING"},
-    {"id": "orb", "name": "Opening Range Breakout (ORB)", "source": "quant/orb_engine.py", "status": "SOURCE_PRESENT_ADAPTER_PENDING"},
-    {"id": "vwap", "name": "VWAP Strategy", "source": "quant/vwap_strategy.py", "status": "SOURCE_PRESENT_ADAPTER_PENDING"},
+    {"id": "orb", "name": "Opening Range Breakout (ORB)", "source": "quant/orb_engine.py", "status": "CANDIDATE_PIPELINE_WIRED_WAIT_GATED"},
+    {"id": "vwap", "name": "VWAP Strategy", "source": "quant/vwap_strategy.py", "status": "CANDIDATE_PIPELINE_WIRED_WAIT_GATED"},
 )
 _IDS = {item["id"] for item in STRATEGIES}
 
@@ -47,8 +47,8 @@ _ENGINE_MODULES = {
     "failed_move_pdh_pdl": ("quant.failed_move_fade", "SOURCE_ONLY"),
     "ema_crossover": ("quant.ema_quant_engine", "SOURCE_ONLY"),
     "day_hl_liquidity_sweep": ("quant.day_hl_liquidity", "DETECTOR_ONLY"),
-    "orb": ("quant.orb_engine", "SOURCE_ONLY"),
-    "vwap": ("quant.vwap_strategy", "SOURCE_ONLY"),
+    "orb": ("quant.orb_engine", "CANDIDATE_PIPELINE_WIRED_WAIT_GATED"),
+    "vwap": ("quant.vwap_strategy", "CANDIDATE_PIPELINE_WIRED_WAIT_GATED"),
 }
 
 
@@ -72,7 +72,12 @@ def list_parmar_strategies(x_device_id: str = Header(default="")) -> dict[str, A
         item["engine_module"] = module_name
         item["engine_loaded"] = available
         item["status"] = source_status if available else ("ENGINE_SOURCE_MISSING_IN_DEPLOYMENT" if module_name else "NOT_IMPLEMENTED")
-        item["live_api_wiring"] = "NOT_VERIFIED"
+        item["live_api_wiring"] = (
+            "CANDIDATE_PIPELINE_WIRED; ACTIONABILITY_NOT_VERIFIED"
+            if item["id"] in {"orb", "vwap"} else "NOT_VERIFIED"
+        )
+        if item["id"] in {"orb", "vwap"}:
+            item["candidate_route"] = "/v1/signals.strategy_candidates"
         item["actionable"] = False
         strategies.append(item)
     return {"status": "ok", "engine": "PARMAR", "count": len(strategies), "strategies": strategies}
@@ -92,8 +97,10 @@ def verify_strategy_wiring(strategy_id: str, x_device_id: str = Header(default="
         raise HTTPException(status_code=404, detail="Unknown Parmar strategy id")
     module_name, _ = _ENGINE_MODULES[strategy_id]
     engine_loaded = _module_available(module_name)
+    candidate_pipeline_wired = strategy_id in {"orb", "vwap"} and engine_loaded
     checks = {
         "backend_route_registered": True,
+        "candidate_pipeline_wired": candidate_pipeline_wired,
         "engine_module_available": engine_loaded,
         "fresh_live_market_data": False,
         "signal_contract_validated": False,
@@ -111,7 +118,8 @@ def verify_strategy_wiring(strategy_id: str, x_device_id: str = Header(default="
         "actionable": False,
         "checks": checks,
         "blockers": blockers,
-        "reason": "Diagnostic route and module presence do not prove fresh live feed, risk mapping, or end-to-end wiring.",
+        "candidate_route": "/v1/signals.strategy_candidates" if strategy_id in {"orb", "vwap"} else None,
+        "reason": "ORB/VWAP candidates are emitted by the canonical /v1/signals pipeline but remain non-actionable until fresh option mapping, five-layer validation, risk checks and server confirmation are proven." if strategy_id in {"orb", "vwap"} else "Diagnostic route and module presence do not prove fresh live feed, risk mapping, or end-to-end wiring.",
     }
 
 
@@ -122,8 +130,8 @@ def evaluate_parmar_strategy(body: EvaluateRequest, x_device_id: str = Header(de
     definition = next((item for item in STRATEGIES if item["id"] == strategy_id), None)
     if definition is None:
         raise HTTPException(status_code=404, detail="Unknown Parmar strategy id")
-    # No implicit adapter, no signal synthesis from caller JSON. This is safe
-    # until each real engine is explicitly connected to timestamped backend data.
+    # This direct endpoint deliberately refuses to trust caller-supplied snapshots.
+    # ORB/VWAP candidates are evaluated only by the canonical server-owned /v1/signals path.
     return {
         "status": "wait",
         "engine": "PARMAR",
@@ -135,8 +143,8 @@ def evaluate_parmar_strategy(body: EvaluateRequest, x_device_id: str = Header(de
         "stop_loss": None,
         "target": None,
         "strike": None,
-        "reasons": ["Engine adapter and verified live-data mapping are not yet registered."],
-        "guards": ["ADAPTER_NOT_REGISTERED", "NO_ACTIONABLE_SIGNAL"],
+        "reasons": [("Use the canonical /v1/signals strategy_candidates output; direct caller-supplied evaluation is disabled." if strategy_id in {"orb", "vwap"} else "Engine adapter and verified live-data mapping are not yet registered.")],
+        "guards": ["DIRECT_EVALUATE_DISABLED" if strategy_id in {"orb", "vwap"} else "ADAPTER_NOT_REGISTERED", "NO_ACTIONABLE_SIGNAL"],
         "live_validation": {
             "verdict": "FAIL",
             "decision": "WAIT",
