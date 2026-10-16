@@ -57,7 +57,7 @@ void main() {
       await tester.scrollUntilVisible(labelFinder, 250, scrollable: strategyScroll);
       expect(labelFinder, findsOneWidget, reason: '$label must be in the Strategies tab');
     }
-    final liveStatus = find.text('Live API wiring not verified').first;
+    final liveStatus = find.text('Expiry-only candidate; live API wiring not verified');
     await tester.scrollUntilVisible(liveStatus, 250, scrollable: strategyScroll);
     expect(liveStatus, findsOneWidget);
   });
@@ -101,7 +101,7 @@ void main() {
       matching: find.byType(Scrollable),
     ).first;
     await tester.scrollUntilVisible(
-      find.text('Opening Range Breakout (ORB)').first,
+      find.text('Candidate: CALL BUY • Approved decision: WAIT'),
       250,
       scrollable: strategyScroll,
     );
@@ -109,7 +109,7 @@ void main() {
     expect(find.textContaining('Underlying entry: 25000.0 • SL: 24900.0 • Target: 25200.0'), findsOneWidget);
     expect(find.textContaining('Five-layer quant validation required'), findsOneWidget);
     await tester.scrollUntilVisible(
-      find.text('VWAP Strategy').first,
+      find.text('Candidate: WAIT • Approved decision: WAIT'),
       250,
       scrollable: strategyScroll,
     );
