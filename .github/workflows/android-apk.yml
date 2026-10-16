@@ -130,13 +130,13 @@ jobs:
               anchor = "compileOptions {"
               if anchor not in s:
                   raise SystemExit("compileOptions block missing; cannot safely configure desugaring")
-              s = s.replace(anchor, anchor + "\\n        isCoreLibraryDesugaringEnabled = true", 1)
+              s = s.replace(anchor, anchor + "\n        isCoreLibraryDesugaringEnabled = true", 1)
           dep = 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")'
           if dep not in s:
               anchor = "dependencies {"
               if anchor not in s:
                   raise SystemExit("dependencies block missing; cannot safely add desugaring library")
-              s = s.replace(anchor, anchor + "\\n    " + dep, 1)
+              s = s.replace(anchor, anchor + "\n    " + dep, 1)
           p.write_text(s)
           PY
           grep -nE 'isCoreLibraryDesugaringEnabled|coreLibraryDesugaring' "$GRADLE"
