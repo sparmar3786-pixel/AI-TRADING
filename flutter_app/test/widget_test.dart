@@ -92,7 +92,9 @@ void main() {
     expect(find.textContaining('Exchange timestamp is stale.'), findsOneWidget);
     expect(find.textContaining('Bid/ask depth unavailable.'), findsOneWidget);
     expect(find.textContaining('Backend did not supply exactly five complete layer results'), findsNothing);
-    expect(find.text('DATA REQUIRED'), findsOneWidget);
+    expect(find.text('BLOCK'), findsOneWidget);
+    expect(find.text('CALL BUY'), findsNothing);
+    expect(find.text('PUT BUY'), findsNothing);
   });
 
   testWidgets('Quant Engine exposes missing backend reason while remaining DATA REQUIRED', (tester) async {
