@@ -142,7 +142,6 @@ class _StrategyCard extends StatelessWidget {
     final ready = item.state.contains('SOURCE PRESENT');
     final color = ready ? Colors.orangeAccent : Colors.redAccent;
     return Card(
-      key: key,
       margin: const EdgeInsets.only(bottom: 9),
       child: Padding(
         padding: const EdgeInsets.all(12),
