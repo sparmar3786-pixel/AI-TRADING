@@ -43,17 +43,17 @@ class StrategyLibraryPage extends StatelessWidget {
     ),
     _StrategyItem(
       name: 'Opening Range Breakout (ORB)',
-      source: 'No verified standalone engine on main',
-      state: 'NOT IMPLEMENTED',
-      live: 'Not active; no verified engine source',
-      detail: 'Must not be presented as active until implementation, tests and backend routing are present.',
+      source: 'quant/orb_engine.py',
+      state: 'ENGINE SOURCE PRESENT',
+      live: 'Candidate engine added; live API wiring not verified',
+      detail: '15-minute opening-range breakout with completed-candle and volume checks plus ATR risk levels. Candidate only until backend routing and live-data validation are proven.',
     ),
     _StrategyItem(
       name: 'VWAP Strategy',
-      source: 'Indicator output is not a strategy engine',
-      state: 'NOT IMPLEMENTED',
-      live: 'Not active; indicator does not prove entry/exit integration',
-      detail: 'Requires defined trend/mean-reversion rules, stops, targets and backtest validation.',
+      source: 'quant/vwap_strategy.py',
+      state: 'ENGINE SOURCE PRESENT',
+      live: 'Candidate engine added; live API wiring not verified',
+      detail: 'Session-reset VWAP cross with volume confirmation and ATR-based stop/target. Candidate only until backend routing and live-data validation are proven.',
     ),
   ];
 
