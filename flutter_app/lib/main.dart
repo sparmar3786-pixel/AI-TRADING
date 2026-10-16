@@ -105,9 +105,9 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     final rawSignals = Map<String, dynamic>.from(result['signals'] as Map? ?? const {});
     final stableIndices = <String>{};
     final now = DateTime.now().toUtc();
-    for (final entry in rawSignals.entries) {
-      final index = entry.key.toString().toUpperCase();
-      final row = Map<String, dynamic>.from(entry.value as Map? ?? const {});
+    for (final signalEntry in rawSignals.entries) {
+      final index = signalEntry.key.toString().toUpperCase();
+      final row = Map<String, dynamic>.from(signalEntry.value as Map? ?? const {});
       var decision = (row['decision'] ?? 'WAIT').toString().toUpperCase();
       final storageKey = 'trading_signal_gate_$index';
       final validation = Map<String, dynamic>.from(row['live_validation'] as Map? ?? const {});
@@ -163,7 +163,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       if (!isCandidate) {
         await prefs.remove(storageKey);
         row['signal_stability'] = <String, dynamic>{'state': 'NOT_ACTIONABLE', 'required_minutes': 10};
-        rawSignals[entry.key] = row;
+        rawSignals[signalEntry.key] = row;
         continue;
       }
       final candidateKey = '$decision|${row['strike']}|${row['option_side']}';
