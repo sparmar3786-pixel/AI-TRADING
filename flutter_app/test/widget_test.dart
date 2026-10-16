@@ -40,12 +40,17 @@ void main() {
     // .first/.last on generic Scrollable finders: drawer/tab navigators can
     // introduce additional scrollables or none may be mounted at this point.
     final strategyList = find.byKey(const ValueKey('strategy-library-list'));
+    final strategyScrollable = find.descendant(
+      of: strategyList,
+      matching: find.byType(Scrollable),
+    );
     final finalStrategyCard = find.byKey(const ValueKey('strategy-card-vwap'));
     expect(strategyList, findsOneWidget);
+    expect(strategyScrollable, findsOneWidget);
     await tester.scrollUntilVisible(
       finalStrategyCard,
       250,
-      scrollable: strategyList,
+      scrollable: strategyScrollable,
       maxScrolls: 100,
     );
     await tester.pumpAndSettle();
