@@ -63,7 +63,7 @@ Map<String, dynamic> applyServerSignalSafetyGate(Map<String, dynamic> response) 
     final target = _safeFiniteNumber(row['target']);
     final optionSide = (row['option_side'] ?? '').toString().trim().toUpperCase();
     final expiry = (row['expiry'] ?? '').toString().trim();
-    final expiryDate = DateTime.tryParse(expiry);
+    final expiryDate = _parseStrictExpiryDate(expiry);
     final wantsAction = decision == 'CALL BUY' || decision == 'PUT BUY';
     final sideMatches = decision == 'CALL BUY'
         ? optionSide == 'CE'
@@ -174,6 +174,46 @@ Map<String, dynamic> applyServerSignalSafetyGate(Map<String, dynamic> response) 
   result['trade_plans'] = plans;
   result['qualified_trade_count'] = plans.length;
   return result;
+}
+
+
+/// Parse option expiry strictly. DateTime.tryParse alone can normalize invalid
+/// calendar dates on some inputs, which must never make an option actionable.
+DateTime? _parseStrictExpiryDate(String value) {
+  final match = RegExp(r'^(\\d{4})-(\\d{2})-(\\d{2})
+  final parsed = value is num ? value.toDouble() : double.tryParse(value?.toString() ?? '');
+  if (parsed == null || !parsed.isFinite) return null;
+  return parsed;
+}
+
+
+/// True only for the currently selected index, not merely when any market in
+/// the shared response is live. A green status requires a timestamp-derived
+/// live flag and a bounded quote age during the exchange session.
+bool isSelectedIndexFeedLive({
+  required bool apiOnline,
+  required bool signalsEndpointOnline,
+  required bool marketOpen,
+  required Map<String, dynamic> marketRow,
+}) {
+  final age = _safeFiniteNumber(marketRow['age_seconds']);
+  return apiOnline &&
+      signalsEndpointOnline &&
+      marketOpen &&
+      marketRow['live'] == true &&
+      age != null &&
+      age >= 0 &&
+      age <= 60;
+}
+).firstMatch(value);
+  if (match == null) return null;
+  final year = int.tryParse(match.group(1)!);
+  final month = int.tryParse(match.group(2)!);
+  final day = int.tryParse(match.group(3)!);
+  if (year == null || month == null || day == null) return null;
+  final parsed = DateTime(year, month, day);
+  if (parsed.year != year || parsed.month != month || parsed.day != day) return null;
+  return parsed;
 }
 
 double? _safeFiniteNumber(dynamic value) {
