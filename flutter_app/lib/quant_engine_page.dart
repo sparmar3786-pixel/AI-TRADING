@@ -95,10 +95,33 @@ class QuantEnginePage extends StatelessWidget {
       (layer) => (layer['status'] ?? layer['verdict'] ?? '').toString().toUpperCase() == 'PASS',
     );
     final reportedStatus = (engine['decision'] ?? engine['verdict'] ?? engine['status'] ?? 'WAIT').toString().toUpperCase();
-    final confirmation = _map(engine['confirmation'] ?? signal['signal_stability']);
+    // Prefer server-owned stability metadata and merge the nested layer summary.
+    // A CONFIRMED label alone is insufficient if the 600-second timer cannot be verified.
+    final rootStability = _map(signal['signal_stability']);
+    final nestedConfirmation = _map(engine['confirmation']);
+    final confirmation = <String, dynamic>{
+      ...rootStability,
+      ...nestedConfirmation,
+    };
     final stabilityState = (confirmation['state'] ?? 'NOT VERIFIED').toString().toUpperCase();
+    final rootRequiredSeconds = (rootStability['required_seconds'] as num?)?.toInt() ?? 0;
+    final nestedRequiredSeconds = (nestedConfirmation['required_seconds'] as num?)?.toInt() ?? 0;
+    final requiredSeconds = nestedRequiredSeconds;
+    final stabilityStateConsistent = rootStability.isNotEmpty &&
+        nestedConfirmation.isNotEmpty &&
+        (rootStability['state'] ?? '').toString().toUpperCase() ==
+            (nestedConfirmation['state'] ?? '').toString().toUpperCase();
+    final sinceUtc = DateTime.tryParse((rootStability['since_utc'] ?? '').toString());
+    final elapsedSeconds = sinceUtc == null
+        ? null
+        : DateTime.now().toUtc().difference(sinceUtc.toUtc()).inSeconds;
+    final timerVerified = stabilityStateConsistent &&
+        rootRequiredSeconds >= 600 &&
+        nestedRequiredSeconds >= 600 &&
+        rootRequiredSeconds == nestedRequiredSeconds &&
+        elapsedSeconds != null && elapsedSeconds >= nestedRequiredSeconds;
     final candidateConfirmed = {'CALL BUY', 'PUT BUY'}.contains(reportedStatus) &&
-        allLayersPass && stabilityState == 'CONFIRMED';
+        allLayersPass && stabilityState == 'CONFIRMED' && timerVerified;
     final anyLayerBlocked = parsedLayers.any((layer) =>
         {'FAIL', 'BLOCK'}.contains((layer['status'] ?? layer['verdict'] ?? '').toString().toUpperCase()));
     final engineStatus = !layersSchemaValid || !hasEngineTimestamp || engineAge == null || engineAge < 0 || engineAge > 120
@@ -146,8 +169,19 @@ class QuantEnginePage extends StatelessWidget {
               const SizedBox(height: 6),
               Text('Market feed: ${!marketOpen ? 'MARKET CLOSED' : (live ? 'LIVE' : 'NOT VERIFIED')} • Last snapshot age: ${age == null ? 'unknown' : '$age sec'}',
                 style: TextStyle(color: marketOpen && live ? Colors.greenAccent : Colors.orangeAccent, fontSize: 12)),
-              Text('600-second stability gate: $stabilityState • required ${confirmation['required_seconds'] ?? 600} sec',
-                style: TextStyle(color: stabilityState == 'CONFIRMED' ? Colors.greenAccent : Colors.orangeAccent, fontSize: 12)),
+              Text(
+                '600-second stability gate: $stabilityState • ${elapsedSeconds == null ? 'timer unverified' : '$elapsedSeconds / $requiredSeconds sec'}',
+                style: TextStyle(
+                  color: stabilityState == 'CONFIRMED' && timerVerified
+                      ? Colors.greenAccent : Colors.orangeAccent,
+                  fontSize: 12,
+                ),
+              ),
+              if (stabilityState == 'CONFIRMED' && !timerVerified)
+                const Text(
+                  'Backend says CONFIRMED, but the 600-second timer evidence is missing, too short, or future-dated. Kept at WAIT.',
+                  style: TextStyle(color: Colors.orangeAccent, fontSize: 12),
+                ),
               if (!dataAvailable) ...[
                 const SizedBox(height: 10),
                 Text(
