@@ -8,8 +8,9 @@ import 'api.dart';
 import 'config.dart';
 import 'broker_home_prototype_page.dart';
 import 'strategy_library_page.dart';
+import 'quant_engine_page.dart';
 
-const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Backtesting','API','Data Health','API & Railway','Broker Home','Strategies'];
+const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Backtesting','API','Data Health','API & Railway','Broker Home','Strategies','Quant Engine'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
 
 void main() {
@@ -446,6 +447,12 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           onIndexSelected: (value) => setState(() => selectedIndex = value),
         ),
         const StrategyLibraryPage(),
+        QuantEnginePage(
+          selectedIndex: selectedIndex,
+          signals: signals,
+          market: market,
+          onIndexChanged: (value) => setState(() => selectedIndex = value),
+        ),
       ]),
     ),
   );
@@ -465,6 +472,7 @@ IconData _tabIcon(int index) => switch (index) {
   10 => Icons.cloud_outlined,
   11 => Icons.account_balance_wallet_outlined,
   12 => Icons.library_books_outlined,
+  13 => Icons.layers_outlined,
   _ => Icons.layers_outlined,
 };
 
