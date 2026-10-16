@@ -7,6 +7,7 @@ authoritative. Until an engine adapter is wired and tested, evaluation returns W
 from __future__ import annotations
 
 from typing import Any
+import importlib.util
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
@@ -40,9 +41,77 @@ class EvaluateRequest(BaseModel):
 
 
 @router.get("/strategies")
+_ENGINE_MODULES = {
+    "oi_price_action": ("quant.oi_price_action_engine", "SOURCE_ONLY"),
+    "hero_zero": ("quant.hero_zero", "SOURCE_ONLY"),
+    "failed_move_pdh_pdl": ("quant.failed_move_fade", "SOURCE_ONLY"),
+    "ema_crossover": ("quant.ema_quant_engine", "SOURCE_ONLY"),
+    "day_hl_liquidity_sweep": ("quant.day_hl_liquidity", "DETECTOR_ONLY"),
+    "orb": (None, "NOT_IMPLEMENTED"),
+    "vwap": (None, "NOT_IMPLEMENTED"),
+}
+
+
+def _module_available(module_name: str | None) -> bool:
+    if not module_name:
+        return False
+    try:
+        return importlib.util.find_spec(module_name) is not None
+    except (ImportError, ModuleNotFoundError, ValueError):
+        return False
+
+
 def list_parmar_strategies(x_device_id: str = Header(default="")) -> dict[str, Any]:
     _check_device(x_device_id)
-    return {"status": "ok", "engine": "PARMAR", "count": len(STRATEGIES), "strategies": list(STRATEGIES)}
+    strategies = []
+    for definition in STRATEGIES:
+        item = dict(definition)
+        module_name, source_status = _ENGINE_MODULES[item["id"]]
+        available = _module_available(module_name)
+        item["engine_module"] = module_name
+        item["engine_loaded"] = available
+        item["status"] = source_status if available else ("ENGINE_SOURCE_MISSING_IN_DEPLOYMENT" if module_name else "NOT_IMPLEMENTED")
+        item["live_api_wiring"] = "NOT_VERIFIED"
+        item["actionable"] = False
+        strategies.append(item)
+    return {"status": "ok", "engine": "PARMAR", "count": len(strategies), "strategies": strategies}
+
+
+@router.post("/strategies/{strategy_id}/verify-wiring")
+def verify_strategy_wiring(strategy_id: str, x_device_id: str = Header(default="")) -> dict[str, Any]:
+    """Report verifiable wiring facts without treating route health as live readiness.
+
+    This is intentionally a diagnostic-only dry run: it never calls the broker
+    to place an order and never promotes a strategy based on source presence.
+    """
+    _check_device(x_device_id)
+    strategy_id = strategy_id.strip().lower()
+    definition = next((item for item in STRATEGIES if item["id"] == strategy_id), None)
+    if definition is None:
+        raise HTTPException(status_code=404, detail="Unknown Parmar strategy id")
+    module_name, _ = _ENGINE_MODULES[strategy_id]
+    engine_loaded = _module_available(module_name)
+    checks = {
+        "backend_route_registered": True,
+        "engine_module_available": engine_loaded,
+        "fresh_live_market_data": False,
+        "signal_contract_validated": False,
+        "risk_gate_verified": False,
+        "broker_instrument_resolved": False,
+        "paper_payload_constructed": False,
+        "live_feed_received": False,
+        "audit_written": False,
+    }
+    blockers = [name for name, passed in checks.items() if not passed]
+    return {
+        "strategy_id": strategy_id,
+        "status": "WAIT",
+        "live_api_wiring": "NOT_VERIFIED",
+        "actionable": False,
+        "checks": checks,
+        "blockers": blockers,
+        "reason": "Diagnostic route and module presence do not prove fresh live feed, risk mapping, or end-to-end wiring.",
+    }
 
 
 @router.post("/evaluate")
