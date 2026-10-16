@@ -26,7 +26,7 @@ class ORBEngineTests(unittest.TestCase):
     def test_bullish_breakout_candidate_has_risk_levels_but_is_not_validated(self):
         frame = candles([100, 101, 100.5, 100.5, 101, 103, 104], [100, 100, 100, 110, 120, 180, 200])
         result = OpeningRangeBreakoutEngine(use_volume_filter=True).generate(
-            frame, 25012, datetime(2026, 10, 15, 10, 0, tzinfo=IST))
+            frame, 25012, datetime(2026, 10, 15, 9, 51, tzinfo=IST))
         self.assertEqual(result.candidate_decision, "CALL BUY")
         self.assertEqual(result.option_side, "CE")
         self.assertLess(result.stop_loss, result.entry)
