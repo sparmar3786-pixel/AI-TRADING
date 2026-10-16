@@ -1737,7 +1737,7 @@ def _index_snapshot(
     # Keep the five deterministic validation layers separate from the
     # independent 10-minute confirmation gate. The latter is not a sixth layer.
     engine_layers = dict(result.get("layers") or {})
-    confirmation_layer = dict(engine_layers.get("confirmation") or {})
+    confirmation_layer = dict(result.get("confirmation") or {})
     five_layer_keys = ("data_quality", "trend_sentiment", "order_flow", "option_selection", "risk_levels")
     layer_labels = {
         "data_quality": "Data freshness & price integrity",
@@ -1804,7 +1804,7 @@ def _index_snapshot(
         "indicator_summary": {"timeframes": timeframe_closes, "five_minute_trend": trend, **indicators},
         "option_chain_count": len(normalized_options),
         "signal_stability": {
-            "state": result.get("layers", {}).get("confirmation", {}).get("state", "BLOCKED"),
+            "state": result.get("confirmation", {}).get("state", "BLOCKED"),
             "required_minutes": 10,
             "required_seconds": 600,
         },
