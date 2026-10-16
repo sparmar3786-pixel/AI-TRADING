@@ -451,6 +451,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           selectedIndex: selectedIndex,
           signals: signals,
           market: market,
+          marketOpen: _marketOpenNow,
           onIndexChanged: (value) => setState(() => selectedIndex = value),
         ),
       ]),

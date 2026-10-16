@@ -8,6 +8,7 @@ class QuantEnginePage extends StatelessWidget {
     required this.signals,
     required this.market,
     required this.onIndexChanged,
+    this.marketOpen = true,
     super.key,
   });
 
@@ -15,6 +16,7 @@ class QuantEnginePage extends StatelessWidget {
   final Map<String, dynamic> signals;
   final Map<String, dynamic> market;
   final ValueChanged<String> onIndexChanged;
+  final bool marketOpen;
 
   static const _expectedLayers = <String>[
     'Data freshness',
@@ -57,6 +59,7 @@ class QuantEnginePage extends StatelessWidget {
     final engineAge = engineTimestamp == null ? null : DateTime.now().difference(engineTimestamp).inSeconds;
     final engineFresh = engine['data_fresh'] == true &&
         engineAge != null && engineAge >= 0 && engineAge <= 120;
+    final hasEngineTimestamp = engineTimestamp != null;
     final dataAvailable = layersSchemaValid && engineFresh;
     final allLayersPass = dataAvailable && parsedLayers.every(
       (layer) => (layer['status'] ?? layer['verdict'] ?? '').toString().toUpperCase() == 'PASS',
@@ -68,9 +71,15 @@ class QuantEnginePage extends StatelessWidget {
         allLayersPass && stabilityState == 'CONFIRMED';
     final anyLayerBlocked = parsedLayers.any((layer) =>
         {'FAIL', 'BLOCK'}.contains((layer['status'] ?? layer['verdict'] ?? '').toString().toUpperCase()));
-    final engineStatus = !dataAvailable ? 'DATA REQUIRED'
-        : (reportedStatus == 'BLOCK' || anyLayerBlocked ? 'BLOCK'
-        : (candidateConfirmed ? 'PASS' : 'WAIT'));
+    final engineStatus = !layersSchemaValid || !hasEngineTimestamp || engineAge == null || engineAge < 0 || engineAge > 120
+        ? 'DATA REQUIRED'
+        : (!engineFresh || reportedStatus == 'BLOCK' || anyLayerBlocked
+            ? 'BLOCK'
+            : (candidateConfirmed ? 'PASS' : 'WAIT'));
+    final reasons = signal['reasons'];
+    final fallbackReason = reasons is List
+        ? reasons.where((item) => item != null && item.toString().trim().isNotEmpty).map((item) => item.toString()).join(' • ')
+        : (signal['reason'] ?? signal['error'] ?? 'Backend did not return per-layer evidence.').toString();
     final marketRow = _map(market[selectedIndex]);
     final live = marketRow['live'] == true;
     final age = marketRow['age_seconds'];
@@ -105,15 +114,21 @@ class QuantEnginePage extends StatelessWidget {
                 )),
               ]),
               const SizedBox(height: 6),
-              Text('Market feed: ${live ? 'LIVE' : 'NOT VERIFIED'} • Snapshot age: ${age == null ? 'unknown' : '$age sec'}',
-                style: TextStyle(color: live ? Colors.greenAccent : Colors.orangeAccent, fontSize: 12)),
+              Text('Market feed: ${!marketOpen ? 'MARKET CLOSED' : (live ? 'LIVE' : 'NOT VERIFIED')} • Last snapshot age: ${age == null ? 'unknown' : '$age sec'}',
+                style: TextStyle(color: marketOpen && live ? Colors.greenAccent : Colors.orangeAccent, fontSize: 12)),
               Text('600-second stability gate: $stabilityState • required ${confirmation['required_seconds'] ?? 600} sec',
                 style: TextStyle(color: stabilityState == 'CONFIRMED' ? Colors.greenAccent : Colors.orangeAccent, fontSize: 12)),
               if (!dataAvailable) ...[
                 const SizedBox(height: 10),
-                const Text(
-                  'Backend must provide exactly five layer results, a fresh timestamp (within 120 seconds), data_fresh=true, and a reason for each layer. Otherwise results remain DATA REQUIRED.',
-                  style: TextStyle(color: Colors.orangeAccent),
+                Text(
+                  !layersSchemaValid
+                      ? 'Backend did not supply exactly five complete layer results. Details: $fallbackReason'
+                      : (!hasEngineTimestamp
+                          ? 'Backend engine timestamp is missing. Details: $fallbackReason'
+                          : (engineAge != null && (engineAge < 0 || engineAge > 120)
+                              ? 'Backend engine timestamp is future-dated or older than 120 seconds. Details: $fallbackReason'
+                              : 'Market evidence failed freshness validation. Review the layer reasons below. $fallbackReason')),
+                  style: const TextStyle(color: Colors.orangeAccent),
                 ),
               ],
             ]),
@@ -124,7 +139,8 @@ class QuantEnginePage extends StatelessWidget {
           _LayerCard(
             number: i + 1,
             expectedName: _expectedLayers[i],
-            data: dataAvailable && i < parsedLayers.length ? parsedLayers[i] : null,
+            data: layersSchemaValid && i < parsedLayers.length ? parsedLayers[i] : null,
+            fallbackDetail: fallbackReason,
           ),
         const SizedBox(height: 8),
         const Card(
@@ -142,17 +158,18 @@ class QuantEnginePage extends StatelessWidget {
 }
 
 class _LayerCard extends StatelessWidget {
-  const _LayerCard({required this.number, required this.expectedName, required this.data});
+  const _LayerCard({required this.number, required this.expectedName, required this.data, required this.fallbackDetail});
   final int number;
   final String expectedName;
   final Map<String, dynamic>? data;
+  final String fallbackDetail;
 
   @override
   Widget build(BuildContext context) {
     final name = (data?['name'] ?? data?['layer_name'] ?? expectedName).toString();
     final status = (data?['status'] ?? data?['verdict'] ?? 'DATA REQUIRED').toString().toUpperCase();
     final score = data?['score'];
-    final detail = (data?['detail'] ?? data?['reason'] ?? data?['message'] ?? 'Backend layer evidence not supplied.').toString();
+    final detail = (data?['detail'] ?? data?['reason'] ?? data?['message'] ?? (fallbackDetail.isEmpty ? 'Backend layer evidence not supplied.' : fallbackDetail)).toString();
     final color = status == 'PASS' ? Colors.greenAccent
         : (status == 'FAIL' || status == 'BLOCK' ? Colors.redAccent : Colors.orangeAccent);
     return Card(
