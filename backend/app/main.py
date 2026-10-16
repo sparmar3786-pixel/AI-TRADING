@@ -46,6 +46,8 @@ from integrations.angelone_stream import AngelOneStream, EXCHANGE_TYPES
 from integrations.news_sentiment import cached_market_news_sentiment, fetch_market_news_sentiment
 from quant_engine import evaluate_five_layer_signal, evaluate_futures_signal
 from quant.hero_zero import HeroZeroEngine, hero_zero_to_signal_data
+from quant.orb_engine import OpeningRangeBreakoutEngine
+from quant.vwap_strategy import VWAPStrategyEngine
 
 from strategies.technical import atr as technical_atr, ema as technical_ema, rsi as technical_rsi, rsi_reversion, sma as technical_sma
 from strategies.advanced import bollinger_bands, macd as advanced_macd, donchian_channels
@@ -1732,18 +1734,55 @@ def _index_snapshot(
         **dict(result.get("performance") or {}),
         "five_layer_validation_ms": round((time.perf_counter() - engine_started) * 1000, 2),
     }
-    # Publish one normalized engine contract consumed by Dashboard, Signals,
-    # Risk, Trading Setup, the five-layer page and Quant Engine Lab.
+    # Keep the five deterministic validation layers separate from the
+    # independent 10-minute confirmation gate. The latter is not a sixth layer.
     engine_layers = dict(result.get("layers") or {})
-    passed_layers = sum(1 for layer in engine_layers.values() if isinstance(layer, dict) and layer.get("pass") is True)
+    confirmation_layer = dict(result.get("confirmation") or {})
+    five_layer_keys = ("data_quality", "trend_sentiment", "order_flow", "option_selection", "risk_levels")
+    layer_labels = {
+        "data_quality": "Data freshness & price integrity",
+        "trend_sentiment": "Multi-timeframe trend & sentiment",
+        "order_flow": "Bid/ask depth & spread",
+        "option_selection": "Option contract & liquidity",
+        "risk_levels": "Option ATR risk levels",
+    }
+    display_layers: dict[str, dict[str, Any]] = {}
+    for layer_key in five_layer_keys:
+        raw_layer = engine_layers.get(layer_key)
+        raw_layer = raw_layer if isinstance(raw_layer, dict) else {}
+        passed = raw_layer.get("pass") is True
+        if layer_key == "data_quality":
+            detail = str(raw_layer.get("reason") or raw_layer.get("reason_code") or "Fresh exchange timestamp and positive LTP required.")
+        elif layer_key == "trend_sentiment":
+            detail = f"Trend={raw_layer.get('trend', 'UNKNOWN')}; sentiment={raw_layer.get('sentiment_direction', 'UNKNOWN')}; indicator checks={raw_layer.get('indicator_checks', {})}"
+        elif layer_key == "order_flow":
+            detail = f"Spread={raw_layer.get('spread_pct', 'unknown')}%; depth/flow direction={raw_layer.get('direction', 'UNKNOWN')}; measure={raw_layer.get('measure', 'unknown')}"
+        elif layer_key == "option_selection":
+            detail = f"Eligible contracts={raw_layer.get('candidate_count', 0)}; selected strike={raw_layer.get('strike', 'none')}; spread={raw_layer.get('spread_pct', 'unknown')}"
+        else:
+            detail = str(raw_layer.get("method") or "Valid option ATR, positive stop and target required.")
+        display_layers[layer_key] = {
+            **raw_layer,
+            "name": layer_labels[layer_key],
+            "status": "PASS" if passed else "FAIL",
+            "detail": detail,
+            "score": None,
+        }
+    passed_layers = sum(1 for key in five_layer_keys if (engine_layers.get(key) or {}).get("pass") is True)
+    data_fresh = (engine_layers.get("data_quality") or {}).get("pass") is True
     result["five_layer_engine"] = {
-        "layers": engine_layers, "decision": result.get("decision", "WAIT"),
-        "passed_layers": passed_layers, "total_layers": len(engine_layers),
-        "score_semantics": "passed deterministic checks, not probability of profit",
+        "layers": display_layers,
+        "decision": result.get("decision", "WAIT"),
+        "passed_layers": passed_layers,
+        "total_layers": 5,
+        "confirmation": confirmation_layer,
+        "timestamp": observed,
+        "data_fresh": data_fresh,
+        "score_semantics": "count of five passed deterministic checks; not probability of profit",
     }
     result["quant_engine"] = result["five_layer_engine"]
     result["quant_score"] = passed_layers
-    result["quant_score_semantics"] = "count of passed deterministic layers; not a win probability"
+    result["quant_score_semantics"] = "count of passed deterministic validation layers out of five; not a win probability"
     result["trend_sentiment"] = engine_layers.get("trend_sentiment", {})
     result["option_validation"] = engine_layers.get("option_selection", {})
     result["risk_validation"] = engine_layers.get("risk_levels", {})
@@ -1765,11 +1804,108 @@ def _index_snapshot(
         "indicator_summary": {"timeframes": timeframe_closes, "five_minute_trend": trend, **indicators},
         "option_chain_count": len(normalized_options),
         "signal_stability": {
-            "state": result.get("layers", {}).get("confirmation", {}).get("state", "BLOCKED"),
+            "state": result.get("confirmation", {}).get("state", "BLOCKED"),
             "required_minutes": 10,
             "required_seconds": 600,
         },
     })
+    # Run ORB/VWAP against the same completed, exchange-sourced 5-minute candles
+    # used by the canonical signal pipeline. These are research candidates only:
+    # their underlying levels are not option premiums and cannot bypass quant/risk
+    # validation or the server-owned 600-second confirmation gate.
+    strategy_candidates: dict[str, dict[str, Any]] = {}
+    try:
+        import pandas as pd
+
+        strategy_records = []
+        for candle in candle_rows:
+            if not isinstance(candle, (list, tuple)) or len(candle) < 6:
+                continue
+            stamp = _iso(candle[0])
+            parsed_stamp = datetime.fromisoformat(stamp) if stamp else None
+            values = [_number(candle[i]) for i in (1, 2, 3, 4, 5)]
+            if parsed_stamp is None or any(value is None for value in values):
+                continue
+            opened, high_value, low_value, close_value, volume_value = values
+            strategy_records.append({
+                "timestamp": parsed_stamp,
+                "open": opened, "high": high_value, "low": low_value,
+                "close": close_value, "volume": volume_value,
+            })
+        strategy_frame = pd.DataFrame(strategy_records)
+        if not strategy_frame.empty:
+            strategy_frame["timestamp"] = pd.to_datetime(strategy_frame["timestamp"], utc=True, errors="coerce")
+            strategy_frame = strategy_frame.dropna(subset=["timestamp"]).set_index("timestamp").sort_index()
+        strike_step = {
+            "NIFTY": 50, "BANKNIFTY": 100, "FINNIFTY": 50,
+            "MIDCPNIFTY": 25, "SENSEX": 100, "BANKEX": 100,
+        }.get(index.upper(), 50)
+        current_time = datetime.now(IST)
+        orb_signal = OpeningRangeBreakoutEngine(drop_forming_candle=False).generate(
+            strategy_frame, spot, current_time=current_time, strike_step=strike_step
+        )
+        vwap_signal = VWAPStrategyEngine(drop_forming_candle=False).generate(
+            strategy_frame, spot, current_time=current_time, strike_step=strike_step
+        )
+
+        def _candidate_payload(signal: Any, strategy_id: str) -> dict[str, Any]:
+            candidate = str(getattr(signal, "candidate_decision", None) or "").upper()
+            has_candidate = candidate in ("CALL BUY", "PUT BUY")
+            guards = list(getattr(signal, "guards", []) or [])
+            if has_candidate:
+                guards = list(dict.fromkeys(guards + [
+                    "OPTION_CONTRACT_MAPPING_REQUIRED",
+                    "FIVE_LAYER_QUANT_GATE_REQUIRED",
+                    "SERVER_600_SECOND_CONFIRMATION_REQUIRED",
+                ]))
+            validation = dict(getattr(signal, "live_validation", {}) or {})
+            if has_candidate:
+                validation = {
+                    **validation, "verdict": "PENDING", "decision": "WAIT",
+                    "blocks": list(dict.fromkeys(list(validation.get("blocks") or []) + [
+                        "Candidate is not actionable until a fresh option contract is resolved and all live gates pass."
+                    ])),
+                }
+            return {
+                "strategy_id": strategy_id,
+                "engine_source": getattr(signal, "engine_source", strategy_id.upper()),
+                "decision": "WAIT",
+                "candidate_decision": candidate if has_candidate else None,
+                "option_side": getattr(signal, "option_side", None) if has_candidate else None,
+                "strike": getattr(signal, "strike", None) if has_candidate else None,
+                "entry": getattr(signal, "entry", None) if has_candidate else None,
+                "stop_loss": getattr(signal, "stop_loss", None) if has_candidate else None,
+                "target": getattr(signal, "target", None) if has_candidate else None,
+                "entry_price_basis": "UNDERLYING_SPOT",
+                "timestamp": observed,
+                "data_fresh": (result.get("layers", {}).get("data_quality", {}).get("pass") is True) and not strategy_frame.empty,
+                "live_validation": validation,
+                "reasons": list(getattr(signal, "reasons", []) or []),
+                "guards": guards,
+                "opening_range_high": getattr(signal, "opening_range_high", None),
+                "opening_range_low": getattr(signal, "opening_range_low", None),
+                "vwap": getattr(signal, "vwap", None),
+                "atr_value": getattr(signal, "atr_value", None),
+                "actionable": False,
+            }
+
+        strategy_candidates = {
+            "orb": _candidate_payload(orb_signal, "orb"),
+            "vwap": _candidate_payload(vwap_signal, "vwap"),
+        }
+    except Exception:
+        logging.exception("ORB/VWAP candidate evaluation failed for %s", index)
+        strategy_candidates = {
+            "orb": {"strategy_id": "orb", "decision": "WAIT", "candidate_decision": None,
+                    "entry": None, "stop_loss": None, "target": None, "actionable": False,
+                    "data_fresh": False, "reasons": ["ORB evaluation unavailable; inspect backend logs."],
+                    "guards": ["ENGINE_EVALUATION_ERROR"]},
+            "vwap": {"strategy_id": "vwap", "decision": "WAIT", "candidate_decision": None,
+                     "entry": None, "stop_loss": None, "target": None, "actionable": False,
+                     "data_fresh": False, "reasons": ["VWAP evaluation unavailable; inspect backend logs."],
+                     "guards": ["ENGINE_EVALUATION_ERROR"]},
+        }
+    result["strategy_candidates"] = strategy_candidates
     if selected:
         result["strike"] = selected["strike"] if result.get("strike") is not None else None
         result["expiry"] = selected["expiry"] if result.get("expiry") is not None else None
