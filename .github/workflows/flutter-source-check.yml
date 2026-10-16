@@ -52,7 +52,7 @@ jobs:
             echo "Global API-response repository-link filtering is missing."
             exit 1
           fi
-          grep -Fq "Strategies" flutter_app/lib/main.dart
+          grep -Fq "'Parmar'" flutter_app/lib/main.dart
           echo "Repository-link, AI-removal, and strategy-tab source guards passed."
       - name: Install Flutter dependencies
         run: flutter pub get
