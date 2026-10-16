@@ -90,6 +90,12 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     }
   }
 
+  double? _positiveNumber(dynamic value) {
+    final parsed = value is num ? value.toDouble() : double.tryParse(value?.toString() ?? '');
+    if (parsed == null || !parsed.isFinite || parsed <= 0) return null;
+    return parsed;
+  }
+
   /// Actionable candidates must keep the same side and strike for 10 minutes.
   /// Any candidate change or failed validation returns the UI to WAIT. This is
   /// a conservative client-side confirmation gate, not a profit guarantee.
@@ -102,10 +108,53 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     for (final entry in rawSignals.entries) {
       final index = entry.key.toString().toUpperCase();
       final row = Map<String, dynamic>.from(entry.value as Map? ?? const {});
-      final decision = (row['decision'] ?? 'WAIT').toString().toUpperCase();
+      var decision = (row['decision'] ?? 'WAIT').toString().toUpperCase();
       final validation = Map<String, dynamic>.from(row['live_validation'] as Map? ?? const {});
-      final guards = (row['guards'] as List?) ?? const <dynamic>[];
-      final isCandidate = (decision == 'CALL BUY' || decision == 'PUT BUY') &&
+      final guards = List<dynamic>.from(row['guards'] as List? ?? const <dynamic>[]);
+      final blocks = List<dynamic>.from(validation['blocks'] as List? ?? const <dynamic>[]);
+      final marketAge = validation['market_age_seconds'];
+      final optionAge = validation['option_age_seconds'];
+      final quoteAgeValid = marketAge is num && marketAge >= 0 && marketAge <= 15 &&
+          optionAge is num && optionAge >= 0 && optionAge <= 10;
+      final strike = _positiveNumber(row['strike']);
+      final entry = _positiveNumber(row['entry']);
+      final stop = _positiveNumber(row['stop_loss']);
+      final target = _positiveNumber(row['target']);
+      final side = (row['option_side'] ?? '').toString().toUpperCase();
+      final pricesValid = strike != null && entry != null && stop != null && target != null &&
+          (side == 'CE' || side == 'PE') && stop < entry && target > entry;
+      final backendPassed = validation['verdict'] == 'PASS' && guards.isEmpty && blocks.isEmpty;
+      final quoteValid = quoteAgeValid && pricesValid && backendPassed;
+
+      // The client is a second fail-closed boundary. A backend PASS without
+      // numeric, non-future freshness ages and coherent option-premium risk
+      // levels must never survive as a candidate.
+      if (!quoteValid) {
+        if (decision == 'CALL BUY' || decision == 'PUT BUY') {
+          row['candidate_decision'] = decision;
+        }
+        decision = 'WAIT';
+        row['decision'] = 'WAIT';
+        row['strike'] = null;
+        row['option_side'] = null;
+        row['entry'] = null;
+        row['stop_loss'] = null;
+        row['target'] = null;
+        row['expiry'] = null;
+        validation['decision'] = 'WAIT';
+        validation['verdict'] = 'FAIL';
+        final reason = !quoteAgeValid
+            ? 'Missing/stale market or option quote age; market must be ≤15s and option quote ≤10s'
+            : (!pricesValid
+                ? 'Invalid option contract or entry/stop-loss/target prices'
+                : 'Backend validation did not PASS or guards/validation blocks remain');
+        if (!blocks.contains(reason)) blocks.add(reason);
+        validation['blocks'] = blocks;
+        row['live_validation'] = validation;
+        await prefs.remove(storageKey);
+      }
+      final isCandidate = quoteValid &&
+          (decision == 'CALL BUY' || decision == 'PUT BUY') &&
           row['strike'] != null && row['option_side'] != null &&
           row['entry'] != null && row['stop_loss'] != null && row['target'] != null &&
           validation['verdict'] == 'PASS' && guards.isEmpty;
@@ -199,8 +248,8 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
   }
 
   Future<void> refresh() async {
-    if (_refreshing) return;
-    _refreshing = true;
+    if (_refreshing || !mounted) return;
+    setState(() => _refreshing = true);
     Map<String, dynamic> latestSystemDiagnostics = const {};
     String? latestSystemDiagnosticsError;
     try {
@@ -288,7 +337,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         status = lastFetch != null ? 'Backend unavailable — showing last fetched market data. Error: ${signalsFetchError ?? 'request failed'}' : 'Backend offline or unreachable: ${signalsFetchError ?? 'health check failed'}';
       });
     } finally {
-      _refreshing = false;
+      if (mounted) setState(() => _refreshing = false);
     }
   }
 
@@ -453,7 +502,16 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         ChainPage(selected:selectedIndex,onChanged:(v)=>setState(()=>selectedIndex=v), market:_market(selectedIndex)),
         OIPage(signals:signals),
         IndicatorsPage(selected:selectedIndex,signal:_signal(selectedIndex),fast:emaFast,slow:emaSlow,onChanged:(f,s){setState((){emaFast=f;emaSlow=s;});refresh();},onIndex:(v)=>setState(()=>selectedIndex=v)),
-        SignalPage(index:selectedIndex,signals:signals,tradePlans:tradePlans,market:market,onChanged:(v)=>setState(()=>selectedIndex=v)),
+        SignalPage(
+          index: selectedIndex,
+          signals: signals,
+          tradePlans: tradePlans,
+          market: market,
+          refreshing: _refreshing,
+          refreshError: signalsFetchError,
+          onRefresh: refresh,
+          onChanged: (v) => setState(() => selectedIndex = v),
+        ),
         RiskPage(index:selectedIndex,signal:_signal(selectedIndex),plans:tradePlans),
         BacktestingPage(backendUrl: backendUrl),
         ApiPage(backendUrl:backendUrl,feed:feed,storeDiagnostics:storeDiagnostics,market:market,onSaved:(url){setState(()=>backendUrl=url);refresh();}),
@@ -1108,11 +1166,24 @@ class _IndicatorsState extends State<IndicatorsPage>{
 }
 
 class SignalPage extends StatelessWidget {
-  const SignalPage({required this.index, required this.signals, required this.tradePlans, required this.market, required this.onChanged, super.key});
+  const SignalPage({
+    required this.index,
+    required this.signals,
+    required this.tradePlans,
+    required this.market,
+    required this.refreshing,
+    required this.refreshError,
+    required this.onRefresh,
+    required this.onChanged,
+    super.key,
+  });
   final String index;
   final Map<String, dynamic> signals;
   final List<dynamic> tradePlans;
   final Map<String, dynamic> market;
+  final bool refreshing;
+  final String? refreshError;
+  final Future<void> Function() onRefresh;
   final ValueChanged<String> onChanged;
 
 
@@ -1135,6 +1206,46 @@ class SignalPage extends StatelessWidget {
     final finalDecision = (validation['decision'] ?? 'WAIT').toString();
     final children = <Widget>[
       IndexPicker(selected: index, onChanged: onChanged),
+      Card(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            children: [
+              if (refreshing)
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else
+                Icon(
+                  refreshError == null ? Icons.sync : Icons.warning_amber_rounded,
+                  color: refreshError == null ? Colors.cyanAccent : Colors.orangeAccent,
+                ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      refreshing ? 'Refreshing live signal…' : (refreshError == null ? 'Signal snapshot status' : 'Signal refresh failed'),
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    if (refreshError != null)
+                      Text(refreshError!, style: const TextStyle(fontSize: 11, color: Colors.orangeAccent))
+                    else
+                      const Text('Missing/stale option quote or incomplete validation keeps the signal at WAIT.', style: TextStyle(fontSize: 11, color: Colors.white70)),
+                  ],
+                ),
+              ),
+              TextButton(
+                onPressed: refreshing ? null : onRefresh,
+                child: const Text('REFRESH'),
+              ),
+            ],
+          ),
+        ),
+      ),
       const Section('Signal'),
       Card(
         child: Padding(
