@@ -658,8 +658,8 @@ class BackendApiTests(unittest.TestCase):
 
         adapter = FakeAdapter()
         stream = FakeStream()
-        with patch.object(api, "_stream", stream), \\
-             patch.dict(api.EXCHANGE_TYPES, {"NSE": 1}), \\
+        with patch.object(api, "_stream", stream), \
+             patch.dict(api.EXCHANGE_TYPES, {"NSE": 1}), \
              patch.object(api, "_quote_rows", side_effect=lambda result: result["rows"]):
             spot = api._quotes(
                 adapter, "NSE", ["spot-token"],
