@@ -57,6 +57,14 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text(label), findsOneWidget, reason: 'Missing strategy card: $label');
     }
+    // The integration disclaimer is inside lazily built cards too; bring one
+    // into view before asserting it exists in the rendered widget tree.
+    await tester.scrollUntilVisible(
+      find.textContaining('Live API wiring not verified'),
+      250,
+      scrollable: verticalScrollable,
+    );
+    await tester.pumpAndSettle();
     expect(find.textContaining('Live API wiring not verified'), findsWidgets);
   });
 
