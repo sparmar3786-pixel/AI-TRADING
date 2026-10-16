@@ -51,6 +51,50 @@ void main() {
     expect(find.text('Backend layer evidence not supplied.'), findsNothing);
   });
 
+  testWidgets('Quant Engine falls back to canonical raw five-layer evidence', (tester) async {
+    tester.view.physicalSize = const Size(1200, 4000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final timestamp = DateTime.now().toUtc().toIso8601String();
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: QuantEnginePage(
+          selectedIndex: 'NIFTY',
+          signals: {
+            'NIFTY': {
+              'decision': 'WAIT',
+              'reasons': ['Market evidence is not fresh'],
+              'quant_engine': {
+                'layers': <String, dynamic>{},
+                'timestamp': timestamp,
+                'data_fresh': false,
+                'confirmation': {'state': 'BLOCKED', 'required_seconds': 600},
+              },
+              'layers': {
+                'data_quality': {'pass': false, 'reason': 'Exchange timestamp is stale.'},
+                'trend_sentiment': {'pass': false, 'reason': 'Insufficient completed candles.'},
+                'order_flow': {'pass': false, 'reason': 'Bid/ask depth unavailable.'},
+                'option_selection': {'pass': false, 'reason': 'Fresh option quote missing.'},
+                'risk_levels': {'pass': false, 'reason': 'Option ATR unavailable.'},
+              },
+            },
+          },
+          market: {'NIFTY': {'live': false, 'age_seconds': 30}},
+          marketOpen: true,
+          onIndexChanged: (_) {},
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Exchange timestamp is stale.'), findsOneWidget);
+    expect(find.textContaining('Bid/ask depth unavailable.'), findsOneWidget);
+    expect(find.textContaining('Backend did not supply exactly five complete layer results'), findsNothing);
+    expect(find.text('DATA REQUIRED'), findsOneWidget);
+  });
+
   testWidgets('Quant Engine exposes missing backend reason while remaining DATA REQUIRED', (tester) async {
     tester.view.physicalSize = const Size(1200, 4000);
     tester.view.devicePixelRatio = 1;
