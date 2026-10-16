@@ -4881,3 +4881,11 @@ def historical_backtest(body: BacktestRequest, _: str = Depends(_device)) -> dic
         ],
     }
     return {"status": "ok", "source": "angelone_smartapi_historical_candles", "index": index, "exchange": exchange, "symboltoken": token, "interval": body.interval, "report": report}
+
+# Parmar strategy suite is isolated from existing signal-generation routes.
+# Its API remains fail-closed until each strategy has a verified adapter.
+try:
+    from app.parmar_api import router as parmar_router
+except ModuleNotFoundError:
+    from backend.app.parmar_api import router as parmar_router
+app.include_router(parmar_router)
