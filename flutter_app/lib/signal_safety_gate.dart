@@ -177,35 +177,9 @@ Map<String, dynamic> applyServerSignalSafetyGate(Map<String, dynamic> response) 
 }
 
 
-/// Parse option expiry strictly. DateTime.tryParse alone can normalize invalid
-/// calendar dates on some inputs, which must never make an option actionable.
+/// Parse option expiry strictly and reject impossible calendar dates.
 DateTime? _parseStrictExpiryDate(String value) {
-  final match = RegExp(r'^(\\d{4})-(\\d{2})-(\\d{2})
-  final parsed = value is num ? value.toDouble() : double.tryParse(value?.toString() ?? '');
-  if (parsed == null || !parsed.isFinite) return null;
-  return parsed;
-}
-
-
-/// True only for the currently selected index, not merely when any market in
-/// the shared response is live. A green status requires a timestamp-derived
-/// live flag and a bounded quote age during the exchange session.
-bool isSelectedIndexFeedLive({
-  required bool apiOnline,
-  required bool signalsEndpointOnline,
-  required bool marketOpen,
-  required Map<String, dynamic> marketRow,
-}) {
-  final age = _safeFiniteNumber(marketRow['age_seconds']);
-  return apiOnline &&
-      signalsEndpointOnline &&
-      marketOpen &&
-      marketRow['live'] == true &&
-      age != null &&
-      age >= 0 &&
-      age <= 60;
-}
-).firstMatch(value);
+  final match = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$').firstMatch(value);
   if (match == null) return null;
   final year = int.tryParse(match.group(1)!);
   final month = int.tryParse(match.group(2)!);
