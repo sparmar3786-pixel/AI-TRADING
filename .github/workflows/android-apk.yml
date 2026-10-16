@@ -188,10 +188,12 @@ jobs:
             COMPILED_STRINGS=$(for file in "${CODE_FILES[@]}"; do unzip -p "$APK" "$file" | strings; done)
             if printf '%s\n' "$COMPILED_STRINGS" | grep -Ei 'SMC Pro Chart|SMC Chart|Smart Money Concepts Chart|Order Flow & Footprint|Order Flow Chart|Footprint Chart|FOOTPRINT CHART|MCX|Commodities|CRUDEOIL|NATURALGAS|CommodityPage' >/dev/null; then
               echo "Removed SMC, Order Flow, or MCX UI found in $APK"
+              printf '%s\n' "$COMPILED_STRINGS" | grep -Ein 'SMC Pro Chart|SMC Chart|Smart Money Concepts Chart|Order Flow & Footprint|Order Flow Chart|Footprint Chart|FOOTPRINT CHART|MCX|Commodities|CRUDEOIL|NATURALGAS|CommodityPage' | head -20 || true
               exit 1
             fi
             if printf '%s\n' "$COMPILED_STRINGS" | grep -E 'http://10[.]0[.]2[.]2:8000|http://localhost:8000|http://127[.]0[.]0[.]1:8000' >/dev/null; then
               echo "Forbidden local/emulator backend URL found in $APK"
+              printf '%s\n' "$COMPILED_STRINGS" | grep -Ein 'http://10[.]0[.]2[.]2:8000|http://localhost:8000|http://127[.]0[.]0[.]1:8000' | head -20 || true
               exit 1
             fi
             # Dart AOT may fold/omit URL literals; validate compile-time defines and source consumers instead.
@@ -207,10 +209,12 @@ jobs:
             grep -F "AppConfig.signalBackendUrl" "$API" >/dev/null
             if printf '%s\n' "$COMPILED_STRINGS" | grep -E 'OPENAI_API_KEY|OPEN_AI_API_KEY|OPENAI_MODEL|api[.]openai[.]com' >/dev/null; then
               echo "Direct OpenAI provider configuration unexpectedly found in $APK"
+              printf '%s\n' "$COMPILED_STRINGS" | grep -Ein 'OPENAI_API_KEY|OPEN_AI_API_KEY|OPENAI_MODEL|api[.]openai[.]com' | head -20 || true
               exit 1
             fi
             if printf '%s\n' "$COMPILED_STRINGS" | grep -E '/v1/live/execute-signal|PLACE_REAL_ANGEL_ORDER|PLACE REAL ANGEL ONE ORDER' >/dev/null; then
               echo "Order-placement capability unexpectedly found in APK"
+              printf '%s\n' "$COMPILED_STRINGS" | grep -Ein '/v1/live/execute-signal|PLACE_REAL_ANGEL_ORDER|PLACE REAL ANGEL ONE ORDER' | head -20 || true
               exit 1
             fi
             "$AAPT" dump permissions "$APK" | grep -q 'android.permission.INTERNET'
