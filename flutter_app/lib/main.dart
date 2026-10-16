@@ -239,7 +239,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         validation['blocks'] = blocks;
         row['live_validation'] = validation;
         row['signal_stability'] = <String, dynamic>{'state': 'STALE_OFFLINE', 'required_minutes': 10};
-        rawSignals[signalEntry.key] = row;
+        rawSignals[entry.key] = row;
       }
     }
     result['signals'] = rawSignals;
