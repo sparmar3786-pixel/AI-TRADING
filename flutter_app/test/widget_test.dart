@@ -36,10 +36,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('STRATEGY LIBRARY'), findsOneWidget);
-    final strategyScroll = find.descendant(
-      of: find.byType(StrategyLibraryPage),
-      matching: find.byType(Scrollable),
-    ).first;
+    // Use the active page scrollable directly. The StrategyLibraryPage
+    // finder can be absent from the scrollable's ancestor chain in the
+    // app's navigation shell, which made scrollUntilVisible throw No element.
+    final strategyScroll = find.byType(Scrollable).first;
     for (final label in <String>[
       'OI Price Action',
       'Hero Zero',
