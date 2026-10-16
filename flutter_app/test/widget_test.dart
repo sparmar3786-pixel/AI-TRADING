@@ -35,9 +35,17 @@ void main() {
 
     expect(find.text('STRATEGY LIBRARY'), findsOneWidget);
 
-    // StrategyLibraryPage uses ListView(children: ...), not ListView.builder.
-    // All strategy cards are built immediately, so do not scroll a TabBar
-    // Scrollable (which caused StateError: No element in CI).
+    // Target the Strategy Library's own vertical Scrollable. The ListView
+    // lazily builds off-screen children, so assertions must scroll this exact
+    // list rather than a horizontal TabBar scrollable.
+    final strategyList = find.byKey(const ValueKey('strategy-library-list'));
+    expect(strategyList, findsOneWidget);
+    final strategyScrollable = find.descendant(
+      of: strategyList,
+      matching: find.byType(Scrollable),
+    );
+    expect(strategyScrollable, findsOneWidget);
+
     final strategyLabels = <String>[
       'OI Price Action',
       'Hero Zero',
@@ -48,10 +56,29 @@ void main() {
       'VWAP Strategy',
     ];
     for (final label in strategyLabels) {
-      expect(find.text(label), findsOneWidget, reason: 'Missing strategy card: $label');
+      final labelFinder = find.text(label);
+      if (labelFinder.evaluate().isEmpty) {
+        await tester.scrollUntilVisible(
+          labelFinder,
+          250,
+          scrollable: strategyScrollable,
+        );
+        await tester.pumpAndSettle();
+      }
+      expect(labelFinder, findsOneWidget, reason: 'Missing strategy card: $label');
+    }
+
+    final disclaimer = find.textContaining('Live API wiring not verified');
+    if (disclaimer.evaluate().isEmpty) {
+      await tester.scrollUntilVisible(
+        disclaimer,
+        250,
+        scrollable: strategyScrollable,
+      );
+      await tester.pumpAndSettle();
     }
     expect(
-      find.textContaining('Live API wiring not verified'),
+      disclaimer,
       findsWidgets,
       reason: 'Strategy cards must disclose that live API wiring is unverified',
     );
