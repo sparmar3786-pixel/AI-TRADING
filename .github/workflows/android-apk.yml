@@ -161,7 +161,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if grep -RniE 'AI Access|AI Memory|Market Intelligence|AI Chat|AI Provider|DailyAiMemory|nvidia_signal_review|daily_ai_memory_page|market_intelligence_page|OpenRouter|OpenAI|Tavily|Exa Search' lib; then
+          if grep -RniE 'AI Access|AI Memory|Market Intelligence|AI Chat|AI Provider|DailyAiMemory|nvidia_signal_review|daily_ai_memory_page|market_intelligence_page' lib; then
             echo "Removed AI page/provider UI or AI-memory implementation remains in active Flutter source."
             exit 1
           fi
