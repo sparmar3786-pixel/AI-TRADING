@@ -35,7 +35,7 @@ class ORBEngineTests(unittest.TestCase):
 
     def test_missing_volume_fails_closed(self):
         frame = candles([100, 101, 100.5, 102, 103, 104, 105]).drop(columns="volume")
-        result = OpeningRangeBreakoutEngine().generate(frame, 25000, datetime(2026, 10, 15, 10, 0, tzinfo=IST))
+        result = OpeningRangeBreakoutEngine().generate(frame, 25000, datetime(2026, 10, 15, 9, 51, tzinfo=IST))
         self.assertEqual(result.decision, "WAIT")
 
     def test_outside_window_waits(self):
@@ -49,7 +49,7 @@ class VWAPEngineTests(unittest.TestCase):
         frame = candles([100, 99.8, 99.5, 99.4, 99.3, 99.2, 100.5, 101.5],
                         [100, 100, 110, 120, 130, 150, 250, 300])
         result = VWAPStrategyEngine(use_volume_filter=True, volume_mult=1.0).generate(
-            frame, 25012, datetime(2026, 10, 15, 10, 0, tzinfo=IST))
+            frame, 25012, datetime(2026, 10, 15, 9, 51, tzinfo=IST))
         self.assertEqual(result.candidate_decision, "CALL BUY")
         self.assertIsNotNone(result.vwap)
         self.assertLess(result.stop_loss, result.entry)
@@ -58,7 +58,7 @@ class VWAPEngineTests(unittest.TestCase):
 
     def test_missing_volume_fails_closed(self):
         frame = candles([100, 99.8, 99.5, 99.4, 99.3, 99.6, 100.5, 101.5]).drop(columns="volume")
-        result = VWAPStrategyEngine().generate(frame, 25012, datetime(2026, 10, 15, 10, 0, tzinfo=IST))
+        result = VWAPStrategyEngine().generate(frame, 25012, datetime(2026, 10, 15, 9, 51, tzinfo=IST))
         self.assertEqual(result.decision, "WAIT")
 
     def test_outside_window_waits(self):
