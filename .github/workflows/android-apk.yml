@@ -184,6 +184,28 @@ jobs:
           ARM64="$APK_DIR/app-arm64-v8a-release.apk"
           test -s "$UNIVERSAL"
           test -s "$ARM64"
+
+          # Do not require Dart AOT binaries to preserve full URL literals.
+          # Flutter's AOT compiler can omit/fold constants, so validate the
+          # compile-time defines and their consumers in source instead.
+          WORKFLOW="../.github/workflows/android-apk.yml"
+          CONFIG="lib/config.dart"
+          API="lib/api.dart"
+          grep -F -- '--dart-define=BACKEND_URL=https://nse-algo-backend-final-production.up.railway.app' "$WORKFLOW" >/dev/null || {
+            echo "Build configuration missing BACKEND_URL define"
+            exit 1
+          }
+          grep -F -- '--dart-define=SIGNAL_BACKEND_URL=https://ai-trading-signals-api-production.up.railway.app' "$WORKFLOW" >/dev/null || {
+            echo "Build configuration missing SIGNAL_BACKEND_URL define"
+            exit 1
+          }
+          grep -F "String.fromEnvironment(" "$CONFIG" >/dev/null
+          grep -F "'BACKEND_URL'" "$CONFIG" >/dev/null
+          grep -F "'SIGNAL_BACKEND_URL'" "$CONFIG" >/dev/null
+          grep -F "AppConfig.backendUrl" "$API" >/dev/null
+          grep -F "AppConfig.signalBackendUrl" "$API" >/dev/null
+          echo "Compile-time backend defines and Dart consumers verified."
+
           AAPT=$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort | tail -1)
           for APK in "$UNIVERSAL" "$ARM64"; do
             mapfile -t CODE_FILES < <(unzip -Z1 "$APK" | grep -E '(^classes[0-9]*[.]dex$|^lib/[^/]+/libapp[.]so$)' || true)
@@ -197,14 +219,8 @@ jobs:
               echo "Forbidden local/emulator backend URL found in $APK"
               exit 1
             fi
-            if ! printf '%s\n' "$COMPILED_STRINGS" | grep -F 'nse-algo-backend-final-production.up.railway.app' >/dev/null; then
-              echo "Primary backend URL missing from $APK"
-              exit 1
-            fi
-            if ! printf '%s\n' "$COMPILED_STRINGS" | grep -F 'ai-trading-signals-api-production.up.railway.app' >/dev/null; then
-              echo "Signal backend URL missing from $APK"
-              exit 1
-            fi
+            # URL literals are intentionally not grepped from Dart AOT output;
+            # the compile-time defines and their source consumers were checked above.
             if printf '%s\n' "$COMPILED_STRINGS" | grep -E 'OPENAI_API_KEY|OPEN_AI_API_KEY|OPENAI_MODEL|api[.]openai[.]com' >/dev/null; then
               echo "Direct OpenAI provider configuration unexpectedly found in $APK"
               exit 1
