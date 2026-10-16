@@ -2,35 +2,34 @@
 
 Audit date: 2026-10-16  
 Repository: AI-TRADING  
-Scope: repository source and UI wiring only; no broker secrets, Railway credentials, APK runtime, or live order execution were available to this audit.
+Active Railway branch reviewed: `fix/signal-backend-health-status` (commit `47ab9a7f0faad48e7244a0d4c16a9271fcc7fb` at audit start).  
+Scope: source, backend signal pipeline and UI wiring. Live Angel One session and production response bodies were not available for this code review.
 
-## Findings
+## ORB and VWAP
 
-### ORB and VWAP
-- The Flutter Strategy Library explicitly marked ORB and VWAP as NOT IMPLEMENTED.
-- The existing VWAP references in the repository are indicator/vendor examples; they do not prove a first-party entry/exit strategy is routed into the active signal API.
-- Added deterministic, fail-closed research candidate engines:
-  - `quant/orb_engine.py`: IST session opening range, completed-candle breakout, optional volume confirmation, ATR-bounded risk levels.
-  - `quant/vwap_strategy.py`: session-reset cumulative VWAP, completed-candle cross, volume confirmation and ATR-based risk levels.
-- Both emit candidates with `live_validation=PENDING`; they do not authorize trades. The strategy library must continue to say live API wiring is unverified until the external Railway signal service imports/calls these modules and end-to-end tests prove it.
+- The active backend branch's `backend/app/parmar_api.py` explicitly listed ORB and VWAP as `ENGINE_NOT_IMPLEMENTED`; no standalone first-party engine modules were present on that branch.
+- Added `quant/orb_engine.py`: IST opening range, completed-candle breakout, volume confirmation, ATR-bounded underlying stop/target, and stale/future candle rejection.
+- Added `quant/vwap_strategy.py`: session-reset VWAP, completed-candle cross, volume confirmation, ATR-based underlying stop/target, and stale/future candle rejection.
+- Wired both engines into `backend/app/main.py::_index_snapshot()` using the same completed Angel One 5-minute candles consumed by the canonical signal pipeline. Their results are exposed under `strategy_candidates.orb` and `strategy_candidates.vwap`.
+- Added a Strategy Library panel to display each candidate, underlying entry/SL/target, reasons and blockers. A candidate always has `decision=WAIT` and `actionable=false`; the values are underlying spot levels, not option-premium prices.
+- Registered the modules in the Parmar strategy inventory. The diagnostic `/v1/parmar/evaluate` endpoint remains fail-closed for caller-supplied snapshots; live candidates come from the trusted `/v1/signals` pipeline instead.
 
-### Five-layer Quant Engine — critical integration gap
-- The current main branch tree does not contain the backend evaluator described in the old integration guide (the guide refers to `quant_engine.py` and `backend/app/main.py`, which are absent from the current tracked tree).
-- `src/services/api.ts` implements `getQuantLayers()` as five hard-coded `UNAVAILABLE` records. The web Quant Engine page calls this stub, not a backend calculation. This is safe from false PASS but is not a functioning live engine.
-- The Flutter Quant Engine page reads `quant_engine` / `five_layer_engine` fields from a signal response, but this repository does not contain the backend implementation that guarantees those fields are computed and supplied. Therefore the UI alone cannot establish that any layer executed.
-- The TypeScript 10-minute gate stores confirmation state in browser `localStorage`. That is not server-owned and can be reset by clearing storage/reinstalling. It must not be the authoritative production stability gate.
-- A passing HTTP status, non-empty response, or a market row marked live is not evidence that all five quant layers passed. Each layer needs timestamped input provenance, explicit result/reason, and fail-closed semantics.
+## Five-layer Quant Engine audit
 
-## Required production integration before any BUY/SELL
-1. Add/import the actual five-layer evaluator in the active Railway backend repository.
-2. Run it in the same canonical signal pipeline used by dashboard, strategy, risk and signal pages.
-3. Require all five layer outputs to be present, schema-valid and fresh; no missing layer may default to PASS.
-4. Keep the 600-second candidate+strike+side stability state server-side; reset on candidate change, failed validation, stale/future timestamps or a gap over 60 seconds.
-5. Map underlying entry/SL/target to a real, fresh, liquid option contract and its premium. Never label spot prices as option premium prices.
-6. Add backend regression tests for stale/future/missing data, cross-layer conflicts, invalid spreads, missing ATR, invalid option liquidity, expiry/strike mapping and stability resets.
-7. Verify live Angel One session/stream and fresh option-chain data from Railway logs and response bodies, not HTTP 200 alone.
+### Findings fixed in this change
+- `quant_engine.py` previously stored the independent 600-second confirmation gate inside the same `layers` dictionary as the five validation layers. The API therefore reported six total layers, and the UI could mislabel candidate generation/final validation as quant layers.
+- The evaluator now returns exactly five validation layers: data quality, trend/sentiment, order flow, option selection and risk levels. The 600-second confirmation result is a separate `confirmation` object.
+- The canonical signal API now emits a normalized `five_layer_engine` / `quant_engine` contract with exactly five named layers, explicit PASS/FAIL status, per-layer evidence text, a source timestamp and a freshness flag. The pass count is out of five and is not a win probability.
+- The Trade Engine UI now labels candidate generation and the final validation gate separately from the five quant layers; the stability gate is shown separately and is not counted as layer six.
+- The Strategy Library counts only the five normalized validation layers, and shows ORB/VWAP backend candidate status from the shared signal response.
 
-## Verification status
-- Added unit tests cover ORB/VWAP candidate, missing-volume and out-of-window behavior.
-- These engines are research candidates only; the active Railway endpoint is not wired by this repository change.
-- No APK was built and no live API, Angel One, Railway deployment, profitability or win-rate claim is made.
+### Remaining risks / production verification
+- The 600-second confirmation state is held in process memory (`_confirmation_states`). Restarting the service resets the gate to WAIT, which is fail-closed; multiple Railway replicas would not share confirmation state. For multi-replica production, use a shared Redis/Postgres state with atomic updates.
+- The web React page's `getQuantLayers()` is still a hard-coded `UNAVAILABLE` stub. The active Flutter backend path is the one wired to `/v1/signals`; do not treat the separate web stub as a live quant calculation.
+- ORB/VWAP candidates are not final trade signals. Their underlying levels still require fresh option-contract resolution, premium-based entry/SL/target calculation, agreement with the five quant layers, all risk checks, and an uninterrupted server-side 600-second same-candidate gate.
+- An HTTP 200, a fresh spot quote, or a strategy candidate does not prove that all layers passed. Check response bodies, timestamp provenance, option bid/ask/OI/volume, selected contract, and server confirmation state in live Railway diagnostics.
+- No accuracy, win-rate, profitability, APK build, or live broker execution is claimed.
+
+## Tests
+- `tests/test_orb_vwap_engines.py`: candidate generation, stop/target ordering, missing-volume rejection, and out-of-window rejection.
+- `tests/test_quant_engine.py`: stale data, timestamp normalization, trend/flow/option/risk blockers, 10-minute confirmation and reset behavior, and the separation between five validation layers and the confirmation gate.
