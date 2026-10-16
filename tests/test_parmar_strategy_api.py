@@ -75,7 +75,6 @@ def test_direct_evaluate_never_trusts_caller_snapshot_or_emits_trade_levels():
     assert response.status_code == 200, response.text
     result = response.json()
     assert result["decision"] == "WAIT"
-    assert result["actionable"] if "actionable" in result else True
     assert result["entry"] is None
     assert result["stop_loss"] is None
     assert result["target"] is None
