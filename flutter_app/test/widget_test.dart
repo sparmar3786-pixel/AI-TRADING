@@ -76,4 +76,27 @@ void main() {
       expect(find.text(label), findsNothing, reason: '$label must not appear in navigation');
     }
   });
+  testWidgets('Indicators page clearly fixes the live signal EMA periods', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: IndicatorsPage(
+          selected: 'NIFTY',
+          signal: <String, dynamic>{
+            'indicators': <String, dynamic>{
+              'ema_fast': 101.0,
+              'ema_slow': 99.0,
+            },
+          },
+          onIndex: (_) {},
+        ),
+      ),
+    ));
+    expect(find.text('Core EMA Configuration'), findsOneWidget);
+    expect(find.text('Live signal EMA fast period'), findsOneWidget);
+    expect(find.text('8', skipOffstage: false), findsOneWidget);
+    expect(find.text('21', skipOffstage: false), findsOneWidget);
+    expect(find.text('APPLY EMA'), findsNothing);
+    expect(find.byType(TextField), findsNothing);
+  });
+
 }

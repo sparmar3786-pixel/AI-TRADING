@@ -359,7 +359,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         MarketPage(selected:selectedIndex,onChanged:(v)=>setState(()=>selectedIndex=v), signal:_signal(selectedIndex), market:_market(selectedIndex)),
         ChainPage(selected:selectedIndex,onChanged:(v)=>setState(()=>selectedIndex=v), market:_market(selectedIndex)),
         OIPage(signals:signals),
-        IndicatorsPage(selected:selectedIndex,signal:_signal(selectedIndex),fast:emaFast,slow:emaSlow,onChanged:(f,s){setState((){emaFast=f;emaSlow=s;});refresh();},onIndex:(v)=>setState(()=>selectedIndex=v)),
+        IndicatorsPage(selected:selectedIndex,signal:_signal(selectedIndex),onIndex:(v)=>setState(()=>selectedIndex=v)),
         SignalPage(index:selectedIndex,signals:signals,tradePlans:tradePlans,market:market,onChanged:(v)=>setState(()=>selectedIndex=v)),
         RiskPage(index:selectedIndex,signal:_signal(selectedIndex),plans:tradePlans),
         BacktestingPage(backendUrl: backendUrl),
@@ -985,33 +985,74 @@ class OIPage extends StatelessWidget {
   ]);
 }
 
-class IndicatorsPage extends StatefulWidget {
-  const IndicatorsPage({required this.selected,required this.signal,required this.fast,required this.slow,required this.onChanged,required this.onIndex,super.key});
-  final String selected; final Map<String,dynamic> signal; final int fast,slow; final void Function(int,int) onChanged; final ValueChanged<String> onIndex;
-  @override State<IndicatorsPage> createState()=>_IndicatorsState();
-}
-class _IndicatorsState extends State<IndicatorsPage>{
-  late TextEditingController fast,slow;
-  @override void initState(){super.initState();fast=TextEditingController(text:'8');slow=TextEditingController(text:'13');}
-  @override void didUpdateWidget(covariant IndicatorsPage old){super.didUpdateWidget(old);fast.text=widget.fast.toString();slow.text=widget.slow.toString();}
-  @override void dispose(){fast.dispose();slow.dispose();super.dispose();}
-  @override Widget build(BuildContext context){final i=Map<String,dynamic>.from(widget.signal['indicators'] as Map? ?? const{});return ListView(padding:const EdgeInsets.all(10),children:[
-    IndexPicker(selected:widget.selected,onChanged:widget.onIndex),const Section('Editable EMA'),
-    Row(children:[Expanded(child:TextField(controller:fast,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'EMA Fast'))),const SizedBox(width:8),Expanded(child:TextField(controller:slow,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'EMA Slow')))]),
-    const SizedBox(height:8),FilledButton(onPressed:(){final f=int.tryParse(fast.text)??8;final s=int.tryParse(slow.text)??13;widget.onChanged(f.clamp(2,50),s.clamp(3,100));},child:const Text('APPLY EMA')),
-    const Section('Live Indicator Snapshot'),
-    InfoRow('EMA Fast',_val(i['ema_fast'])),InfoRow('EMA Slow',_val(i['ema_slow'])),InfoRow('SMA 20',_val(i['sma20'])),
-    InfoRow('EMA 50',_val(i['ema50'])),InfoRow('EMA 200',_val(i['ema200'])),
-    InfoRow('RSI 14',_val(i['rsi14'])),InfoRow('MACD',_val(i['macd'])),InfoRow('MACD Histogram',_val(i['macd_hist'])),
-    InfoRow('ATR 14',_val(i['atr14'])),InfoRow('VWAP',_val(i['vwap'])),
-    InfoRow('Bollinger Mid',_val(i['bb_mid'])),InfoRow('Bollinger Upper',_val(i['bb_upper'])),InfoRow('Bollinger Lower',_val(i['bb_lower'])),
-    InfoRow('Stochastic %K 14',_val(i['stochastic_k14'])),InfoRow('Stochastic %D 3',_val(i['stochastic_d3'])),
-    InfoRow('Williams %R 14',_val(i['williams_r14'])),InfoRow('ROC 10 (%)',_val(i['roc10_pct'])),
-    InfoRow('ADX 14',_val(i['adx14'])),InfoRow('Supertrend Direction',_val(i['supertrend_direction'])),
-    InfoRow('Support 20',_val(i['support20'])),InfoRow('Resistance 20',_val(i['resistance20'])),
-    InfoRow('Z-score 20',_val(i['zscore20'])),InfoRow('Realized Volatility 20',_val(i['realized_vol20'])),
-    const Text('Advanced indicators require sufficient normalized OHLC history. N/A means the required history is not available; no values are fabricated.', style: TextStyle(fontSize: 11, color: Colors.white70)),
-  ]);}
+class IndicatorsPage extends StatelessWidget {
+  const IndicatorsPage({
+    required this.selected,
+    required this.signal,
+    required this.onIndex,
+    super.key,
+  });
+
+  final String selected;
+  final Map<String, dynamic> signal;
+  final ValueChanged<String> onIndex;
+
+  @override
+  Widget build(BuildContext context) {
+    final indicators = Map<String, dynamic>.from(signal['indicators'] as Map? ?? const {});
+    return ListView(
+      padding: const EdgeInsets.all(10),
+      children: [
+        IndexPicker(selected: selected, onChanged: onIndex),
+        const Section('Core EMA Configuration'),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                InfoRow('Live signal EMA fast period', '8'),
+                InfoRow('Live signal EMA slow period', '21'),
+                SizedBox(height: 6),
+                Text(
+                  'Core live-signal decisions use fixed EMA 8/21. Editable period controls were removed because the backend does not apply query overrides to the core calculation.',
+                  style: TextStyle(fontSize: 11, color: Colors.white70),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const Section('Live Indicator Snapshot'),
+        InfoRow('EMA Fast', _val(indicators['ema_fast'])),
+        InfoRow('EMA Slow', _val(indicators['ema_slow'])),
+        InfoRow('SMA 20', _val(indicators['sma20'])),
+        InfoRow('EMA 50', _val(indicators['ema50'])),
+        InfoRow('EMA 200', _val(indicators['ema200'])),
+        InfoRow('RSI 14', _val(indicators['rsi14'])),
+        InfoRow('MACD', _val(indicators['macd'])),
+        InfoRow('MACD Histogram', _val(indicators['macd_hist'])),
+        InfoRow('ATR 14', _val(indicators['atr14'])),
+        InfoRow('VWAP', _val(indicators['vwap'])),
+        InfoRow('Bollinger Mid', _val(indicators['bb_mid'])),
+        InfoRow('Bollinger Upper', _val(indicators['bb_upper'])),
+        InfoRow('Bollinger Lower', _val(indicators['bb_lower'])),
+        InfoRow('Stochastic %K 14', _val(indicators['stochastic_k14'])),
+        InfoRow('Stochastic %D 3', _val(indicators['stochastic_d3'])),
+        InfoRow('Williams %R 14', _val(indicators['williams_r14'])),
+        InfoRow('ROC 10 (%)', _val(indicators['roc10_pct'])),
+        InfoRow('ADX 14', _val(indicators['adx14'])),
+        InfoRow('Supertrend Direction', _val(indicators['supertrend_direction'])),
+        InfoRow('Support 20', _val(indicators['support20'])),
+        InfoRow('Resistance 20', _val(indicators['resistance20'])),
+        InfoRow('Z-score 20', _val(indicators['zscore20'])),
+        InfoRow('Realized Volatility 20', _val(indicators['realized_vol20'])),
+        const Text(
+          'Advanced indicators require sufficient normalized OHLC history. N/A means the required history is not available; no values are fabricated.',
+          style: TextStyle(fontSize: 11, color: Colors.white70),
+        ),
+      ],
+    );
+  }
 }
 
 class SignalPage extends StatelessWidget {
