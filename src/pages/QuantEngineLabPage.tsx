@@ -106,7 +106,7 @@ export const QuantEngineLabPage: React.FC = () => {
           {!quantAvailable
             ? 'Quant confluence is unavailable because verified backend layer calculations are not available. Do not treat this panel as a validated signal.'
             : currentSignal?.candidate_decision && currentSignal.candidate_decision !== 'WAIT'
-              ? `The 5-Layer Quant Engine has validated a high-probability ${currentSignal.candidate_decision} on ${selectedIndex} with ${totalScore}% weighted score. The signal is currently monitored under the 10-minute continuous gate.`
+              ? `A ${currentSignal.candidate_decision} candidate is present for ${selectedIndex}. This display does not prove profitability or server-side 10-minute confirmation; verify backend validation and fresh data before treating it as actionable.`
               : `All 5 quantitative layers are actively monitoring ${selectedIndex}. Signal generation is held in WAIT until minimum 80% weighted confluence is achieved.`}
         </p>
       </div>
