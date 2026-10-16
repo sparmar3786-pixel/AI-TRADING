@@ -208,7 +208,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           'remaining_seconds': 0, 'since_utc': since.toIso8601String(),
         };
       }
-      rawSignals[entry.key] = row;
+      rawSignals[signalEntry.key] = row;
     }
     result['signals'] = rawSignals;
     final plans = (result['trade_plans'] as List? ?? const [])
@@ -239,7 +239,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         validation['blocks'] = blocks;
         row['live_validation'] = validation;
         row['signal_stability'] = <String, dynamic>{'state': 'STALE_OFFLINE', 'required_minutes': 10};
-        rawSignals[entry.key] = row;
+        rawSignals[signalEntry.key] = row;
       }
     }
     result['signals'] = rawSignals;
