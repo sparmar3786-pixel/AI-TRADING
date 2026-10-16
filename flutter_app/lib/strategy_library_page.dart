@@ -9,35 +9,35 @@ class StrategyLibraryPage extends StatelessWidget {
     _StrategyItem(
       name: 'OI Price Action',
       source: 'quant/oi_price_action_engine.py',
-      state: 'SOURCE BUNDLED',
+      state: 'ENGINE SOURCE PRESENT',
       live: 'Live API wiring not verified',
       detail: 'Uses option-chain OI/PCR, price structure and candle/ATR confluence. Missing/stale OI data must return WAIT.',
     ),
     _StrategyItem(
       name: 'Hero Zero',
       source: 'quant/hero_zero.py',
-      state: 'SOURCE BUNDLED',
+      state: 'ENGINE SOURCE PRESENT',
       live: 'Expiry-only candidate; live API wiring not verified',
       detail: 'High-risk expiry-day setup with time-window and premium guards. Candidate only; never an order approval.',
     ),
     _StrategyItem(
       name: 'Failed-Move / PDH-PDL',
       source: 'quant/failed_move_fade.py',
-      state: 'SOURCE BUNDLED',
+      state: 'ENGINE SOURCE PRESENT',
       live: 'Live API wiring not verified',
       detail: 'Detects acceptance beyond previous-day high/low. Stale candles or failed validation must result in WAIT.',
     ),
     _StrategyItem(
       name: 'EMA Crossover',
       source: 'quant/ema_quant_engine.py',
-      state: 'SOURCE BUNDLED',
+      state: 'ENGINE SOURCE PRESENT',
       live: 'Live API wiring not verified',
       detail: 'EMA trend candidate with RSI/ATR filters. Must be merged, connected to the backend and tested before live use.',
     ),
     _StrategyItem(
       name: 'DAY-HL Liquidity Sweep',
       source: 'quant/day_hl_liquidity.py',
-      state: 'SOURCE BUNDLED',
+      state: 'DETECTOR SOURCE PRESENT',
       live: 'Detector only; live API wiring not verified',
       detail: 'Day-high/day-low liquidity event detector. Needs confirmed entry, invalidation, exit and risk mapping.',
     ),
@@ -64,7 +64,7 @@ class StrategyLibraryPage extends StatelessWidget {
       const Text('STRATEGY LIBRARY', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
       const SizedBox(height: 6),
       const Text(
-        'Five strategy-engine source files are included in this release branch. They are not executed by Flutter itself: live APK signals still require backend routing, fresh-data checks and risk validation.',
+        'Source presence is not live integration. The five listed strategy/detector sources are not executed by Flutter itself: live APK signals require verified backend routing, fresh-data checks, risk validation and the 10-minute stability gate.',
         style: TextStyle(color: Colors.white70),
       ),
       const SizedBox(height: 12),
@@ -74,7 +74,7 @@ class StrategyLibraryPage extends StatelessWidget {
         child: Padding(
           padding: EdgeInsets.all(12),
           child: Text(
-            'Safety: this page is an inventory, not a signal generator. Until a strategy is connected end-to-end and validated, it must remain non-actionable. No win rate or profitability is implied.',
+            'Safety: this page is an inventory, not a signal generator. Until a strategy is connected end-to-end and validated, it must remain non-actionable. Missing/stale data, failed risk checks or incomplete stability confirmation must keep the signal at WAIT. No win rate or profitability is implied.',
             style: TextStyle(fontWeight: FontWeight.w700),
           ),
         ),
@@ -104,8 +104,8 @@ class _StrategyCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ready = item.state == 'SOURCE BUNDLED';
-    final color = ready ? Colors.orangeAccent : Colors.redAccent;
+    final sourcePresent = item.state == 'ENGINE SOURCE PRESENT' || item.state == 'DETECTOR SOURCE PRESENT';
+    final color = sourcePresent ? Colors.orangeAccent : Colors.redAccent;
     return Card(
       margin: const EdgeInsets.only(bottom: 9),
       child: Padding(
