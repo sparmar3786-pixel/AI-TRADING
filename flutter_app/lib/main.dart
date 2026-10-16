@@ -363,6 +363,29 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
   Map<String,dynamic> _signal(String i) => Map<String,dynamic>.from(signals[i] as Map? ?? const {});
   Map<String,dynamic> _market(String i) => Map<String,dynamic>.from(market[i] as Map? ?? const {});
 
+  String _drawerStatusLabel() {
+    if (apiOnline && signalsEndpointOnline && status == 'LIVE market feed connected.') {
+      return 'Backend + live data OK';
+    }
+    if (apiOnline && signalsEndpointOnline && _hasFreshStream(liveTrading)) {
+      return 'Backend up • stream live / snapshot stale';
+    }
+    if (apiOnline && signalsEndpointOnline && status.startsWith('Backend online')) {
+      return 'Backend up • waiting for market data';
+    }
+    if (apiOnline && signalsEndpointOnline) {
+      return 'Backend up • snapshot stale / refreshing';
+    }
+    return apiOnline ? 'Backend up • data check needed' : 'Backend offline';
+  }
+
+  Color _drawerStatusColor() {
+    if (apiOnline && signalsEndpointOnline && status == 'LIVE market feed connected.') {
+      return Colors.greenAccent;
+    }
+    return apiOnline ? Colors.orangeAccent : Colors.redAccent;
+  }
+
   @override
   Widget build(BuildContext context) => DefaultTabController(
     length: tabs.length,
@@ -399,8 +422,8 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
               ),
               const Divider(),
               ListTile(
-                leading: Icon(Icons.circle, size: 11, color: apiOnline && signalsEndpointOnline && status == 'LIVE market feed connected.' ? Colors.greenAccent : (apiOnline ? Colors.orangeAccent : Colors.redAccent)),
-                title: Text(apiOnline && signalsEndpointOnline && status == 'LIVE market feed connected.' ? 'Backend + live data OK' : (apiOnline && signalsEndpointOnline && _hasFreshStream(liveTrading) ? 'Backend up • stream live / snapshot stale' : (apiOnline && signalsEndpointOnline && status.startsWith('Backend online') ? 'Backend up • waiting for market data' : (apiOnline && signalsEndpointOnline ? 'Backend up • snapshot stale / refreshing' : (apiOnline ? 'Backend up • data check needed' : 'Backend offline')))),
+                leading: Icon(Icons.circle, size: 11, color: _drawerStatusColor()),
+                title: Text(_drawerStatusLabel()),
                 subtitle: const Text('Tap a section above to open it'),
               ),
             ],
