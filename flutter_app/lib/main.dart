@@ -72,7 +72,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
   int qualifiedCount = 0;
   String? lastFetch;
   int emaFast = 8;
-  int emaSlow = 13;
+  int emaSlow = 21;
   String status = 'Connect Angel One from Settings.';
   Timer? _refreshTimer;
 
