@@ -62,11 +62,15 @@ class QuantEnginePage extends StatelessWidget {
       (layer) => (layer['status'] ?? layer['verdict'] ?? '').toString().toUpperCase() == 'PASS',
     );
     final reportedStatus = (engine['decision'] ?? engine['verdict'] ?? engine['status'] ?? 'WAIT').toString().toUpperCase();
+    final confirmation = _map(engine['confirmation'] ?? signal['signal_stability']);
+    final stabilityState = (confirmation['state'] ?? 'NOT VERIFIED').toString().toUpperCase();
+    final candidateConfirmed = {'CALL BUY', 'PUT BUY'}.contains(reportedStatus) &&
+        allLayersPass && stabilityState == 'CONFIRMED';
+    final anyLayerBlocked = parsedLayers.any((layer) =>
+        {'FAIL', 'BLOCK'}.contains((layer['status'] ?? layer['verdict'] ?? '').toString().toUpperCase()));
     final engineStatus = !dataAvailable ? 'DATA REQUIRED'
-        : (reportedStatus == 'PASS' && allLayersPass ? 'PASS'
-        : (reportedStatus == 'BLOCK' || parsedLayers.any((layer) =>
-            {'FAIL', 'BLOCK'}.contains((layer['status'] ?? layer['verdict'] ?? '').toString().toUpperCase()))
-            ? 'BLOCK' : 'WAIT'));
+        : (reportedStatus == 'BLOCK' || anyLayerBlocked ? 'BLOCK'
+        : (candidateConfirmed ? 'PASS' : 'WAIT'));
     final marketRow = _map(market[selectedIndex]);
     final live = marketRow['live'] == true;
     final age = marketRow['age_seconds'];
@@ -103,6 +107,8 @@ class QuantEnginePage extends StatelessWidget {
               const SizedBox(height: 6),
               Text('Market feed: ${live ? 'LIVE' : 'NOT VERIFIED'} • Snapshot age: ${age == null ? 'unknown' : '$age sec'}',
                 style: TextStyle(color: live ? Colors.greenAccent : Colors.orangeAccent, fontSize: 12)),
+              Text('600-second stability gate: $stabilityState • required ${confirmation['required_seconds'] ?? 600} sec',
+                style: TextStyle(color: stabilityState == 'CONFIRMED' ? Colors.greenAccent : Colors.orangeAccent, fontSize: 12)),
               if (!dataAvailable) ...[
                 const SizedBox(height: 10),
                 const Text(
