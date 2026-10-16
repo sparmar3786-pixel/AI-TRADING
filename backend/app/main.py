@@ -1878,7 +1878,7 @@ def _index_snapshot(
                 "target": getattr(signal, "target", None) if has_candidate else None,
                 "entry_price_basis": "UNDERLYING_SPOT",
                 "timestamp": observed,
-                "data_fresh": data_fresh and not strategy_frame.empty,
+                "data_fresh": (result.get("layers", {}).get("data_quality", {}).get("pass") is True) and not strategy_frame.empty,
                 "live_validation": validation,
                 "reasons": list(getattr(signal, "reasons", []) or []),
                 "guards": guards,
