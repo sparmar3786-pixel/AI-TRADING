@@ -29,11 +29,26 @@ class QuantEnginePage extends StatelessWidget {
   Map<String, dynamic> _map(dynamic value) =>
       value is Map ? Map<String, dynamic>.from(value) : <String, dynamic>{};
 
+  int _layerCount(dynamic value) =>
+      value is List ? value.length : value is Map ? value.length : 0;
+
   @override
   Widget build(BuildContext context) {
     final signal = _map(signals[selectedIndex]);
     final engine = _map(signal['quant_engine'] ?? signal['five_layer_engine']);
-    final rawLayers = engine['layers'] ?? engine['layer_results'] ?? signal['quant_layers'];
+    // Prefer a complete five-layer contract from the engine, but tolerate the
+    // canonical raw layer map returned by older backend builds. An empty or
+    // partial nested object must not mask a complete sibling payload.
+    final layerCandidates = <dynamic>[
+      engine['layers'], engine['layer_results'], signal['quant_layers'], signal['layers'],
+    ];
+    final rawLayers = layerCandidates.firstWhere(
+      (candidate) => _layerCount(candidate) == _expectedLayers.length,
+      orElse: () => layerCandidates.firstWhere(
+        (candidate) => _layerCount(candidate) > 0,
+        orElse: () => null,
+      ),
+    );
     final parsedLayers = <Map<String, dynamic>>[];
     if (rawLayers is List) {
       for (final item in rawLayers) {
@@ -45,6 +60,21 @@ class QuantEnginePage extends StatelessWidget {
           parsedLayers.add(<String, dynamic>{'name': entry.key.toString(), ...Map<String, dynamic>.from(entry.value as Map)});
         } else {
           parsedLayers.add(<String, dynamic>{'name': entry.key.toString(), 'status': entry.value});
+        }
+      }
+    }
+    // Raw quant_engine.py layers use `pass` + `reason`; map that explicit
+    // result to a display status without ever promoting missing evidence.
+    for (final layer in parsedLayers) {
+      if (layer['status'] == null && layer['verdict'] == null && layer['pass'] is bool) {
+        if (layer['pass'] == true) {
+          layer['status'] = 'PASS';
+        } else {
+          final evidence = (layer['detail'] ?? layer['reason'] ?? layer['message'] ?? '')
+              .toString().toLowerCase();
+          final unavailable = RegExp(r'unavailable|missing|not supplied|not available|insufficient|unknown|required')
+              .hasMatch(evidence);
+          layer['status'] = unavailable ? 'UNAVAILABLE' : 'FAIL';
         }
       }
     }
