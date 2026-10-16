@@ -206,7 +206,7 @@ jobs:
             mapfile -t CODE_FILES < <(unzip -Z1 "$APK" | grep -E '(^classes[0-9]*[.]dex$|^lib/[^/]+/libapp[.]so$)' || true)
             test "${#CODE_FILES[@]}" -gt 0
             COMPILED_STRINGS=$(for file in "${CODE_FILES[@]}"; do unzip -p "$APK" "$file" | strings; done)
-            if printf '%s\\n' "$COMPILED_STRINGS" | grep -Ei 'stream_chat_flutter_ai|llama_flutter_android|LlamaController|[.]gguf|GGUF model|offline Qwen|OpenRouter|NVIDIA|Gemini|/v1/ai/|/v1/providers/ai|AI Access|AI Chat' >/dev/null; then
+            if printf '%s\n' "$COMPILED_STRINGS" | grep -Ei 'stream_chat_flutter_ai|llama_flutter_android|LlamaController|[.]gguf|GGUF model|offline Qwen|OpenRouter|NVIDIA|Gemini|/v1/ai/|/v1/providers/ai|AI Access|AI Chat' >/dev/null; then
               echo "AI provider/chat/model code found in $APK; APK must be AI-free."
               exit 1
             fi
