@@ -85,6 +85,20 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(signal["live_validation"]["verdict"], "WAIT")
         self.assertIn("checks", signal["live_validation"])
         self.assertFalse(any(signal["live_validation"]["checks"].values()))
+
+    def test_wait_signal_returns_five_explicit_unavailable_quant_layers(self):
+        signal = api._wait_signal("NIFTY", "Insufficient completed 5-minute candles")
+        engine = signal["quant_engine"]
+        self.assertEqual(engine["total_layers"], 5)
+        self.assertEqual(engine["passed_layers"], 0)
+        self.assertIsNone(engine["timestamp"])
+        self.assertFalse(engine["data_fresh"])
+        self.assertEqual(len(engine["layers"]), 5)
+        self.assertTrue(all(layer["status"] == "UNAVAILABLE" for layer in engine["layers"].values()))
+        self.assertTrue(all("Insufficient completed 5-minute candles" in layer["detail"] for layer in engine["layers"].values()))
+        self.assertEqual(signal["decision"], "WAIT")
+        self.assertIsNone(signal["entry"])
+        self.assertIsNone(signal["strike"])
     def test_nvidia_review_cannot_override_or_conflict_with_deterministic_candidate(self):
         payload = {
             "market": {"NIFTY": {"ltp": 25000.0, "age_seconds": 3.0, "live": True}},
