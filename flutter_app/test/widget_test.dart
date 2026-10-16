@@ -36,24 +36,16 @@ void main() {
 
     expect(find.text('PARMAR STRATEGY ENGINE'), findsOneWidget);
 
-    // Target the actual vertical strategy ListView by stable key. Do not use
-    // .first/.last on generic Scrollable finders: drawer/tab navigators can
-    // introduce additional scrollables or none may be mounted at this point.
+    // Use the keyed ListView itself for deterministic gestures. Flutter's
+    // scrollUntilVisible/dragUntilVisible resolves its scrollable with .single,
+    // which has been brittle with nested Material scrollables in this screen.
     final strategyList = find.byKey(const ValueKey('strategy-library-list'));
-    final strategyScrollable = find.descendant(
-      of: strategyList,
-      matching: find.byType(Scrollable),
-    ).first;
     final finalStrategyCard = find.byKey(const ValueKey('strategy-card-vwap'));
     expect(strategyList, findsOneWidget);
-    expect(strategyScrollable, findsOneWidget);
-    await tester.scrollUntilVisible(
-      finalStrategyCard,
-      250,
-      scrollable: strategyScrollable,
-      maxScrolls: 100,
-    );
-    await tester.pumpAndSettle();
+    for (var attempt = 0; attempt < 20 && finalStrategyCard.evaluate().isEmpty; attempt++) {
+      await tester.drag(strategyList, const Offset(0, -250));
+      await tester.pumpAndSettle();
+    }
     expect(finalStrategyCard, findsOneWidget);
 
     // This is a local inventory/status disclosure, not proof of live API
