@@ -109,6 +109,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       final index = entry.key.toString().toUpperCase();
       final row = Map<String, dynamic>.from(entry.value as Map? ?? const {});
       var decision = (row['decision'] ?? 'WAIT').toString().toUpperCase();
+      final storageKey = 'trading_signal_gate_$index';
       final validation = Map<String, dynamic>.from(row['live_validation'] as Map? ?? const {});
       final guards = List<dynamic>.from(row['guards'] as List? ?? const <dynamic>[]);
       final blocks = List<dynamic>.from(validation['blocks'] as List? ?? const <dynamic>[]);
@@ -124,15 +125,17 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       final pricesValid = strike != null && entry != null && stop != null && target != null &&
           (side == 'CE' || side == 'PE') && stop < entry && target > entry;
       final backendPassed = validation['verdict'] == 'PASS' && guards.isEmpty && blocks.isEmpty;
-      final quoteValid = quoteAgeValid && pricesValid && backendPassed;
+      final proposedCandidate = decision == 'CALL BUY' || decision == 'PUT BUY';
+      final hasPriceData = row['strike'] != null || row['entry'] != null ||
+          row['stop_loss'] != null || row['target'] != null;
+      final requiresQuoteGate = proposedCandidate || hasPriceData || validation['verdict'] == 'PASS';
+      final quoteValid = !requiresQuoteGate || (quoteAgeValid && pricesValid && backendPassed);
 
-      // The client is a second fail-closed boundary. A backend PASS without
-      // numeric, non-future freshness ages and coherent option-premium risk
-      // levels must never survive as a candidate.
-      if (!quoteValid) {
-        if (decision == 'CALL BUY' || decision == 'PUT BUY') {
-          row['candidate_decision'] = decision;
-        }
+      // The client is a second fail-closed boundary. A proposed BUY with
+      // missing/stale quote ages, malformed prices, or incomplete backend
+      // validation cannot be actionable or retain stale contract levels.
+      if (requiresQuoteGate && !quoteValid) {
+        if (proposedCandidate) row['candidate_decision'] = decision;
         decision = 'WAIT';
         row['decision'] = 'WAIT';
         row['strike'] = null;
@@ -153,12 +156,10 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         row['live_validation'] = validation;
         await prefs.remove(storageKey);
       }
-      final isCandidate = quoteValid &&
-          (decision == 'CALL BUY' || decision == 'PUT BUY') &&
+      final isCandidate = quoteValid && proposedCandidate &&
           row['strike'] != null && row['option_side'] != null &&
           row['entry'] != null && row['stop_loss'] != null && row['target'] != null &&
           validation['verdict'] == 'PASS' && guards.isEmpty;
-      final storageKey = 'trading_signal_gate_$index';
       if (!isCandidate) {
         await prefs.remove(storageKey);
         row['signal_stability'] = <String, dynamic>{'state': 'NOT_ACTIONABLE', 'required_minutes': 10};
