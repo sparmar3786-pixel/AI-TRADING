@@ -104,6 +104,11 @@ class OpeningRangeBreakoutEngine:
             df = df.loc[[ts.date() == now.date() and ts <= pd.Timestamp(now) for ts in df.index]]
             if self.drop_forming and not df.empty:
                 df = df.iloc[:-1]
+            if df.empty:
+                return _wait("No completed candles after filtering", "NO_COMPLETED_CANDLES")
+            candle_age = (now - df.index[-1].to_pydatetime()).total_seconds()
+            if candle_age < 0 or candle_age > 360:
+                return _wait("Latest completed candle is stale or future-dated", "STALE_CANDLES")
             required = {"open", "high", "low", "close"}
             if not required.issubset(df.columns):
                 return _wait("Missing OHLC columns", "MISSING_OHLC")
