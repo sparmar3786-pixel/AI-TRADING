@@ -137,9 +137,9 @@ jobs:
               # Add the dependency block at EOF in that case rather than failing CI.
               anchor = "dependencies {"
               if anchor in s:
-                  s = s.replace(anchor, anchor + "\\n    " + dep, 1)
+                  s = s.replace(anchor, anchor + "\n    " + dep, 1)
               else:
-                  s = s.rstrip() + "\\n\\ndependencies {\\n    " + dep + "\\n}\\n"
+                  s = s.rstrip() + "\n\ndependencies {\n    " + dep + "\n}\n"
           p.write_text(s)
           PY
           grep -nE 'isCoreLibraryDesugaringEnabled|coreLibraryDesugaring' "$GRADLE"
