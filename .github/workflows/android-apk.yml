@@ -137,7 +137,10 @@ jobs:
           if ! grep -q 'id.flutter.flutter_background_service.BackgroundService' "$MANIFEST"; then
             sed -i 's#</application>#<service android:name="id.flutter.flutter_background_service.BackgroundService" android:foregroundServiceType="dataSync" android:exported="true" />\n    </application>#' "$MANIFEST"
           fi
-          sed -i 's/android:label="ai_trading_signal"/android:label="Trading Signals"/' "$MANIFEST"
+          # Flutter may generate a default label or restore an existing label from the release branch.
+          # Normalize any existing application label, not just the template default.
+          sed -i -E 's/android:label="[^"]*"/android:label="Trading Signals"/' "$MANIFEST"
+          grep -F 'android:label="Trading Signals"' "$MANIFEST"
           GRADLE=android/app/build.gradle.kts
           sed -i 's/applicationId = "com.example.ai_trading_signal"/applicationId = "com.sparmar3786.aitradingsignals"/' "$GRADLE"
           grep -n 'applicationId\|minSdk' "$GRADLE"
