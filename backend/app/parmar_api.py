@@ -20,8 +20,8 @@ STRATEGIES: tuple[dict[str, Any], ...] = (
     {"id": "failed_move_pdh_pdl", "name": "Failed Move / PDH-PDL", "source": "quant/failed_move_fade.py", "status": "SOURCE_PRESENT_ADAPTER_PENDING"},
     {"id": "ema_crossover", "name": "EMA Crossover", "source": "quant/ema_quant_engine.py", "status": "SOURCE_PRESENT_ADAPTER_PENDING"},
     {"id": "day_hl_liquidity_sweep", "name": "Day HL Liquidity Sweep", "source": "quant/day_hl_liquidity.py", "status": "DETECTOR_ADAPTER_PENDING"},
-    {"id": "orb", "name": "Opening Range Breakout (ORB)", "source": None, "status": "ENGINE_NOT_IMPLEMENTED"},
-    {"id": "vwap", "name": "VWAP Strategy", "source": None, "status": "ENGINE_NOT_IMPLEMENTED"},
+    {"id": "orb", "name": "Opening Range Breakout (ORB)", "source": "quant/orb_engine.py", "status": "SOURCE_PRESENT_ADAPTER_PENDING"},
+    {"id": "vwap", "name": "VWAP Strategy", "source": "quant/vwap_strategy.py", "status": "SOURCE_PRESENT_ADAPTER_PENDING"},
 )
 _IDS = {item["id"] for item in STRATEGIES}
 
@@ -47,8 +47,8 @@ _ENGINE_MODULES = {
     "failed_move_pdh_pdl": ("quant.failed_move_fade", "SOURCE_ONLY"),
     "ema_crossover": ("quant.ema_quant_engine", "SOURCE_ONLY"),
     "day_hl_liquidity_sweep": ("quant.day_hl_liquidity", "DETECTOR_ONLY"),
-    "orb": (None, "NOT_IMPLEMENTED"),
-    "vwap": (None, "NOT_IMPLEMENTED"),
+    "orb": ("quant.orb_engine", "SOURCE_ONLY"),
+    "vwap": ("quant.vwap_strategy", "SOURCE_ONLY"),
 }
 
 

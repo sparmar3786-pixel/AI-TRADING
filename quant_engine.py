@@ -322,10 +322,11 @@ def evaluate_five_layer_signal(
             decision = "CALL BUY" if option_type == "CALL" else "PUT BUY"
             stability = "CONFIRMED"
 
-    layers["confirmation"] = {
+    confirmation_result = {
         "pass": decision in ("CALL BUY", "PUT BUY"),
         "state": stability, "required_seconds": confirmation_seconds,
     }
+    # Keep five validation layers separate from the independent stability gate.
     return {
         "decision": decision,
         "candidate_decision": ("CALL BUY" if option_type == "CALL" else "PUT BUY") if candidate else "WAIT",
@@ -337,6 +338,7 @@ def evaluate_five_layer_signal(
         "stop_loss": round(stop, 4) if candidate and stop is not None else None,
         "target": round(target, 4) if candidate and target is not None else None,
         "layers": layers,
+        "confirmation": confirmation_result,
         "reasons": reasons,
         "confirmation_state": new_state,
         "score_semantics": "Layer pass status is a rule checklist, not probability of profit",
@@ -479,13 +481,13 @@ def evaluate_futures_signal(
             reasons.append(f"Commodity signal stability gate: {int(confirmation_seconds - elapsed)} seconds remaining")
         else:
             decision, stability = side, "CONFIRMED"
-    layers["confirmation"] = {"pass": decision in ("BUY FUTURE", "SELL FUTURE"), "state": stability, "required_seconds": confirmation_seconds}
+    confirmation_result = {"pass": decision in ("BUY FUTURE", "SELL FUTURE"), "state": stability, "required_seconds": confirmation_seconds}
     return {
         "decision": decision, "candidate_decision": side if candidate else "WAIT",
         "direction": trend, "entry": round(entry, 4) if candidate and entry is not None else None,
         "stop_loss": round(stop, 4) if candidate and stop is not None else None,
         "target": round(target, 4) if candidate and target is not None else None,
-        "layers": layers, "reasons": reasons, "confirmation_state": new_state,
+        "layers": layers, "confirmation": confirmation_result, "reasons": reasons, "confirmation_state": new_state,
         "signal_stability": {"state": stability, "required_minutes": 10, "required_seconds": confirmation_seconds},
         "signal_only": True, "order_placement_enabled": False,
     }

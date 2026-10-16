@@ -28,6 +28,15 @@ class FiveLayerEngineTests(unittest.TestCase):
             }],
         }
 
+    def test_confirmation_gate_is_separate_from_five_validation_layers(self):
+        result = evaluate_five_layer_signal(self.snapshot, now=self.now)
+        self.assertEqual(
+            set(result["layers"]),
+            {"data_quality", "trend_sentiment", "order_flow", "option_selection", "risk_levels"},
+        )
+        self.assertIn("confirmation", result)
+        self.assertEqual(result["confirmation"]["state"], "CONFIRMING")
+
     def test_missing_or_stale_market_data_fails_closed(self):
         result = evaluate_five_layer_signal(self.snapshot, now=self.now + timedelta(seconds=16))
         self.assertEqual(result["decision"], "WAIT")
@@ -68,7 +77,7 @@ class FiveLayerEngineTests(unittest.TestCase):
         result = evaluate_five_layer_signal(self.snapshot, now=self.now)
         self.assertEqual(result["decision"], "WAIT")
         self.assertEqual(result["candidate_decision"], "CALL BUY")
-        self.assertEqual(result["layers"]["confirmation"]["state"], "CONFIRMING")
+        self.assertEqual(result["confirmation"]["state"], "CONFIRMING")
         self.assertEqual(result["entry"], 100.1)
         self.assertEqual(result["stop_loss"], 97.1)
         self.assertEqual(result["target"], 106.1)
@@ -90,7 +99,7 @@ class FiveLayerEngineTests(unittest.TestCase):
             )
             state = result["confirmation_state"]
         self.assertEqual(result["decision"], "CALL BUY")
-        self.assertEqual(result["layers"]["confirmation"]["state"], "CONFIRMED")
+        self.assertEqual(result["confirmation"]["state"], "CONFIRMED")
 
     def test_refresh_gap_restarts_confirmation(self):
         first = evaluate_five_layer_signal(self.snapshot, now=self.now)
@@ -102,7 +111,7 @@ class FiveLayerEngineTests(unittest.TestCase):
             next_snapshot, now=next_now, confirmation_state=first["confirmation_state"]
         )
         self.assertEqual(result["decision"], "WAIT")
-        self.assertEqual(result["layers"]["confirmation"]["state"], "CONFIRMING")
+        self.assertEqual(result["confirmation"]["state"], "CONFIRMING")
 
     def test_conflicting_timeframes_block_signal(self):
         self.snapshot["timeframe_closes"]["15m"] = [22010, 22000, 21990, 21980, 21970]
