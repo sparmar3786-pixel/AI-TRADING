@@ -1254,13 +1254,16 @@ class RiskPage extends StatelessWidget {
       padding: const EdgeInsets.all(10),
       children: [
         Section('Risk — ' + index),
+        InfoRow('Decision', (signal['decision'] ?? signal['final_decision'] ?? 'WAIT').toString()),
+        InfoRow('Option / Strike', _riskOptionStrike(signal)),
         InfoRow('Entry', _val(signal['entry'])),
+        InfoRow('Exit', _val(signal['exit'] ?? signal['exit_price'])),
         InfoRow('Stop Loss', _val(signal['stop_loss'])),
         InfoRow('Target', _val(signal['target'])),
-        InfoRow('Invalidation', guards.join(', ')),
+        InfoRow('Invalidation', guards.isEmpty ? (signal['data_quality'] ?? signal['status'] ?? 'VALIDATION REQUIRED').toString() : guards.join(', ')),
         StatusCard(
           text: indexPlans.isEmpty
-              ? 'No qualified trade plan for ' + index + '.'
+              ? 'No qualified trade plan for ' + index + '. Entry/SL/target are intentionally not estimated. Check fresh market data, Angel One session and strategy/risk gates.'
               : indexPlans.length.toString() + ' qualified plan(s) for ' + index + ' currently pass the gates.',
           good: indexPlans.isNotEmpty,
         ),
@@ -1475,6 +1478,18 @@ class TradePlanCard extends StatelessWidget {
       ),
     );
   }
+}
+
+String _riskOptionStrike(Map<String, dynamic> signal) {
+  final option = signal['option_name'] ?? signal['instrument'] ?? signal['option_symbol'];
+  final strike = signal['strike'] ?? signal['strike_price'];
+  final side = signal['option_side'] ?? signal['option_type'];
+  final parts = <String>[
+    if (option != null && option.toString().trim().isNotEmpty) option.toString(),
+    if (strike != null && strike.toString().trim().isNotEmpty) 'Strike ' + strike.toString(),
+    if (side != null && side.toString().trim().isNotEmpty) side.toString(),
+  ];
+  return parts.isEmpty ? '—' : parts.toSet().join(' • ');
 }
 
 String _val(dynamic v){if(v==null)return '—';if(v is num)return v.toStringAsFixed(v.abs()>=100?2:3);return v.toString();}
