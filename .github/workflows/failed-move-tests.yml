@@ -7,6 +7,7 @@ on:
       - "quant/**"
       - "tests/test_failed_move_fade.py"
       - "tests/test_hero_zero.py"
+      - "tests/test_orb_vwap_engines.py"
       - ".github/workflows/failed-move-tests.yml"
   push:
     branches: [failed-move-fade-isolated, hero-zero-expiry-hardening]
@@ -35,3 +36,4 @@ jobs:
         run: |
           python -m unittest discover -s tests -p "test_failed_move_fade.py" -v
           python -m unittest discover -s tests -p "test_hero_zero.py" -v
+          python -m unittest discover -s tests -p "test_orb_vwap_engines.py" -v
