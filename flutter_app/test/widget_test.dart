@@ -43,7 +43,7 @@ void main() {
     final strategyScrollable = find.descendant(
       of: strategyList,
       matching: find.byType(Scrollable),
-    );
+    ).first;
     final finalStrategyCard = find.byKey(const ValueKey('strategy-card-vwap'));
     expect(strategyList, findsOneWidget);
     expect(strategyScrollable, findsOneWidget);
