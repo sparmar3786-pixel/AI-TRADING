@@ -1131,15 +1131,50 @@ def _session_range() -> tuple[str, str]:
 
 
 def _wait_signal(index: str, reason: str) -> dict[str, Any]:
-    """A blocked/missing-data signal still returns the full validation contract."""
+    """Return a complete, explicitly unavailable five-layer contract on collection failure.
+
+    This makes the exact upstream blocker visible in the Quant tab without
+    inventing a timestamp, promoting missing inputs to PASS, or allowing a
+    failed collection to become an actionable signal.
+    """
+    layer_specs = (
+        ("data_quality", "Data freshness", "Exchange-timestamped market data unavailable."),
+        ("trend_sentiment", "Trend & sentiment", "Completed-candle trend and sentiment evidence unavailable."),
+        ("order_flow", "Order-flow validation", "Validated bid/ask depth evidence unavailable."),
+        ("option_selection", "Option selection & liquidity", "Fresh option quote, contract and liquidity evidence unavailable."),
+        ("risk_levels", "Risk & 10-minute stability", "Validated option ATR risk levels and stability evidence unavailable."),
+    )
+    unavailable_layers = {
+        key: {
+            "name": label,
+            "status": "UNAVAILABLE",
+            "pass": False,
+            "detail": f"{detail} Signal collection blocker: {reason}",
+            "reason": f"{detail} Signal collection blocker: {reason}",
+        }
+        for key, label, detail in layer_specs
+    }
+    engine = {
+        "layers": unavailable_layers,
+        "decision": "WAIT",
+        "passed_layers": 0,
+        "total_layers": 5,
+        "timestamp": None,
+        "data_fresh": False,
+        "confirmation": {
+            "state": "BLOCKED",
+            "required_seconds": 600,
+            "reason": "No complete live signal snapshot was produced.",
+        },
+    }
     return {
         "decision": "WAIT", "candidate_decision": "WAIT", "index": index,
         "entry": None, "stop_loss": None, "target": None, "strike": None,
         "expiry": None, "signal_only": True, "layers": {},
-        "reasons": [reason], "signal_stability": {"state": "BLOCKED", "required_minutes": 10},
+        "reasons": [reason], "signal_stability": {"state": "BLOCKED", "required_minutes": 10, "required_seconds": 600},
         "data_source": "angelone_smartapi", "data_fresh": False,
-        "five_layer_engine": {"layers": {}, "decision": "WAIT", "passed_layers": 0, "total_layers": 0},
-        "quant_engine": {"layers": {}, "decision": "WAIT", "passed_layers": 0, "total_layers": 0},
+        "five_layer_engine": dict(engine),
+        "quant_engine": dict(engine),
         "live_validation": {
             "decision": "WAIT", "verdict": "WAIT",
             "checks": {
