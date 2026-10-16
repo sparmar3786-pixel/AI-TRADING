@@ -101,7 +101,8 @@ class _StrategyLibraryPageState extends State<StrategyLibraryPage> {
     final groups = ['All', ...items.map((x) => x['group']!).toSet()];
     final marketRow = Map<String, dynamic>.from(widget.market[widget.selectedIndex] as Map? ?? const {});
     final signalRow = Map<String, dynamic>.from(widget.signals[widget.selectedIndex] as Map? ?? const {});
-    final layers = Map<String, dynamic>.from(signalRow['layers'] as Map? ?? const {});
+    final quantEngine = Map<String, dynamic>.from(signalRow['five_layer_engine'] as Map? ?? signalRow['quant_engine'] as Map? ?? const {});
+    final layers = Map<String, dynamic>.from(quantEngine['layers'] as Map? ?? const {});
     final passedLayers = layers.values.whereType<Map>().where((layer) => layer['pass'] == true).length;
     final suite = Map<String, dynamic>.from(signalRow['strategy_suite'] as Map? ?? marketRowFallback(widget.market, widget.selectedIndex));
     final suiteStrategies = Map<String, dynamic>.from(suite['strategies'] as Map? ?? const {});
