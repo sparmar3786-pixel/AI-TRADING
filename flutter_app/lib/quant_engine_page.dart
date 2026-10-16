@@ -46,8 +46,27 @@ class QuantEnginePage extends StatelessWidget {
         }
       }
     }
-    final dataAvailable = parsedLayers.isNotEmpty;
-    final engineStatus = (engine['decision'] ?? engine['verdict'] ?? engine['status'] ?? 'DATA REQUIRED').toString().toUpperCase();
+    final allowedStatuses = {'PASS', 'WARN', 'FAIL', 'BLOCK', 'UNAVAILABLE'};
+    final exactlyFiveLayers = parsedLayers.length == _expectedLayers.length;
+    final layersSchemaValid = exactlyFiveLayers && parsedLayers.every((layer) {
+      final status = (layer['status'] ?? layer['verdict'] ?? '').toString().toUpperCase();
+      final detail = (layer['detail'] ?? layer['reason'] ?? layer['message'] ?? '').toString().trim();
+      return allowedStatuses.contains(status) && detail.isNotEmpty;
+    });
+    final engineTimestamp = DateTime.tryParse((engine['timestamp'] ?? '').toString());
+    final engineAge = engineTimestamp == null ? null : DateTime.now().difference(engineTimestamp).inSeconds;
+    final engineFresh = engine['data_fresh'] == true &&
+        engineAge != null && engineAge >= 0 && engineAge <= 120;
+    final dataAvailable = layersSchemaValid && engineFresh;
+    final allLayersPass = dataAvailable && parsedLayers.every(
+      (layer) => (layer['status'] ?? layer['verdict'] ?? '').toString().toUpperCase() == 'PASS',
+    );
+    final reportedStatus = (engine['decision'] ?? engine['verdict'] ?? engine['status'] ?? 'WAIT').toString().toUpperCase();
+    final engineStatus = !dataAvailable ? 'DATA REQUIRED'
+        : (reportedStatus == 'PASS' && allLayersPass ? 'PASS'
+        : (reportedStatus == 'BLOCK' || parsedLayers.any((layer) =>
+            {'FAIL', 'BLOCK'}.contains((layer['status'] ?? layer['verdict'] ?? '').toString().toUpperCase()))
+            ? 'BLOCK' : 'WAIT'));
     final marketRow = _map(market[selectedIndex]);
     final live = marketRow['live'] == true;
     final age = marketRow['age_seconds'];
@@ -78,7 +97,7 @@ class QuantEnginePage extends StatelessWidget {
                 const Expanded(child: Text('Quant validation status', style: TextStyle(fontWeight: FontWeight.w800))),
                 Text(engineStatus, style: TextStyle(
                   fontWeight: FontWeight.w900,
-                  color: engineStatus == 'PASS' || engineStatus == 'VALID' ? Colors.greenAccent : Colors.orangeAccent,
+                  color: engineStatus == 'PASS' ? Colors.greenAccent : engineStatus == 'BLOCK' ? Colors.redAccent : Colors.orangeAccent,
                 )),
               ]),
               const SizedBox(height: 6),
@@ -87,7 +106,7 @@ class QuantEnginePage extends StatelessWidget {
               if (!dataAvailable) ...[
                 const SizedBox(height: 10),
                 const Text(
-                  'Backend did not provide verified five-layer results for this index. Layers are DATA REQUIRED; no score or PASS is inferred from HTTP success or market price alone.',
+                  'Backend must provide exactly five layer results, a fresh timestamp (within 120 seconds), data_fresh=true, and a reason for each layer. Otherwise results remain DATA REQUIRED.',
                   style: TextStyle(color: Colors.orangeAccent),
                 ),
               ],
