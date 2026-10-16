@@ -2,8 +2,97 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ai_trading_signal/main.dart';
 import 'package:ai_trading_signal/strategy_library_page.dart';
+import 'package:ai_trading_signal/quant_engine_page.dart';
 
 void main() {
+  testWidgets('Quant Engine shows layer blockers and never calls a closed-market snapshot LIVE', (tester) async {
+    tester.view.physicalSize = const Size(1200, 4000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final timestamp = DateTime.now().toUtc().toIso8601String();
+    final layers = <String, dynamic>{
+      'data_quality': {'name': 'Data freshness', 'status': 'FAIL', 'detail': 'Exchange timestamp is stale.'},
+      'trend_sentiment': {'name': 'Trend & sentiment', 'status': 'FAIL', 'detail': 'Trend evidence unavailable.'},
+      'order_flow': {'name': 'Order-flow validation', 'status': 'UNAVAILABLE', 'detail': 'Depth not returned.'},
+      'option_selection': {'name': 'Option selection & liquidity', 'status': 'FAIL', 'detail': 'No fresh option quote.'},
+      'risk_levels': {'name': 'Risk & 10-minute stability', 'status': 'FAIL', 'detail': 'Option ATR missing.'},
+    };
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: QuantEnginePage(
+          selectedIndex: 'NIFTY',
+          signals: {
+            'NIFTY': {
+              'decision': 'WAIT',
+              'reasons': ['Insufficient completed 5-minute candles'],
+              'quant_engine': {
+                'layers': layers,
+                'decision': 'WAIT',
+                'timestamp': timestamp,
+                'data_fresh': false,
+                'confirmation': {'state': 'BLOCKED', 'required_seconds': 600},
+              },
+            },
+          },
+          market: {'NIFTY': {'live': true, 'age_seconds': 9.2}},
+          marketOpen: false,
+          onIndexChanged: (_) {},
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('BLOCK'), findsOneWidget);
+    expect(find.textContaining('MARKET CLOSED'), findsOneWidget);
+    expect(find.textContaining('Exchange timestamp is stale.'), findsOneWidget);
+    expect(find.textContaining('Depth not returned.'), findsOneWidget);
+    expect(find.text('Backend layer evidence not supplied.'), findsNothing);
+  });
+
+  testWidgets('Quant Engine exposes missing backend reason while remaining DATA REQUIRED', (tester) async {
+    tester.view.physicalSize = const Size(1200, 4000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: QuantEnginePage(
+          selectedIndex: 'NIFTY',
+          signals: {
+            'NIFTY': {
+              'decision': 'WAIT',
+              'reasons': ['Insufficient completed 5-minute candles'],
+              'quant_engine': {
+                'layers': {
+                  'data_quality': {'name': 'Data freshness', 'status': 'UNAVAILABLE', 'detail': 'Insufficient completed 5-minute candles'},
+                  'trend_sentiment': {'name': 'Trend & sentiment', 'status': 'UNAVAILABLE', 'detail': 'Insufficient completed 5-minute candles'},
+                  'order_flow': {'name': 'Order-flow validation', 'status': 'UNAVAILABLE', 'detail': 'Insufficient completed 5-minute candles'},
+                  'option_selection': {'name': 'Option selection & liquidity', 'status': 'UNAVAILABLE', 'detail': 'Insufficient completed 5-minute candles'},
+                  'risk_levels': {'name': 'Risk & 10-minute stability', 'status': 'UNAVAILABLE', 'detail': 'Insufficient completed 5-minute candles'},
+                },
+                'decision': 'WAIT',
+                'timestamp': null,
+                'data_fresh': false,
+                'confirmation': {'state': 'BLOCKED', 'required_seconds': 600},
+              },
+            },
+          },
+          market: {'NIFTY': {'live': false, 'age_seconds': null}},
+          marketOpen: true,
+          onIndexChanged: (_) {},
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('DATA REQUIRED'), findsOneWidget);
+    expect(find.textContaining('Insufficient completed 5-minute candles'), findsWidgets);
+    expect(find.text('Backend layer evidence not supplied.'), findsNothing);
+  });
+
   testWidgets('Trading app starts with strategy tab and no AI tabs', (tester) async {
     await tester.pumpWidget(const FreshApp());
     await tester.pump(const Duration(milliseconds: 100));
