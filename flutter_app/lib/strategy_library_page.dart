@@ -59,6 +59,7 @@ class StrategyLibraryPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ListView(
+    key: const ValueKey('strategy-library-list'),
     padding: const EdgeInsets.all(12),
     children: [
       const Text('STRATEGY LIBRARY', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
