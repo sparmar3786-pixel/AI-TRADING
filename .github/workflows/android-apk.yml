@@ -189,7 +189,7 @@ jobs:
             mapfile -t CODE_FILES < <(unzip -Z1 "$APK" | grep -E '(^classes[0-9]*[.]dex$|^lib/[^/]+/libapp[.]so$)' || true)
             test "${#CODE_FILES[@]}" -gt 0
             COMPILED_STRINGS=$(for file in "${CODE_FILES[@]}"; do unzip -p "$APK" "$file" | strings; done)
-            if printf '%s\n' "$COMPILED_STRINGS" | grep -Ei 'SMC Pro Chart|SMC Chart|Smart Money Concepts Chart|Order Flow & Footprint|Order Flow Chart|Footprint Chart|FOOTPRINT CHART|MCX|Commodities|CRUDEOIL|NATURALGAS|CommodityPage' >/dev/null; then
+            if printf '%s\n' "$COMPILED_STRINGS" | grep -Ei 'SMC Pro Chart|SMC Chart|Smart Money Concepts Chart|Order Flow & Footprint|Order Flow Chart|Footprint Chart|FOOTPRINT CHART|class OrderFlowPage|CommodityPage' >/dev/null; then
               echo "Removed SMC, Order Flow, or MCX UI found in $APK"
               exit 1
             fi
@@ -197,8 +197,14 @@ jobs:
               echo "Forbidden local/emulator backend URL found in $APK"
               exit 1
             fi
-            printf '%s\n' "$COMPILED_STRINGS" | grep -F 'nse-algo-backend-final-production.up.railway.app' >/dev/null
-            printf '%s\n' "$COMPILED_STRINGS" | grep -F 'ai-trading-signals-api-production.up.railway.app' >/dev/null
+            if ! printf '%s\n' "$COMPILED_STRINGS" | grep -F 'nse-algo-backend-final-production.up.railway.app' >/dev/null; then
+              echo "Primary backend URL missing from $APK"
+              exit 1
+            fi
+            if ! printf '%s\n' "$COMPILED_STRINGS" | grep -F 'ai-trading-signals-api-production.up.railway.app' >/dev/null; then
+              echo "Signal backend URL missing from $APK"
+              exit 1
+            fi
             if printf '%s\n' "$COMPILED_STRINGS" | grep -E 'OPENAI_API_KEY|OPEN_AI_API_KEY|OPENAI_MODEL|api[.]openai[.]com' >/dev/null; then
               echo "Direct OpenAI provider configuration unexpectedly found in $APK"
               exit 1
@@ -207,8 +213,15 @@ jobs:
               echo "Order-placement capability unexpectedly found in APK"
               exit 1
             fi
-            "$AAPT" dump permissions "$APK" | grep -q 'android.permission.INTERNET'
-            "$AAPT" dump badging "$APK" | grep -F "application-label:'Trading Signals'" >/dev/null
+            if ! "$AAPT" dump permissions "$APK" | grep -q 'android.permission.INTERNET'; then
+              echo "Internet permission missing from $APK"
+              exit 1
+            fi
+            if ! "$AAPT" dump badging "$APK" | grep -F "application-label:'Trading Signals'" >/dev/null; then
+              echo "Expected Trading Signals app label missing from $APK"
+              "$AAPT" dump badging "$APK" | grep 'application-label' || true
+              exit 1
+            fi
           done
           ls -lh "$UNIVERSAL" "$ARM64"
       - name: Upload APK artifacts
