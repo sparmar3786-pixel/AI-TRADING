@@ -35,6 +35,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('PARMAR STRATEGY ENGINE'), findsOneWidget);
+    final pageScroll = find.byType(Scrollable).last;
+    await tester.scrollUntilVisible(
+      find.text('Live API wiring not verified').first,
+      250,
+      scrollable: pageScroll,
+    );
     expect(find.text('Live API wiring not verified'), findsWidgets);
   });
 
