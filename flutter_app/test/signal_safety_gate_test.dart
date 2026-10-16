@@ -17,7 +17,7 @@ Map<String, dynamic> _response({
 }) {
   return <String, dynamic>{
     'live': live,
-    'market': <String, dynamic>{'NIFTY': <String, dynamic>{'live': marketLive, 'ltp': 25000}},
+    'market': <String, dynamic>{'NIFTY': <String, dynamic>{'live': marketLive, 'age_seconds': 1, 'ltp': 25000}},
     'signals': <String, dynamic>{
       'NIFTY': <String, dynamic>{
         'decision': decision,
@@ -134,4 +134,19 @@ void main() {
     expect(signal['target'], isNull);
     expect(result['trade_plans'], isEmpty);
   });
+  test('selected-index live badge does not borrow freshness from another index', () {
+    expect(isSelectedIndexFeedLive(
+      apiOnline: true, signalsEndpointOnline: true, marketOpen: true,
+      marketRow: <String, dynamic>{'live': false, 'age_seconds': 1},
+    ), isFalse);
+    expect(isSelectedIndexFeedLive(
+      apiOnline: true, signalsEndpointOnline: true, marketOpen: true,
+      marketRow: <String, dynamic>{'live': true, 'age_seconds': 61},
+    ), isFalse);
+    expect(isSelectedIndexFeedLive(
+      apiOnline: true, signalsEndpointOnline: true, marketOpen: true,
+      marketRow: <String, dynamic>{'live': true, 'age_seconds': 1},
+    ), isTrue);
+  });
+
 }

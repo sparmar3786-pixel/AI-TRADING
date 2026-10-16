@@ -219,8 +219,8 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     if (!apiOnline) return "API OFFLINE";
     if (!signalsEndpointOnline) return "API UP • DATA ERROR";
     if (!_marketOpenNow) return "API UP • MARKET CLOSED";
-    if (status == "LIVE market feed connected.") return "API LIVE";
-    if (status.startsWith("Backend online")) return "API UP • WAITING DATA";
+    if (_selectedIndexFeedIsLive) return "API LIVE";
+    if (status.startsWith("Backend online") || status.startsWith("LIVE unavailable")) return "API UP • WAITING DATA";
     return "API UP • DATA ERROR";
   }
 
@@ -273,6 +273,26 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
   Map<String,dynamic> _signal(String i) => Map<String,dynamic>.from(signals[i] as Map? ?? const {});
   Map<String,dynamic> _market(String i) => Map<String,dynamic>.from(market[i] as Map? ?? const {});
 
+  bool get _selectedIndexFeedIsLive => isSelectedIndexFeedLive(
+    apiOnline: apiOnline,
+    signalsEndpointOnline: signalsEndpointOnline,
+    marketOpen: _marketOpenNow,
+    marketRow: _market(selectedIndex),
+  );
+
+  String get _currentIndexStatus {
+    if (!apiOnline || !signalsEndpointOnline) return status;
+    if (!_marketOpenNow) return 'Backend online • market closed; live trading signals are blocked.';
+    if (_selectedIndexFeedIsLive) return 'LIVE market feed connected for $selectedIndex.';
+    final row = _market(selectedIndex);
+    final error = row['signal_error'] ?? row['error'];
+    if (error != null && error.toString().trim().isNotEmpty) {
+      return 'Selected index $selectedIndex data unavailable: ${error.toString()}';
+    }
+    return 'Backend online • waiting for fresh $selectedIndex data.';
+  }
+
+
   @override
   Widget build(BuildContext context) => DefaultTabController(
     length: tabs.length,
@@ -309,9 +329,9 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
               ),
               const Divider(),
               ListTile(
-                leading: Icon(Icons.circle, size: 11, color: apiOnline && signalsEndpointOnline ? Colors.greenAccent : (apiOnline ? Colors.orangeAccent : Colors.redAccent)),
-                title: Text(apiOnline && signalsEndpointOnline && status == 'LIVE market feed connected.' ? 'Backend + live data OK' : (apiOnline && signalsEndpointOnline && status.startsWith('Backend online') ? 'Backend up • waiting for market data' : (apiOnline ? 'Backend up • data check needed' : 'Backend offline'))),
-                subtitle: const Text('Tap a section above to open it'),
+                 leading: Icon(Icons.circle, size: 11, color: _appBarStatusColor),
+                 title: Text(_appBarStatus == 'API LIVE' ? 'Selected index feed live' : (_appBarStatus == 'API OFFLINE' ? 'Backend offline' : (_appBarStatus == 'API UP • MARKET CLOSED' ? 'Market closed' : 'Waiting for selected index data'))),
+                 subtitle: Text('Selected index: $selectedIndex'),
               ),
             ],
           ),
@@ -335,7 +355,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         bottom: TabBar(isScrollable: true, tabAlignment: TabAlignment.start, tabs: tabs.map((t)=>Tab(text:t)).toList()),
       ),
       body: TabBarView(children: [
-        DashboardPage(index:selectedIndex, connected:status == 'LIVE market feed connected.', status:status, signals:signals, market:market, tradePlans:tradePlans, qualifiedCount:qualifiedCount, lastFetch:lastFetch, onSelected:(v)=>setState(()=>selectedIndex=v)),
+        DashboardPage(index:selectedIndex, connected:_selectedIndexFeedIsLive, status:_currentIndexStatus, signals:signals, market:market, tradePlans:tradePlans, qualifiedCount:qualifiedCount, lastFetch:lastFetch, onSelected:(v)=>setState(()=>selectedIndex=v)),
         MarketPage(selected:selectedIndex,onChanged:(v)=>setState(()=>selectedIndex=v), signal:_signal(selectedIndex), market:_market(selectedIndex)),
         ChainPage(selected:selectedIndex,onChanged:(v)=>setState(()=>selectedIndex=v), market:_market(selectedIndex)),
         OIPage(signals:signals),
@@ -349,7 +369,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           apiOnline: apiOnline,
           signalsOnline: signalsEndpointOnline,
           angelOnline: angelOnline,
-          status: status,
+          status: _currentIndexStatus,
           diagnostics: systemDiagnostics,
           diagnosticsError: systemDiagnosticsError,
           market: market,
@@ -362,7 +382,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           market: market,
           signals: signals,
           angelOnline: angelOnline,
-          status: status,
+          status: _currentIndexStatus,
           onIndexSelected: (value) => setState(() => selectedIndex = value),
         ),
         const StrategyLibraryPage(),

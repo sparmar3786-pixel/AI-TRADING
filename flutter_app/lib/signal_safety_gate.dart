@@ -17,6 +17,7 @@ Map<String, dynamic> applyServerSignalSafetyGate(Map<String, dynamic> response) 
     final stability = Map<String, dynamic>.from(row['signal_stability'] as Map? ?? const {});
     final guards = (row['guards'] as List?) ?? const <dynamic>[];
     final marketRow = Map<String, dynamic>.from((market[entry.key] ?? market[index]) as Map? ?? const {});
+    final quoteAge = _safeFiniteNumber(marketRow['age_seconds']);
     final strike = _safeFiniteNumber(row['strike']);
     final entryPrice = _safeFiniteNumber(row['entry']);
     final stop = _safeFiniteNumber(row['stop_loss']);
@@ -34,6 +35,7 @@ Map<String, dynamic> applyServerSignalSafetyGate(Map<String, dynamic> response) 
     final reasons = <String>[];
     if (!responseLive) reasons.add('Backend response is not marked live');
     if (marketRow['live'] != true) reasons.add('Matching index market quote is not live');
+    if (quoteAge == null || quoteAge < 0 || quoteAge > 60) reasons.add('Matching index quote age is missing, future-dated or stale');
     if (row['data_fresh'] != true) reasons.add('Signal data-quality gate is not PASS');
     if (validation['verdict'] != 'PASS') reasons.add('Backend live validation is not PASS');
     if (stability['state'] != 'CONFIRMED') reasons.add('Backend 10-minute confirmation is not CONFIRMED');
@@ -130,4 +132,24 @@ double? _safeFiniteNumber(dynamic value) {
   final parsed = value is num ? value.toDouble() : double.tryParse(value?.toString() ?? '');
   if (parsed == null || !parsed.isFinite) return null;
   return parsed;
+}
+
+
+/// True only for the currently selected index, not merely when any market in
+/// the shared response is live. A green status requires a timestamp-derived
+/// live flag and a bounded quote age during the exchange session.
+bool isSelectedIndexFeedLive({
+  required bool apiOnline,
+  required bool signalsEndpointOnline,
+  required bool marketOpen,
+  required Map<String, dynamic> marketRow,
+}) {
+  final age = _safeFiniteNumber(marketRow['age_seconds']);
+  return apiOnline &&
+      signalsEndpointOnline &&
+      marketOpen &&
+      marketRow['live'] == true &&
+      age != null &&
+      age >= 0 &&
+      age <= 60;
 }
