@@ -1841,6 +1841,11 @@ def _index_snapshot(
             "MIDCPNIFTY": 25, "SENSEX": 100, "BANKEX": 100,
         }.get(index.upper(), 50)
         current_time = datetime.now(IST)
+        strategy_candles_fresh = False
+        if not strategy_frame.empty:
+            latest_bar_close = (strategy_frame.index[-1] + pd.Timedelta(minutes=5)).to_pydatetime()
+            candle_age_seconds = (current_time - latest_bar_close).total_seconds()
+            strategy_candles_fresh = 0 <= candle_age_seconds <= 360
         orb_signal = OpeningRangeBreakoutEngine(drop_forming_candle=False).generate(
             strategy_frame, spot, current_time=current_time, strike_step=strike_step
         )
@@ -1878,7 +1883,7 @@ def _index_snapshot(
                 "target": getattr(signal, "target", None) if has_candidate else None,
                 "entry_price_basis": "UNDERLYING_SPOT",
                 "timestamp": observed,
-                "data_fresh": (result.get("layers", {}).get("data_quality", {}).get("pass") is True) and not strategy_frame.empty,
+                "data_fresh": (result.get("layers", {}).get("data_quality", {}).get("pass") is True) and strategy_candles_fresh,
                 "live_validation": validation,
                 "reasons": list(getattr(signal, "reasons", []) or []),
                 "guards": guards,
