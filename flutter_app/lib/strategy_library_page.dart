@@ -106,6 +106,10 @@ class _StrategyLibraryPageState extends State<StrategyLibraryPage> {
     final suite = Map<String, dynamic>.from(signalRow['strategy_suite'] as Map? ?? marketRowFallback(widget.market, widget.selectedIndex));
     final suiteStrategies = Map<String, dynamic>.from(suite['strategies'] as Map? ?? const {});
     final suiteVotes = Map<String, dynamic>.from(suite['votes'] as Map? ?? const {});
+    final strategyCandidates = Map<String, dynamic>.from(signalRow['strategy_candidates'] as Map? ?? const {});
+    Map<String, dynamic> candidateFor(String id) =>
+        Map<String, dynamic>.from(strategyCandidates[id] as Map? ?? const {});
+    String displayValue(dynamic value) => value == null ? '—' : value.toString();
     final fresh = marketRow['live'] == true;
     final ltp = marketRow['ltp'];
     return Scaffold(
@@ -250,6 +254,46 @@ class _StrategyLibraryPageState extends State<StrategyLibraryPage> {
             Text('Source: ${marketRow['source'] ?? 'not available'} • Quote age: ${marketRow['age_seconds'] ?? 'unknown'} sec', style: const TextStyle(color: Colors.white54, fontSize: 11)),
             if (marketRow['signal_error'] != null || marketRow['error'] != null)
               Text('Signal blocked: ${marketRow['signal_error'] ?? marketRow['error']}', style: const TextStyle(color: Colors.orangeAccent, fontSize: 11)),
+          ]),
+        )),
+        const SizedBox(height: 10),
+        Card(color: const Color(0xFF101722), child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('ORB & VWAP CANDIDATES • LIVE BACKEND', style: TextStyle(fontWeight: FontWeight.w900, color: Color(0xFF12D6FF))),
+            const SizedBox(height: 5),
+            const Text('Candidate levels are on the underlying index, not option premium. Both remain WAIT until option mapping, five-layer quant validation, risk checks and server-side 600-second confirmation pass.',
+              style: TextStyle(color: Colors.orangeAccent, fontSize: 11)),
+            for (final item in const [
+              ('orb', 'Opening Range Breakout'),
+              ('vwap', 'VWAP Strategy'),
+            ]) ...[
+              const Divider(height: 16),
+              Builder(builder: (context) {
+                final candidate = candidateFor(item.$1);
+                final rawValidation = Map<String, dynamic>.from(candidate['live_validation'] as Map? ?? const {});
+                final reasons = (candidate['reasons'] as List? ?? const []).map((v) => v.toString()).toList();
+                final blocks = (rawValidation['blocks'] as List? ?? const []).map((v) => v.toString()).toList();
+                final direction = candidate['candidate_decision'] ?? 'WAIT';
+                return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Expanded(child: Text(item.$2, style: const TextStyle(fontWeight: FontWeight.w800))),
+                    Text(candidate['data_fresh'] == true ? 'FRESH INPUT' : 'DATA REQUIRED',
+                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900,
+                        color: candidate['data_fresh'] == true ? Colors.greenAccent : Colors.orangeAccent)),
+                  ]),
+                  const SizedBox(height: 4),
+                  Text('Candidate: $direction • Approved decision: ${candidate['decision'] ?? 'WAIT'}',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                  Text('Underlying entry: ${displayValue(candidate['entry'])} • SL: ${displayValue(candidate['stop_loss'])} • Target: ${displayValue(candidate['target'])}',
+                    style: const TextStyle(fontSize: 11, color: Colors.white70)),
+                  Text('Reason: ${reasons.isEmpty ? 'No candidate reason returned by backend.' : reasons.join(' • ')}',
+                    style: const TextStyle(fontSize: 10, color: Colors.white60)),
+                  if (blocks.isNotEmpty)
+                    Text('Blocked by: ${blocks.join(' • ')}', style: const TextStyle(fontSize: 10, color: Colors.orangeAccent)),
+                ]);
+              }),
+            ],
           ]),
         )),
         const SizedBox(height: 12),
