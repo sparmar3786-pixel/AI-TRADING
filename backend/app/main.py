@@ -1809,6 +1809,103 @@ def _index_snapshot(
             "required_seconds": 600,
         },
     })
+    # Run ORB/VWAP against the same completed, exchange-sourced 5-minute candles
+    # used by the canonical signal pipeline. These are research candidates only:
+    # their underlying levels are not option premiums and cannot bypass quant/risk
+    # validation or the server-owned 600-second confirmation gate.
+    strategy_candidates: dict[str, dict[str, Any]] = {}
+    try:
+        import pandas as pd
+
+        strategy_records = []
+        for candle in candle_rows:
+            if not isinstance(candle, (list, tuple)) or len(candle) < 6:
+                continue
+            stamp = _iso(candle[0])
+            parsed_stamp = datetime.fromisoformat(stamp) if stamp else None
+            values = [_number(candle[i]) for i in (1, 2, 3, 4, 5)]
+            if parsed_stamp is None or any(value is None for value in values):
+                continue
+            opened, high_value, low_value, close_value, volume_value = values
+            strategy_records.append({
+                "timestamp": parsed_stamp,
+                "open": opened, "high": high_value, "low": low_value,
+                "close": close_value, "volume": volume_value,
+            })
+        strategy_frame = pd.DataFrame(strategy_records)
+        if not strategy_frame.empty:
+            strategy_frame["timestamp"] = pd.to_datetime(strategy_frame["timestamp"], utc=True, errors="coerce")
+            strategy_frame = strategy_frame.dropna(subset=["timestamp"]).set_index("timestamp").sort_index()
+        strike_step = {
+            "NIFTY": 50, "BANKNIFTY": 100, "FINNIFTY": 50,
+            "MIDCPNIFTY": 25, "SENSEX": 100, "BANKEX": 100,
+        }.get(index.upper(), 50)
+        current_time = datetime.now(IST)
+        orb_signal = OpeningRangeBreakoutEngine(drop_forming_candle=False).generate(
+            strategy_frame, spot, current_time=current_time, strike_step=strike_step
+        )
+        vwap_signal = VWAPStrategyEngine(drop_forming_candle=False).generate(
+            strategy_frame, spot, current_time=current_time, strike_step=strike_step
+        )
+
+        def _candidate_payload(signal: Any, strategy_id: str) -> dict[str, Any]:
+            candidate = str(getattr(signal, "candidate_decision", None) or "").upper()
+            has_candidate = candidate in ("CALL BUY", "PUT BUY")
+            guards = list(getattr(signal, "guards", []) or [])
+            if has_candidate:
+                guards = list(dict.fromkeys(guards + [
+                    "OPTION_CONTRACT_MAPPING_REQUIRED",
+                    "FIVE_LAYER_QUANT_GATE_REQUIRED",
+                    "SERVER_600_SECOND_CONFIRMATION_REQUIRED",
+                ]))
+            validation = dict(getattr(signal, "live_validation", {}) or {})
+            if has_candidate:
+                validation = {
+                    **validation, "verdict": "PENDING", "decision": "WAIT",
+                    "blocks": list(dict.fromkeys(list(validation.get("blocks") or []) + [
+                        "Candidate is not actionable until a fresh option contract is resolved and all live gates pass."
+                    ])),
+                }
+            return {
+                "strategy_id": strategy_id,
+                "engine_source": getattr(signal, "engine_source", strategy_id.upper()),
+                "decision": "WAIT",
+                "candidate_decision": candidate if has_candidate else None,
+                "option_side": getattr(signal, "option_side", None) if has_candidate else None,
+                "strike": getattr(signal, "strike", None) if has_candidate else None,
+                "entry": getattr(signal, "entry", None) if has_candidate else None,
+                "stop_loss": getattr(signal, "stop_loss", None) if has_candidate else None,
+                "target": getattr(signal, "target", None) if has_candidate else None,
+                "entry_price_basis": "UNDERLYING_SPOT",
+                "timestamp": observed,
+                "data_fresh": data_fresh and not strategy_frame.empty,
+                "live_validation": validation,
+                "reasons": list(getattr(signal, "reasons", []) or []),
+                "guards": guards,
+                "opening_range_high": getattr(signal, "opening_range_high", None),
+                "opening_range_low": getattr(signal, "opening_range_low", None),
+                "vwap": getattr(signal, "vwap", None),
+                "atr_value": getattr(signal, "atr_value", None),
+                "actionable": False,
+            }
+
+        strategy_candidates = {
+            "orb": _candidate_payload(orb_signal, "orb"),
+            "vwap": _candidate_payload(vwap_signal, "vwap"),
+        }
+    except Exception:
+        logging.exception("ORB/VWAP candidate evaluation failed for %s", index)
+        strategy_candidates = {
+            "orb": {"strategy_id": "orb", "decision": "WAIT", "candidate_decision": None,
+                    "entry": None, "stop_loss": None, "target": None, "actionable": False,
+                    "data_fresh": False, "reasons": ["ORB evaluation unavailable; inspect backend logs."],
+                    "guards": ["ENGINE_EVALUATION_ERROR"]},
+            "vwap": {"strategy_id": "vwap", "decision": "WAIT", "candidate_decision": None,
+                     "entry": None, "stop_loss": None, "target": None, "actionable": False,
+                     "data_fresh": False, "reasons": ["VWAP evaluation unavailable; inspect backend logs."],
+                     "guards": ["ENGINE_EVALUATION_ERROR"]},
+        }
+    result["strategy_candidates"] = strategy_candidates
     if selected:
         result["strike"] = selected["strike"] if result.get("strike") is not None else None
         result["expiry"] = selected["expiry"] if result.get("expiry") is not None else None
