@@ -8,6 +8,7 @@ import 'api.dart';
 import 'config.dart';
 import 'broker_home_prototype_page.dart';
 import 'strategy_library_page.dart';
+import 'signal_safety_gate.dart';
 
 const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Backtesting','API','Data Health','API & Railway','Broker Home','Parmar'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
@@ -53,7 +54,7 @@ class FreshHome extends StatefulWidget {
 }
 
 class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
-  String backendUrl = AppConfig.backendUrl;
+  String backendUrl = AppConfig.signalBackendUrl;
   String selectedIndex = 'NIFTY';
   bool apiOnline = false;
   bool signalsEndpointOnline = false;
@@ -88,87 +89,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     } catch (_) {
       return <String, dynamic>{};
     }
-  }
-
-  /// Actionable candidates must keep the same side and strike for 10 minutes.
-  /// Any candidate change or failed validation returns the UI to WAIT. This is
-  /// a conservative client-side confirmation gate, not a profit guarantee.
-  Future<Map<String, dynamic>> _applyTenMinuteSignalGate(Map<String, dynamic> response) async {
-    final prefs = await SharedPreferences.getInstance();
-    final result = Map<String, dynamic>.from(response);
-    final rawSignals = Map<String, dynamic>.from(result['signals'] as Map? ?? const {});
-    final stableIndices = <String>{};
-    final now = DateTime.now().toUtc();
-    for (final entry in rawSignals.entries) {
-      final index = entry.key.toString().toUpperCase();
-      final row = Map<String, dynamic>.from(entry.value as Map? ?? const {});
-      final decision = (row['decision'] ?? 'WAIT').toString().toUpperCase();
-      final validation = Map<String, dynamic>.from(row['live_validation'] as Map? ?? const {});
-      final guards = (row['guards'] as List?) ?? const <dynamic>[];
-      final isCandidate = (decision == 'CALL BUY' || decision == 'PUT BUY') &&
-          row['strike'] != null && row['option_side'] != null &&
-          row['entry'] != null && row['stop_loss'] != null && row['target'] != null &&
-          validation['verdict'] == 'PASS' && guards.isEmpty;
-      final storageKey = 'trading_signal_gate_$index';
-      if (!isCandidate) {
-        await prefs.remove(storageKey);
-        row['signal_stability'] = <String, dynamic>{'state': 'NOT_ACTIONABLE', 'required_minutes': 10};
-        rawSignals[entry.key] = row;
-        continue;
-      }
-      final candidateKey = '$decision|${row['strike']}|${row['option_side']}';
-      final savedRaw = prefs.getString(storageKey);
-      Map<String, dynamic>? saved;
-      if (savedRaw != null) {
-        try {
-          final parsed = jsonDecode(savedRaw);
-          if (parsed is Map) saved = Map<String, dynamic>.from(parsed);
-        } catch (_) { saved = null; }
-      }
-      final lastSeen = DateTime.tryParse(saved?['last_seen_utc']?.toString() ?? '')?.toUtc();
-      final gapTooLong = lastSeen == null || now.difference(lastSeen).inSeconds > 60;
-      if (saved == null || saved['candidate'] != candidateKey || saved['since_utc'] == null || gapTooLong) {
-        saved = <String, dynamic>{'candidate': candidateKey, 'since_utc': now.toIso8601String()};
-      }
-      saved['last_seen_utc'] = now.toIso8601String();
-      await prefs.setString(storageKey, jsonEncode(saved));
-      final since = DateTime.tryParse(saved['since_utc'].toString())?.toUtc() ?? now;
-      final elapsed = now.difference(since).inSeconds;
-      final remaining = (600 - elapsed).clamp(0, 600);
-      row['candidate_decision'] = decision;
-      if (elapsed < 600) {
-        row['decision'] = 'WAIT';
-        final gatedValidation = Map<String, dynamic>.from(validation);
-        gatedValidation['decision'] = 'WAIT';
-        gatedValidation['verdict'] = 'WARN';
-        final blocks = List<dynamic>.from(gatedValidation['blocks'] as List? ?? const []);
-        if (!blocks.any((item) => item.toString().contains('10-minute stability gate'))) {
-          blocks.add('10-minute stability gate: candidate must remain unchanged for 600 seconds');
-        }
-        gatedValidation['blocks'] = blocks;
-        row['live_validation'] = gatedValidation;
-        row['signal_stability'] = <String, dynamic>{
-          'state': 'CONFIRMING', 'required_minutes': 10, 'elapsed_seconds': elapsed,
-          'remaining_seconds': remaining, 'since_utc': since.toIso8601String(),
-        };
-      } else {
-        stableIndices.add(index);
-        row['signal_stability'] = <String, dynamic>{
-          'state': 'CONFIRMED', 'required_minutes': 10, 'elapsed_seconds': elapsed,
-          'remaining_seconds': 0, 'since_utc': since.toIso8601String(),
-        };
-      }
-      rawSignals[entry.key] = row;
-    }
-    result['signals'] = rawSignals;
-    final plans = (result['trade_plans'] as List? ?? const [])
-        .whereType<Map>()
-        .map((plan) => Map<String, dynamic>.from(plan))
-        .where((plan) => stableIndices.contains((plan['index'] ?? '').toString().toUpperCase()))
-        .toList();
-    result['trade_plans'] = plans;
-    result['qualified_trade_count'] = plans.length;
-    return result;
   }
 
   /// Cached quotes are display-only; cached BUY/SELL recommendations are never actionable.
@@ -221,7 +141,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       Map<String,dynamic> s;
       try {
         s = await api.signals(emaFast: emaFast, emaSlow: emaSlow);
-        s = await _applyTenMinuteSignalGate(s);
+        s = applyServerSignalSafetyGate(s);
         // API success is independent of local cache persistence. A full device,
         // oversized cached payload or SharedPreferences write error must not
         // falsely turn a successful Railway response into "API UP • DATA ERROR".
@@ -1450,7 +1370,7 @@ class TradePlanCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('#' + rank.toString() + ' ' + (plan['index'] ?? '').toString() + ' • ' + (plan['decision'] ?? '').toString(), style: const TextStyle(fontWeight: FontWeight.w900)),
+            Text('#' + rank.toString() + ' ' + (plan['index'] ?? '').toString() + ' • ' + (plan['decision'] ?? plan['side'] ?? 'WAIT').toString(), style: const TextStyle(fontWeight: FontWeight.w900)),
             InfoRow('Confidence', (plan['confidence'] ?? 0).toString() + '%'),
             InfoRow('Strike', plan['strike']?.toString() ?? '—'),
             InfoRow('Entry / SL', _val(plan['entry']) + ' / ' + _val(plan['stop_loss'])),
