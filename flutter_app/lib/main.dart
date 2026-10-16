@@ -263,7 +263,11 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
                 ? 'Signal data request failed: $signalsFetchError'
                 : (angelStatusError != null
                     ? 'Signal API responded, but Angel One status check failed: $angelStatusError'
-                    : (lastFetch != null ? 'LIVE unavailable — showing last fetched market data.' : 'Backend online — waiting for Angel One market data. Check broker credentials and connection status.')));
+                    : (_hasFreshStream(liveStatus)
+                        ? 'API up • WebSocket ticks are fresh; signal snapshot is stale or refreshing.'
+                        : (lastFetch != null
+                            ? 'API responded • signal snapshot stale; waiting for fresh market and option data.'
+                            : 'Backend online • waiting for fresh market and option data.'))));
       });
     } catch (e) {
       if (mounted) setState(() { apiOnline = false; signalsEndpointOnline = false; signalsFetchError = e.toString().replaceFirst('Exception: ', ''); systemDiagnostics = const {}; systemDiagnosticsError = e.toString().replaceFirst('Exception: ', ''); });
@@ -288,6 +292,11 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     }
   }
 
+  bool _hasFreshStream(Map<String, dynamic> value) {
+    final age = value['last_tick_age_seconds'];
+    return value['stream_open'] == true && age is num && age >= 0 && age <= 15;
+  }
+
   bool get _marketOpenNow {
     final ist = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
     if (ist.weekday == DateTime.saturday || ist.weekday == DateTime.sunday) return false;
@@ -301,6 +310,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     if (!_marketOpenNow) return "API UP • MARKET CLOSED";
     if (status == "LIVE market feed connected.") return "API LIVE";
     if (status.startsWith("Backend online")) return "API UP • WAITING DATA";
+    if (signalsEndpointOnline) return "API UP • SNAPSHOT STALE";
     return "API UP • DATA ERROR";
   }
 
@@ -389,8 +399,8 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
               ),
               const Divider(),
               ListTile(
-                leading: Icon(Icons.circle, size: 11, color: apiOnline && signalsEndpointOnline ? Colors.greenAccent : (apiOnline ? Colors.orangeAccent : Colors.redAccent)),
-                title: Text(apiOnline && signalsEndpointOnline && status == 'LIVE market feed connected.' ? 'Backend + live data OK' : (apiOnline && signalsEndpointOnline && status.startsWith('Backend online') ? 'Backend up • waiting for market data' : (apiOnline ? 'Backend up • data check needed' : 'Backend offline'))),
+                leading: Icon(Icons.circle, size: 11, color: apiOnline && signalsEndpointOnline && status == 'LIVE market feed connected.' ? Colors.greenAccent : (apiOnline ? Colors.orangeAccent : Colors.redAccent)),
+                title: Text(apiOnline && signalsEndpointOnline && status == 'LIVE market feed connected.' ? 'Backend + live data OK' : (apiOnline && signalsEndpointOnline && _hasFreshStream(liveTrading) ? 'Backend up • stream live / snapshot stale' : (apiOnline && signalsEndpointOnline && status.startsWith('Backend online') ? 'Backend up • waiting for market data' : (apiOnline && signalsEndpointOnline ? 'Backend up • snapshot stale / refreshing' : (apiOnline ? 'Backend up • data check needed' : 'Backend offline')))),
                 subtitle: const Text('Tap a section above to open it'),
               ),
             ],
