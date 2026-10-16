@@ -1,6 +1,6 @@
-# AI-TRADING Android signal app
+# Android trading signal app
 
-The Flutter app in flutter_app is based on the user's existing Fresh-Apk UI and is adapted for the AI-TRADING repository. It calls the existing Railway HTTPS API:
+The Flutter app in `flutter_app/` is a deterministic, backend-driven trading signal client. AI chat/provider integrations and on-device model runtimes are excluded from the APK. It calls the existing Railway HTTPS API:
 
 https://nse-algo-backend-final-production.up.railway.app
 
@@ -18,6 +18,6 @@ Keep API key, client code, MPIN/PIN, TOTP seed, JWT, refresh token, and feed tok
 
 ## Build and distribution
 
-The workflow bootstraps Android project files, sets Android minSdk to 26 (required by llama_flutter_android), runs Dart analysis and Flutter tests, builds the release APK, verifies the Railway host and internet permission, and publishes one rolling prerelease asset at GitHub Releases. Android 8.0 (API 26) or newer is required. It deliberately avoids upload-artifact because the existing Fresh-Apk Actions artifact quota had been exhausted.
+The workflow bootstraps Android project files, sets Android minSdk to 26, rejects AI-provider/chat/model strings in source and compiled APK code, runs Dart analysis and Flutter tests, builds universal and ARM64 release APKs, verifies configured Railway hosts and internet permission, and publishes build artifacts. Android 8.0 (API 26) or newer is required. It deliberately avoids upload-artifact because the existing Fresh-Apk Actions artifact quota had been exhausted.
 
 The app is not a guarantee of returns. Live Angel One session health, market data freshness, option-chain completeness, and on-device behavior still require separate verification. The repository's Python engine and vendored research code are not automatically invoked by this Flutter app unless a deployed backend explicitly integrates them.
