@@ -751,7 +751,7 @@ class BackendApiTests(unittest.TestCase):
             patch.object(api, "_start_stream"),
             patch.object(api, "_schedule_news_refresh"),
             patch.object(api, "_index_snapshot", side_effect=RuntimeError("insufficient candle history")),
-            patch.object(api, "_quotes", side_effect=lambda adapter, exchange, tokens: {tokens[0]: quote}),
+            patch.object(api, "_quotes", side_effect=lambda adapter, exchange, tokens, **kwargs: {tokens[0]: quote}),
             patch.object(api, "_commodity_snapshot", return_value=[]),
             patch.object(api, "_stream", None),
             patch.object(api, "_is_market_session_open", return_value=True),
