@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'api.dart';
 
 /// Parmar strategy suite inventory. A listed strategy is not automatically live/actionable.
 class StrategyLibraryPage extends StatelessWidget {
@@ -62,6 +63,31 @@ class StrategyLibraryPage extends StatelessWidget {
     children: [
       const Text('PARMAR STRATEGY ENGINE', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
       const SizedBox(height: 6),
+      FutureBuilder<Map<String, dynamic>>(
+        future: FreshApi.signal().parmarStrategies(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Card(child: Padding(
+              padding: EdgeInsets.all(10),
+              child: Text('Parmar backend: checking…'),
+            ));
+          }
+          if (snapshot.hasError) {
+            return Card(child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Text('Parmar backend unavailable: ${snapshot.error}',
+                  style: const TextStyle(color: Colors.orangeAccent)),
+            ));
+          }
+          final data = snapshot.data ?? const <String, dynamic>{};
+          final count = data['count'] ?? 0;
+          return Card(child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Text('Parmar backend connected • ${count.toString()} strategies listed. Evaluation remains WAIT until verified adapters and live-data validation are wired.',
+                style: const TextStyle(color: Colors.lightGreenAccent)),
+          ));
+        },
+      ),
       const Text(
         'Separate strategy suite: Price Action / OI Price Action, Hero Zero, Failed Move / PDH-PDL, EMA Crossover, Day HL Liquidity Sweep, ORB and VWAP. The backend orchestrator is fail-closed; only registered and tested adapters can evaluate. All candidates still require fresh-data, risk and 10-minute stability gates.',
         style: TextStyle(color: Colors.white70),
