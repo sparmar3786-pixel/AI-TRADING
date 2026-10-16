@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Makes the strategy inventory visible without falsely presenting source files
-/// as live, validated or order-ready strategies.
+/// Parmar strategy suite inventory. A listed strategy is not automatically live/actionable.
 class StrategyLibraryPage extends StatelessWidget {
   const StrategyLibraryPage({super.key});
 
@@ -9,15 +8,15 @@ class StrategyLibraryPage extends StatelessWidget {
     _StrategyItem(
       name: 'OI Price Action',
       source: 'quant/oi_price_action_engine.py',
-      state: 'SOURCE BUNDLED',
-      live: 'Live API wiring not verified',
+      state: 'ENGINE SOURCE PRESENT',
+      live: 'Backend adapter / live wiring must be verified',
       detail: 'Uses option-chain OI/PCR, price structure and candle/ATR confluence. Missing/stale OI data must return WAIT.',
     ),
     _StrategyItem(
       name: 'Hero Zero',
       source: 'quant/hero_zero.py',
-      state: 'SOURCE BUNDLED',
-      live: 'Expiry-only candidate; live API wiring not verified',
+      state: 'ENGINE SOURCE PRESENT',
+      live: 'Expiry-only; backend adapter / live wiring must be verified',
       detail: 'High-risk expiry-day setup with time-window and premium guards. Candidate only; never an order approval.',
     ),
     _StrategyItem(
@@ -37,8 +36,8 @@ class StrategyLibraryPage extends StatelessWidget {
     _StrategyItem(
       name: 'DAY-HL Liquidity Sweep',
       source: 'quant/day_hl_liquidity.py',
-      state: 'SOURCE BUNDLED',
-      live: 'Detector only; live API wiring not verified',
+      state: 'DETECTOR SOURCE PRESENT',
+      live: 'Detector only; backend adapter and risk mapping must be verified',
       detail: 'Day-high/day-low liquidity event detector. Needs confirmed entry, invalidation, exit and risk mapping.',
     ),
     _StrategyItem(
@@ -61,10 +60,10 @@ class StrategyLibraryPage extends StatelessWidget {
   Widget build(BuildContext context) => ListView(
     padding: const EdgeInsets.all(12),
     children: [
-      const Text('STRATEGY LIBRARY', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
+      const Text('PARMAR STRATEGY ENGINE', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
       const SizedBox(height: 6),
       const Text(
-        'Five strategy-engine source files are included in this release branch. They are not executed by Flutter itself: live APK signals still require backend routing, fresh-data checks and risk validation.',
+        'Separate strategy suite: Price Action / OI Price Action, Hero Zero, Failed Move / PDH-PDL, EMA Crossover, Day HL Liquidity Sweep, ORB and VWAP. The backend orchestrator is fail-closed; only registered and tested adapters can evaluate. All candidates still require fresh-data, risk and 10-minute stability gates.',
         style: TextStyle(color: Colors.white70),
       ),
       const SizedBox(height: 12),
@@ -74,7 +73,7 @@ class StrategyLibraryPage extends StatelessWidget {
         child: Padding(
           padding: EdgeInsets.all(12),
           child: Text(
-            'Safety: this page is an inventory, not a signal generator. Until a strategy is connected end-to-end and validated, it must remain non-actionable. No win rate or profitability is implied.',
+            'Safety: this page lists the Parmar engine suite. The registry never upgrades WAIT to BUY/SELL; unregistered adapters and missing/stale data remain WAIT. ORB and VWAP remain NOT IMPLEMENTED until their own tested engines are added. No win rate or profitability is implied.',
             style: TextStyle(fontWeight: FontWeight.w700),
           ),
         ),
@@ -104,7 +103,7 @@ class _StrategyCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ready = item.state == 'SOURCE BUNDLED';
+    final ready = item.state.contains('SOURCE PRESENT');
     final color = ready ? Colors.orangeAccent : Colors.redAccent;
     return Card(
       margin: const EdgeInsets.only(bottom: 9),
