@@ -34,14 +34,30 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('STRATEGY LIBRARY'), findsOneWidget);
-    expect(find.text('OI Price Action'), findsOneWidget);
-    expect(find.text('Hero Zero'), findsOneWidget);
-    expect(find.text('Failed-Move / PDH-PDL'), findsOneWidget);
-    expect(find.text('EMA Crossover'), findsOneWidget);
-    expect(find.text('DAY-HL Liquidity Sweep'), findsOneWidget);
-    expect(find.text('Opening Range Breakout (ORB)'), findsOneWidget);
-    expect(find.text('VWAP Strategy'), findsOneWidget);
-    expect(find.text('Live API wiring not verified'), findsWidgets);
+
+    // ListView builds rows lazily. Scroll each strategy card into the viewport
+    // before asserting its text; otherwise off-screen cards do not exist in the
+    // widget tree yet and the test fails even though the library contains them.
+    final strategyLabels = <String>[
+      'OI Price Action',
+      'Hero Zero',
+      'Failed-Move / PDH-PDL',
+      'EMA Crossover',
+      'DAY-HL Liquidity Sweep',
+      'Opening Range Breakout (ORB)',
+      'VWAP Strategy',
+    ];
+    final verticalScrollable = find.byType(Scrollable).last;
+    for (final label in strategyLabels) {
+      await tester.scrollUntilVisible(
+        find.text(label),
+        250,
+        scrollable: verticalScrollable,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text(label), findsOneWidget, reason: 'Missing strategy card: $label');
+    }
+    expect(find.textContaining('Live API wiring not verified'), findsWidgets);
   });
 
   testWidgets('SMC, MCX and Order Flow chart pages are completely absent', (tester) async {
