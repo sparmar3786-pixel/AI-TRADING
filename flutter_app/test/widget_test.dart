@@ -23,9 +23,14 @@ void main() {
   testWidgets('Strategies tab lists all known engines and discloses integration limits', (tester) async {
     await tester.pumpWidget(const FreshApp());
     await tester.pump(const Duration(milliseconds: 100));
-    await tester.tap(find.byKey(const ValueKey('open-navigation-menu')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Strategies').last);
+    // Select the Strategies tab through its controller. The horizontal TabBar
+    // can place its text off-screen in the 800x600 CI test viewport, so tapping
+    // a matching Text('Strategies') may hit the off-screen app-bar tab instead
+    // of the drawer item.
+    final tabController = DefaultTabController.of(
+      tester.element(find.byType(TabBar)),
+    );
+    tabController.animateTo(tabs.indexOf('Strategies'));
     await tester.pumpAndSettle();
 
     expect(find.text('STRATEGY LIBRARY'), findsOneWidget);
