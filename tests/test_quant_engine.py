@@ -28,6 +28,15 @@ class FiveLayerEngineTests(unittest.TestCase):
             }],
         }
 
+    def test_confirmation_gate_is_separate_from_five_validation_layers(self):
+        result = evaluate_five_layer_signal(self.snapshot, now=self.now)
+        self.assertEqual(
+            set(result["layers"]),
+            {"data_quality", "trend_sentiment", "order_flow", "option_selection", "risk_levels"},
+        )
+        self.assertIn("confirmation", result)
+        self.assertEqual(result["confirmation"]["state"], "CONFIRMING")
+
     def test_missing_or_stale_market_data_fails_closed(self):
         result = evaluate_five_layer_signal(self.snapshot, now=self.now + timedelta(seconds=16))
         self.assertEqual(result["decision"], "WAIT")
