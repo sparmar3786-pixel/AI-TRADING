@@ -133,10 +133,13 @@ jobs:
               s = s.replace(anchor, anchor + "\n        isCoreLibraryDesugaringEnabled = true", 1)
           dep = 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")'
           if dep not in s:
+              # Some generated Flutter Gradle templates omit an app dependencies block.
+              # Add the dependency block at EOF in that case rather than failing CI.
               anchor = "dependencies {"
-              if anchor not in s:
-                  raise SystemExit("dependencies block missing; cannot safely add desugaring library")
-              s = s.replace(anchor, anchor + "\n    " + dep, 1)
+              if anchor in s:
+                  s = s.replace(anchor, anchor + "\\n    " + dep, 1)
+              else:
+                  s = s.rstrip() + "\\n\\ndependencies {\\n    " + dep + "\\n}\\n"
           p.write_text(s)
           PY
           grep -nE 'isCoreLibraryDesugaringEnabled|coreLibraryDesugaring' "$GRADLE"
