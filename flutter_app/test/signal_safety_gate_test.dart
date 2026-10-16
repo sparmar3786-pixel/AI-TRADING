@@ -129,6 +129,17 @@ void main() {
     }
   });
 
+  test('rejects already-expired option contracts and clears active levels', () {
+    final yesterday = DateTime.now().subtract(const Duration(days: 1));
+    final expired = '${yesterday.year.toString().padLeft(4, '0')}-${yesterday.month.toString().padLeft(2, '0')}-${yesterday.day.toString().padLeft(2, '0')}';
+    final result = applyServerSignalSafetyGate(_response(expiry: expired));
+    final signal = (result['signals'] as Map)['NIFTY'] as Map;
+    expect(signal['decision'], 'WAIT');
+    expect(signal['expiry'], isNull);
+    expect(signal['strike'], isNull);
+    expect(result['trade_plans'], isEmpty);
+  });
+
   test('rejects old trade plan whose expiry differs from the confirmed signal', () {
     final response = _response();
     (response['trade_plans'] as List).first['expiry'] = '2026-11-05';
