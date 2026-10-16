@@ -624,6 +624,56 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(adapter.batch_sizes, [50, 50, 1])
         self.assertEqual(len(result), 101)
 
+    def test_fresh_stream_spot_tick_does_not_require_depth_but_options_do(self):
+        from datetime import datetime, timezone
+
+        stamp = int(datetime.now(timezone.utc).timestamp() * 1000)
+        tick = {
+            "token": "spot-token",
+            "ltp": 25000.0,
+            "exchange_timestamp": stamp,
+            "_source_mode": "WEBSOCKET_V2",
+        }
+
+        class FakeStream:
+            def subscribe(self, exchange_type, tokens):
+                self.subscribed = (exchange_type, tokens)
+            def get_tick(self, token, max_age_seconds=10.0):
+                return tick if token in ("spot-token", "option-token") else None
+
+        class FakeAdapter:
+            def __init__(self):
+                self.calls = []
+            def market_data(self, mode, exchange_tokens):
+                self.calls.append(exchange_tokens)
+                tokens = exchange_tokens["NSE"]
+                return {"rows": [{
+                    "symbolToken": token, "ltp": 25000.0,
+                    "exchange_timestamp": stamp,
+                    "best5Data": {
+                        "buy": [{"price": 24999.5, "quantity": 10}],
+                        "sell": [{"price": 25000.5, "quantity": 12}],
+                    },
+                } for token in tokens]}
+
+        adapter = FakeAdapter()
+        stream = FakeStream()
+        with patch.object(api, "_stream", stream), \\
+             patch.dict(api.EXCHANGE_TYPES, {"NSE": 1}), \\
+             patch.object(api, "_quote_rows", side_effect=lambda result: result["rows"]):
+            spot = api._quotes(
+                adapter, "NSE", ["spot-token"],
+                require_depth=False, max_stream_age_seconds=15.0,
+            )
+            self.assertEqual(spot["spot-token"]["_source_mode"], "WEBSOCKET_V2")
+            self.assertEqual(adapter.calls, [])
+
+            # A WebSocket option tick without both sides of the book must not
+            # bypass FULL-depth REST quote validation.
+            option = api._quotes(adapter, "NSE", ["option-token"])
+            self.assertEqual(option["option-token"]["_source_mode"], "REST_FULL_DEPTH")
+            self.assertEqual(len(adapter.calls), 1)
+
     def test_paper_trade_open_close_and_report_deduct_costs(self):
         with tempfile.TemporaryDirectory() as tmp, \
              patch.object(api, "_paper_trade_path", return_value=Path(tmp) / "paper.json"):
