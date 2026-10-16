@@ -1691,7 +1691,12 @@ def _index_snapshot(
     option_atr = None
     if selected:
         option_candles = adapter.candles(exchange, selected["token"], "FIVE_MINUTE", start, end).get("candles") or []
-        option_atr = _atr_from_candles(option_candles)
+        # Option premium ATR feeds the stop/target gate too: apply the same
+        # complete-bar and OHLC validation used by the underlying trend/indicators.
+        completed_option_candles = _completed_source_candle_rows(
+            option_candles, timeframe_minutes=5
+        )
+        option_atr = _atr_from_candles(completed_option_candles)
         selected["option_atr"] = option_atr
     # Do not pass a server fetch time off as exchange time; source timestamps are mandatory.
     observed = _iso(spot_ts)
