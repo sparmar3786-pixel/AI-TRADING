@@ -35,13 +35,25 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('PARMAR STRATEGY ENGINE'), findsOneWidget);
-    final pageScroll = find.byType(Scrollable).last;
+
+    // Target the actual vertical strategy ListView by stable key. Do not use
+    // .first/.last on generic Scrollable finders: drawer/tab navigators can
+    // introduce additional scrollables or none may be mounted at this point.
+    final strategyList = find.byKey(const ValueKey('strategy-library-list'));
+    final finalStrategyCard = find.byKey(const ValueKey('strategy-card-vwap'));
+    expect(strategyList, findsOneWidget);
     await tester.scrollUntilVisible(
-      find.text('Live API wiring not verified').first,
+      finalStrategyCard,
       250,
-      scrollable: pageScroll,
+      scrollable: strategyList,
+      maxScrolls: 100,
     );
-    expect(find.text('Live API wiring not verified'), findsWidgets);
+    await tester.pumpAndSettle();
+    expect(finalStrategyCard, findsOneWidget);
+
+    // This is a local inventory/status disclosure, not proof of live API
+    // connectivity. Keep the test independent from the real backend response.
+    expect(find.text('Not active; indicator does not prove entry/exit integration'), findsOneWidget);
   });
 
   testWidgets('SMC, MCX and Order Flow chart pages are completely absent', (tester) async {
