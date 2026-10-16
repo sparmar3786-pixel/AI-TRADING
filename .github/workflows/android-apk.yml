@@ -156,6 +156,22 @@ jobs:
             echo "Removed SMC, Order Flow, or MCX UI is still present in Flutter source."
             exit 1
           fi
+      - name: Verify AI pages and provider UI are absent
+        working-directory: flutter_app
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -RniE 'AI Access|AI Memory|Market Intelligence|AI Chat|AI Provider|DailyAiMemory|nvidia_signal_review|daily_ai_memory_page|market_intelligence_page|OpenRouter|OpenAI|Tavily|Exa Search' lib; then
+            echo "Removed AI page/provider UI or AI-memory implementation remains in active Flutter source."
+            exit 1
+          fi
+          if grep -Eq "'AI Access'|'AI Memory'|'Market Intelligence'|'AI Chat'|'AI Providers?'" lib/main.dart; then
+            echo "An AI-specific navigation tab remains in main.dart."
+            exit 1
+          fi
+          grep -F "'Strategies'" lib/main.dart >/dev/null
+          echo "AI pages/provider integrations absent; Strategies tab remains."
+
       - name: Analyze Dart
         working-directory: flutter_app
         run: flutter analyze --no-fatal-infos
