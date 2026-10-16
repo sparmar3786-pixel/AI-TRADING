@@ -140,6 +140,18 @@ void main() {
     expect(result['trade_plans'], isEmpty);
   });
 
+  test('rejects missing and malformed option expiry fail-closed', () {
+    for (final expiry in ['', 'not-a-date', '2026-99-99']) {
+      final result = applyServerSignalSafetyGate(_response(expiry: expiry));
+      final signal = (result['signals'] as Map)['NIFTY'] as Map;
+      expect(signal['decision'], 'WAIT', reason: 'expiry=$expiry');
+      expect(signal['expiry'], isNull, reason: 'expiry=$expiry');
+      expect(signal['strike'], isNull, reason: 'expiry=$expiry');
+      expect(result['trade_plans'], isEmpty, reason: 'expiry=$expiry');
+      expect(result['qualified_trade_count'], 0, reason: 'expiry=$expiry');
+    }
+  });
+
   test('rejects old trade plan whose expiry differs from the confirmed signal', () {
     final response = _response();
     (response['trade_plans'] as List).first['expiry'] = '2026-11-05';
