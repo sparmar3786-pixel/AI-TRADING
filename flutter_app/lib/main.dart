@@ -328,7 +328,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       signals: Map<String, dynamic>.from(signals),
       commodities: List<dynamic>.from(commodities),
       optionChains: optionChainsByIndex.map((key, value) => MapEntry(key, List<dynamic>.from(value))),
-      footprint: Map<String, dynamic>.from(OrderFlowTelemetry.latest),
       aiProviders: Map<String, dynamic>.from(aiProviderStatus),
       aiResults: Map<String, dynamic>.from(ai),
     ));
@@ -855,7 +854,7 @@ IconData _tabIcon(int index) => switch (index) {
   21 => Icons.speed,
   22 => Icons.layers_outlined,
   _ => Icons.layers_outlined,
-}
+};
 
 class DataHealthPage extends StatelessWidget {
   const DataHealthPage({
