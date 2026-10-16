@@ -81,7 +81,16 @@ Map<String, dynamic> applyServerSignalSafetyGate(Map<String, dynamic> response) 
     if (guards.isNotEmpty) reasons.add('Signal contains active guards');
     if (!sideMatches) reasons.add('Decision and option side do not match');
     if (strike == null || strike <= 0) reasons.add('Strike is missing or invalid');
-    if (expiryDate == null) reasons.add('Option expiry is missing or invalid');
+    final today = DateTime.now();
+    final todayDate = DateTime(today.year, today.month, today.day);
+    final normalizedExpiry = expiryDate == null
+        ? null
+        : DateTime(expiryDate.year, expiryDate.month, expiryDate.day);
+    if (normalizedExpiry == null) {
+      reasons.add('Option expiry is missing or invalid');
+    } else if (normalizedExpiry.isBefore(todayDate)) {
+      reasons.add('Option contract expiry has already passed');
+    }
     if (entryPrice == null || entryPrice <= 0 || stop == null || target == null ||
         stop <= 0 || !(stop < entryPrice && entryPrice < target)) {
       reasons.add('Entry, stop-loss and target do not form valid positive long-option risk levels');
