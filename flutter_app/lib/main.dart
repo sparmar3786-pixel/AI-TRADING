@@ -219,7 +219,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     String? latestSystemDiagnosticsError;
     try {
       final api = FreshApi(backendUrl);
-      final signalApi = FreshApi.signal();
+      final signalApi = FreshApi(AppConfig.backendUrl, null, AppConfig.signalBackendUrl);
       generalApiOnline = await _probeGeneralBackend(api);
       // Broker/session diagnostics must not prevent the independent signal
       // endpoint from being queried. A broken /v1/angel/status route used to
@@ -1287,7 +1287,7 @@ class _ApiPageState extends State<ApiPage> {
 
   Future<void> loadSavedStatus() async {
     try {
-      final result=await FreshApi.signal().angelStatus();
+      final result=await FreshApi(AppConfig.backendUrl, null, AppConfig.signalBackendUrl).angelStatus();
       if(!mounted)return;
       setState(()=>savedStatus=result);
       if(result['stored_session']==true) {
@@ -1307,7 +1307,7 @@ class _ApiPageState extends State<ApiPage> {
   Future<void> connect() async {
     setState(()=>working=true);
     try {
-      final api=FreshApi.signal();
+      final api=FreshApi(AppConfig.backendUrl, null, AppConfig.signalBackendUrl);
       final result=await api.connectAngel(payload());
       if (result['authenticated'] != true ||
           result['has_jwt_token'] != true ||
@@ -1561,7 +1561,7 @@ class _SignalCalendarPageState extends State<SignalCalendarPage> {
     final first = DateTime(month.year, month.month, 1);
     final last = DateTime(month.year, month.month + 1, 0);
     try {
-      final data = await FreshApi.signal().getJson('/v1/signals/calendar?start_date=${dayKey(first)}&end_date=${dayKey(last)}', timeout: const Duration(seconds: 20));
+      final data = await FreshApi(AppConfig.backendUrl, null, AppConfig.signalBackendUrl).getJson('/v1/signals/calendar?start_date=${dayKey(first)}&end_date=${dayKey(last)}', timeout: const Duration(seconds: 20));
       if (!mounted) return;
       setState(() { days = data['days'] is Map ? Map<String,dynamic>.from(data['days'] as Map) : {}; loading = false; });
     } catch (e) {
