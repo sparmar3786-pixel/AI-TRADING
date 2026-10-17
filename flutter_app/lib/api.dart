@@ -74,6 +74,9 @@ class FreshApi {
     '/v1/option-chain',
     '/v1/market/sentiment',
     '/v1/signals',
+    '/v1/signals/quant',
+    '/v1/signals/strategies',
+    '/v1/signals/calendar',
     '/v1/signals/performance',
     '/api/v1/signals',
     '/api/signals',
@@ -90,7 +93,7 @@ class FreshApi {
   Uri _uri(String path) {
     final suffix = path.startsWith('/') ? path : '/' + path;
     final suffixUri = Uri.parse(suffix);
-    final useSignalBackend = _signalRoutes.contains(suffixUri.path) ||
+    final useSignalBackend = _signalRoutes.contains(suffixUri.path) || suffixUri.path.startsWith('/v1/signals/') ||
         suffixUri.path.startsWith('/v1/paper/trades/');
     final routeBase = useSignalBackend ? signalBackendUrl : baseUrl;
     var normalized = routeBase.trim();
