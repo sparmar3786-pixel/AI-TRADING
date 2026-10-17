@@ -40,8 +40,8 @@ export async function generateMarketIntelligenceAnswer(params: {
     response = await fetch(`${backendUrl}/v1/ai/nvidia-chat`, {
       method: 'POST',
       headers: {
+        ...(await apiService.getAuthHeaders()),
         'Content-Type': 'application/json',
-        'X-Device-Id': apiService.getDeviceId(),
         Accept: 'application/json',
       },
       body: JSON.stringify({ index, question, history: history.slice(-4), context: {

@@ -71,9 +71,9 @@ export const BacktestingPage: React.FC = () => {
       const response = await fetch(`${apiService.getSignalBackend().replace(/\/+$/, '')}/v1/backtest/historical`, {
         method: 'POST',
         headers: {
+          ...(await apiService.getAuthHeaders()),
           Accept: 'application/json',
           'Content-Type': 'application/json',
-          'X-Device-Id': apiService.getDeviceId(),
         },
         body: JSON.stringify({
           index: selectedIndex,

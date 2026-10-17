@@ -40,7 +40,7 @@ class ApiService {
     this.deviceId = this.getOrCreateDeviceId();
   }
 
-  private async authHeaders(): Promise<Record<string, string>> {
+  public async getAuthHeaders(): Promise<Record<string, string>> {
     const headers: Record<string, string> = {
       'Accept': 'application/json',
       'X-Device-Id': this.deviceId,
@@ -322,7 +322,7 @@ class ApiService {
       const timeoutId = setTimeout(() => controller.abort(), 6000);
 
       const resp = await fetch(`${this.signalBackendUrl}/v1/signals`, {
-        headers: await this.authHeaders(),
+        headers: await this.getAuthHeaders(),
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
@@ -568,7 +568,7 @@ class ApiService {
   public async getDiagnostics(): Promise<SystemDiagnostics> {
     try {
       const resp = await fetch(`${this.signalBackendUrl}/v1/system/diagnostics`, {
-        headers: await this.authHeaders(),
+        headers: await this.getAuthHeaders(),
       });
       if (resp.ok) return sanitizeRepositoryLinks(await resp.json()) as SystemDiagnostics;
     } catch (_) {}

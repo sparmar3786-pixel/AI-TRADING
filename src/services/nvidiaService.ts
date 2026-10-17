@@ -55,7 +55,7 @@ class NvidiaService {
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     try {
       const response = await fetch(`${backendUrl}/v1/system/diagnostics`, {
-        headers: { Accept: 'application/json', 'X-Device-Id': apiService.getDeviceId() },
+        headers: await apiService.getAuthHeaders(),
         signal: controller.signal,
         cache: 'no-store',
       });
@@ -148,8 +148,8 @@ class NvidiaService {
     const response = await fetch(`${backendUrl}/v1/ai/nvidia-chat`, {
       method: 'POST',
       headers: {
+        ...(await apiService.getAuthHeaders()),
         'Content-Type': 'application/json',
-        'X-Device-Id': apiService.getDeviceId(),
         Accept: 'application/json',
       },
       body: JSON.stringify({
