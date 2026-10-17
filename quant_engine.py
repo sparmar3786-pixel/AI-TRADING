@@ -170,12 +170,21 @@ def evaluate_five_layer_signal(
             underlying_for_vwap >= vwap if trend == "BULLISH" else
             underlying_for_vwap <= vwap if trend == "BEARISH" else False
         )
-    indicators_ok = all(indicator_checks.values()) if indicator_checks else True
+    required_indicator_keys = {"ema_fast_8", "ema_slow_21", "rsi_14", "macd_histogram", "vwap"}
+    indicators_complete = (
+        required_indicator_keys.issubset(indicator_data.keys())
+        and all(_number(indicator_data.get(key)) is not None for key in required_indicator_keys)
+        and 0 <= float(indicator_data.get("rsi_14", -1)) <= 100
+        and float(indicator_data.get("vwap", 0)) > 0
+    )
+    indicators_ok = indicators_complete and len(indicator_checks) == 4 and all(indicator_checks.values())
     layer2_ok = trend in ("BULLISH", "BEARISH") and sentiment_direction in (trend, "NEUTRAL") and indicators_ok
     layers["trend_sentiment"] = {
         "pass": layer2_ok, "trend": trend, "timeframes": trend_states,
         "sentiment_score": sentiment, "sentiment_direction": sentiment_direction,
         "indicator_checks": indicator_checks, "indicators_pass": indicators_ok,
+        "indicators_complete": indicators_complete,
+        "missing_indicators": sorted(required_indicator_keys.difference(indicator_data.keys())),
     }
     if not layer2_ok:
         reasons.append("Trend and session sentiment are unknown, mixed or conflicting")
@@ -416,12 +425,21 @@ def evaluate_futures_signal(
     vwap = _number(indicators.get("vwap"))
     if vwap is not None and ltp is not None:
         checks["vwap_alignment"] = ltp >= vwap if trend == "BULLISH" else ltp <= vwap if trend == "BEARISH" else False
-    indicators_ok = all(checks.values()) if checks else True
+    required_indicator_keys = {"ema_fast_8", "ema_slow_21", "rsi_14", "macd_histogram", "vwap"}
+    indicators_complete = (
+        required_indicator_keys.issubset(indicators.keys())
+        and all(_number(indicators.get(key)) is not None for key in required_indicator_keys)
+        and 0 <= float(indicators.get("rsi_14", -1)) <= 100
+        and float(indicators.get("vwap", 0)) > 0
+    )
+    indicators_ok = indicators_complete and len(checks) == 4 and all(checks.values())
     layer2_ok = trend in ("BULLISH", "BEARISH") and sentiment_direction in (trend, "NEUTRAL") and indicators_ok
     layers["trend_sentiment"] = {
         "pass": layer2_ok, "trend": trend, "timeframes": timeframe_states,
         "sentiment_score": sentiment, "sentiment_direction": sentiment_direction,
         "indicator_checks": checks, "indicators_pass": indicators_ok,
+        "indicators_complete": indicators_complete,
+        "missing_indicators": sorted(required_indicator_keys.difference(indicators.keys())),
     }
     if not layer2_ok:
         reasons.append("Commodity trend, indicators or session sentiment are conflicting")
