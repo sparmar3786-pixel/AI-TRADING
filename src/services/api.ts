@@ -13,13 +13,13 @@ export const DEFAULT_SIGNAL_BACKEND = 'https://ai-trading-signals-api-production
 export const DEFAULT_LEGACY_BACKEND = 'https://nse-algo-backend-final-production.up.railway.app';
 
 // Instrument configurations
-export const INDEX_CONFIG: Record<IndexSymbol, { name: string; lotSize: number; strikeStep: number; basePrice: number }> = {
-  NIFTY: { name: 'NIFTY 50', lotSize: 75, strikeStep: 50, basePrice: 24865.50 },
-  BANKNIFTY: { name: 'NIFTY BANK', lotSize: 30, strikeStep: 100, basePrice: 51420.20 },
-  FINNIFTY: { name: 'NIFTY FINANCIAL', lotSize: 65, strikeStep: 50, basePrice: 23680.10 },
-  MIDCPNIFTY: { name: 'NIFTY MIDCAP SELECT', lotSize: 120, strikeStep: 25, basePrice: 12990.40 },
-  SENSEX: { name: 'BSE SENSEX', lotSize: 20, strikeStep: 100, basePrice: 81750.60 },
-  BANKEX: { name: 'BSE BANKEX', lotSize: 30, strikeStep: 100, basePrice: 58180.30 },
+export const INDEX_CONFIG: Record<IndexSymbol, { name: string; lotSize: number; strikeStep: number }> = {
+  NIFTY: { name: 'NIFTY 50', lotSize: 75, strikeStep: 50 },
+  BANKNIFTY: { name: 'NIFTY BANK', lotSize: 30, strikeStep: 100 },
+  FINNIFTY: { name: 'NIFTY FINANCIAL', lotSize: 65, strikeStep: 50 },
+  MIDCPNIFTY: { name: 'NIFTY MIDCAP SELECT', lotSize: 120, strikeStep: 25 },
+  SENSEX: { name: 'BSE SENSEX', lotSize: 20, strikeStep: 100 },
+  BANKEX: { name: 'BSE BANKEX', lotSize: 30, strikeStep: 100 },
 };
 
 
