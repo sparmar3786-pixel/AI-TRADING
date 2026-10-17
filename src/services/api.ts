@@ -8,6 +8,7 @@ import {
   QuantLayerResult,
 } from '../types/market';
 import { sanitizeRepositoryLinks } from './repositoryLinkFilter';
+import { getBackendIdToken } from './firebase';
 
 export const DEFAULT_SIGNAL_BACKEND = 'https://ai-trading-signals-api-production.up.railway.app';
 export const DEFAULT_LEGACY_BACKEND = 'https://nse-algo-backend-final-production.up.railway.app';
@@ -37,6 +38,16 @@ class ApiService {
       localStorage.getItem('fresh_legacy_backend_url') || DEFAULT_LEGACY_BACKEND,
     );
     this.deviceId = this.getOrCreateDeviceId();
+  }
+
+  public async getAuthHeaders(): Promise<Record<string, string>> {
+    const headers: Record<string, string> = {
+      'Accept': 'application/json',
+      'X-Device-Id': this.deviceId,
+    };
+    const token = await getBackendIdToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+    return headers;
   }
 
   private normalizeBaseUrl(url: string): string {
@@ -135,15 +146,34 @@ class ApiService {
     return { equityOpen, istTime: istTimeStr };
   }
 
-  // 10-Minute Signal Stability Gate
+  // The backend is the only authority allowed to promote a candidate to CONFIRMED.
+  // This client validates timestamps and can only downgrade invalid/stale responses.
   public applyTenMinuteSignalGate(rawSignals: Record<string, SignalData>): Record<string, SignalData> {
     const now = Date.now();
     const result: Record<string, SignalData> = {};
 
+    type ServerStability = {
+      state?: string;
+      required_minutes?: number;
+      required_seconds?: number;
+      elapsed_seconds?: number;
+      remaining_seconds?: number;
+      since_utc?: string;
+      last_seen_utc?: string;
+      candidate_key?: string;
+    };
+    const isBuy = (value: unknown): value is 'CALL BUY' | 'PUT BUY' =>
+      value === 'CALL BUY' || value === 'PUT BUY';
+
     for (const [key, signal] of Object.entries(rawSignals)) {
-      const index = key.toUpperCase();
-      const updatedSignal = { ...signal };
-      const decision = (updatedSignal.decision || 'WAIT').toUpperCase();
+      const updatedSignal: SignalData = { ...signal };
+      const rawDecision = (updatedSignal.decision || 'WAIT').toUpperCase();
+      const rawCandidate = (updatedSignal.candidate_decision || rawDecision).toUpperCase();
+      const candidateDecision = isBuy(rawCandidate)
+        ? rawCandidate
+        : isBuy(rawDecision) ? rawDecision : 'WAIT';
+      const wantsBuy = isBuy(candidateDecision);
+
       const rawValidation = updatedSignal.live_validation;
       const validation: NonNullable<SignalData['live_validation']> =
         rawValidation && typeof rawValidation === 'object'
@@ -163,11 +193,12 @@ class ApiService {
               decision: 'WAIT',
               blocks: ['Live validation missing; signal is not actionable.'],
             };
+
       const guards = Array.isArray(updatedSignal.guards) ? updatedSignal.guards : [];
       const signalTimestamp = Date.parse(updatedSignal.timestamp || '');
       const signalAgeMs = now - signalTimestamp;
-      const signalFresh = Number.isFinite(signalTimestamp) && signalAgeMs >= 0 && signalAgeMs <= 120000 &&
-        updatedSignal.data_fresh !== false;
+      const signalFresh = Number.isFinite(signalTimestamp) && signalAgeMs >= 0 &&
+        signalAgeMs <= 120000 && updatedSignal.data_fresh !== false;
       const validPositive = (value: unknown): value is number =>
         typeof value === 'number' && Number.isFinite(value) && value > 0;
       const validTradeNumbers = validPositive(updatedSignal.strike) &&
@@ -176,110 +207,103 @@ class ApiService {
         validPositive(updatedSignal.target) &&
         updatedSignal.stop_loss < updatedSignal.entry &&
         updatedSignal.target > updatedSignal.entry;
-      const sideMatchesDecision = (decision === 'CALL BUY' && updatedSignal.option_side === 'CE') ||
-        (decision === 'PUT BUY' && updatedSignal.option_side === 'PE');
-      const isBuy = decision === 'CALL BUY' || decision === 'PUT BUY';
-      const isCandidate = isBuy && signalFresh && validTradeNumbers && sideMatchesDecision &&
-        validation.verdict === 'PASS' && guards.length === 0;
+      const sideMatchesDecision =
+        (candidateDecision === 'CALL BUY' && updatedSignal.option_side === 'CE') ||
+        (candidateDecision === 'PUT BUY' && updatedSignal.option_side === 'PE');
+      const candidateIsValid = wantsBuy && signalFresh && validTradeNumbers &&
+        sideMatchesDecision && validation.verdict === 'PASS' && guards.length === 0;
 
-      const storageKey = `ai_trading_signal_gate_${index}`;
+      const stability = (updatedSignal.signal_stability || {}) as ServerStability;
+      const requiredSeconds = typeof stability.required_seconds === 'number'
+        ? stability.required_seconds
+        : typeof stability.required_minutes === 'number'
+          ? stability.required_minutes * 60 : 0;
+      const sinceMs = typeof stability.since_utc === 'string' ? Date.parse(stability.since_utc) : Number.NaN;
+      const lastSeenMs = typeof stability.last_seen_utc === 'string' ? Date.parse(stability.last_seen_utc) : Number.NaN;
+      const serverElapsed = Number.isFinite(sinceMs) && Number.isFinite(lastSeenMs) && lastSeenMs >= sinceMs
+        ? Math.floor((lastSeenMs - sinceMs) / 1000) : null;
+      const lastSeenFresh = Number.isFinite(lastSeenMs) && Math.abs(now - lastSeenMs) <= 120000;
+      const serverConfirmed = candidateIsValid &&
+        rawDecision === candidateDecision &&
+        stability.state === 'CONFIRMED' &&
+        requiredSeconds >= 600 &&
+        serverElapsed !== null &&
+        serverElapsed >= requiredSeconds &&
+        lastSeenFresh;
 
-      if (!isCandidate) {
-        localStorage.removeItem(storageKey);
-        if (decision === 'CALL BUY' || decision === 'PUT BUY') {
-          // A buy decision without complete live validation and every required
-          // trade field must never leak through as an actionable-looking signal.
+      updatedSignal.candidate_decision = candidateDecision;
+
+      if (!candidateIsValid) {
+        if (wantsBuy || isBuy(rawDecision)) {
           updatedSignal.decision = 'WAIT';
-          const blocks = [...(validation.blocks || [])];
-          if (validation.verdict !== 'PASS' && blocks.length === 0) {
-            blocks.push('Live validation missing or failed; signal is not actionable.');
+          const blocks = [...validation.blocks];
+          if (validation.verdict !== 'PASS') {
+            blocks.push('Server live validation is not PASS; candidate remains WAIT.');
           }
-          if (guards.length > 0) {
-            blocks.push('Signal blocked by risk guards: ' + guards.join(', '));
-          }
-          if (!signalFresh) blocks.push('Signal timestamp missing, stale, malformed, or in the future; signal forced to WAIT.');
-          if (!validTradeNumbers) blocks.push('Strike/entry/stop-loss/target must be finite positive numbers with stop-loss < entry < target.');
-          if (!sideMatchesDecision) blocks.push('Option side conflicts with the BUY decision.');
-          if (!updatedSignal.strike || !updatedSignal.option_side || !updatedSignal.entry ||
-              !updatedSignal.stop_loss || !updatedSignal.target) {
-            blocks.push('Required trade fields are incomplete; signal forced to WAIT.');
-          }
-          updatedSignal.live_validation = {
-            ...validation,
-            verdict: validation.verdict === 'PASS' ? 'WARN' : validation.verdict,
-            decision: 'WAIT',
-            blocks: [...new Set(blocks)],
-          };
+          if (guards.length > 0) blocks.push('Signal blocked by risk guards: ' + guards.join(', '));
+          if (!signalFresh) blocks.push('Signal timestamp missing, stale, malformed, or in the future.');
+          if (!validTradeNumbers) blocks.push('Strike, entry, stop-loss and target must be valid positive prices.');
+          if (!sideMatchesDecision) blocks.push('Option side conflicts with the candidate decision.');
+          validation.decision = 'WAIT';
+          validation.verdict = validation.verdict === 'FAIL' ? 'FAIL' : 'WARN';
+          validation.blocks = [...new Set(blocks)];
+          updatedSignal.live_validation = validation;
         }
         updatedSignal.signal_stability = {
           state: 'NOT_ACTIONABLE',
           required_minutes: 10,
+          server_confirmed: false,
         };
         result[key] = updatedSignal;
         continue;
       }
 
-      const candidateKey = `${decision}|${updatedSignal.strike}|${updatedSignal.option_side}`;
-      const savedRaw = localStorage.getItem(storageKey);
-      let saved: { candidate: string; since_utc: number; last_seen_utc: number } | null = null;
-
-      if (savedRaw) {
-        try {
-          saved = JSON.parse(savedRaw);
-        } catch (_) {
-          saved = null;
-        }
-      }
-
-      const gapTooLong = !saved || (now - saved.last_seen_utc) > 60000; // gap > 60 sec
-
-      if (!saved || saved.candidate !== candidateKey || gapTooLong) {
-        saved = {
-          candidate: candidateKey,
-          since_utc: now,
-          last_seen_utc: now,
-        };
-      } else {
-        saved.last_seen_utc = now;
-      }
-
-      localStorage.setItem(storageKey, JSON.stringify(saved));
-
-      const elapsed = Math.floor((now - saved.since_utc) / 1000);
-      const remaining = Math.max(0, 600 - elapsed);
-      updatedSignal.candidate_decision = decision;
-
-      if (elapsed < 600) {
-        // Enforce WAIT during confirmation window
-        updatedSignal.decision = 'WAIT';
-        updatedSignal.signal_stability = {
-          state: 'CONFIRMING',
-          required_minutes: 10,
-          elapsed_seconds: elapsed,
-          remaining_seconds: remaining,
-          since_utc: new Date(saved.since_utc).toISOString(),
-        };
-        const updatedValidation = { ...validation };
-        updatedValidation.decision = 'WAIT';
-        updatedValidation.verdict = 'WARN';
-        const blocks = [...updatedValidation.blocks];
-        if (!blocks.some(b => b.includes('10-minute stability gate'))) {
-          blocks.push(`10-minute stability gate: candidate active for ${elapsed}s / 600s`);
-        }
-        updatedValidation.blocks = blocks;
-        updatedSignal.live_validation = updatedValidation;
-      } else {
-        // Confirmed stable after 10 full minutes
-        updatedSignal.decision = decision as any;
+      if (serverConfirmed) {
+        updatedSignal.decision = candidateDecision;
         updatedSignal.signal_stability = {
           state: 'CONFIRMED',
           required_minutes: 10,
-          elapsed_seconds: elapsed,
+          elapsed_seconds: serverElapsed ?? 600,
           remaining_seconds: 0,
-          since_utc: new Date(saved.since_utc).toISOString(),
+          since_utc: stability.since_utc,
+          server_confirmed: true,
         };
+        result[key] = updatedSignal;
+        continue;
       }
 
+      // Keep the signal non-actionable until the response itself carries a valid
+      // server-owned stability state and a >=600 second since/last-seen interval.
+      updatedSignal.decision = 'WAIT';
+      const serverConfirming =
+        stability.state === 'CONFIRMING' &&
+        requiredSeconds >= 600 &&
+        serverElapsed !== null &&
+        serverElapsed < requiredSeconds &&
+        lastSeenFresh;
+      updatedSignal.signal_stability = serverConfirming
+        ? {
+            state: 'CONFIRMING',
+            required_minutes: 10,
+            elapsed_seconds: Math.max(0, serverElapsed ?? 0),
+            remaining_seconds: Math.max(0, requiredSeconds - (serverElapsed ?? 0)),
+            since_utc: stability.since_utc,
+            server_confirmed: false,
+          }
+        : {
+            state: 'NOT_ACTIONABLE',
+            required_minutes: 10,
+            server_confirmed: false,
+          };
+      validation.decision = 'WAIT';
+      validation.verdict = validation.verdict === 'FAIL' ? 'FAIL' : 'WARN';
+      validation.blocks = [...new Set([
+        ...validation.blocks,
+        serverConfirming
+          ? 'Waiting for the backend-owned 600-second confirmation gate.'
+          : 'Backend has not supplied verifiable server-owned confirmation metadata.',
+      ])];
+      updatedSignal.live_validation = validation;
       result[key] = updatedSignal;
     }
 
@@ -298,10 +322,7 @@ class ApiService {
       const timeoutId = setTimeout(() => controller.abort(), 6000);
 
       const resp = await fetch(`${this.signalBackendUrl}/v1/signals`, {
-        headers: {
-          'Accept': 'application/json',
-          'X-Device-Id': this.deviceId,
-        },
+        headers: await this.getAuthHeaders(),
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
@@ -474,21 +495,80 @@ class ApiService {
     };
   }
 
-  public getQuantLayers(): QuantLayerResult[] {
-    const detail = 'Live quant calculation unavailable. Waiting for verified backend results.';
-    return [
-      { layer: 1, name: 'Trend Alignment & Moving Averages', status: 'UNAVAILABLE', score: null, weight: 25, detail },
-      { layer: 2, name: 'Momentum & Volatility Filter', status: 'UNAVAILABLE', score: null, weight: 20, detail },
-      { layer: 3, name: 'Price Action & Breakout Volume', status: 'UNAVAILABLE', score: null, weight: 25, detail },
-      { layer: 4, name: 'Options Open Interest & PCR Flow', status: 'UNAVAILABLE', score: null, weight: 20, detail },
-      { layer: 5, name: 'Execution Guard & Slippage Filter', status: 'UNAVAILABLE', score: null, weight: 10, detail },
+  public getQuantLayers(signal?: SignalData): QuantLayerResult[] {
+    type LayerEvidence = Record<string, unknown> & { pass?: unknown; score?: unknown; reason?: unknown; reason_code?: unknown };
+    type EngineEvidence = { layers?: unknown; score_semantics?: unknown };
+    const extended = signal as (SignalData & {
+      quant_engine?: EngineEvidence;
+      five_layer_engine?: EngineEvidence;
+      layers?: unknown;
+    }) | undefined;
+    const engine = extended?.quant_engine ?? extended?.five_layer_engine;
+    const rawLayers = engine?.layers && typeof engine.layers === 'object'
+      ? engine.layers as Record<string, unknown>
+      : extended?.layers && typeof extended.layers === 'object'
+        ? extended.layers as Record<string, unknown> : {};
+    const optionLayerName = 'option_selection' in rawLayers
+      ? 'option_selection'
+      : 'contract_selection' in rawLayers ? 'contract_selection' : 'option_selection';
+
+    const definitions: Array<{ layer: number; name: string; key: string }> = [
+      { layer: 1, name: 'Data Quality & Freshness', key: 'data_quality' },
+      { layer: 2, name: 'Trend Alignment & Market Sentiment', key: 'trend_sentiment' },
+      { layer: 3, name: 'Order Flow & Liquidity', key: 'order_flow' },
+      { layer: 4, name: 'Option Contract Selection', key: optionLayerName },
+      { layer: 5, name: 'Risk Levels & Stability Gate', key: 'risk_levels' },
     ];
+
+    return definitions.map(definition => {
+      const raw = rawLayers[definition.key];
+      const evidence = raw && typeof raw === 'object' ? raw as LayerEvidence : null;
+      const hasBooleanResult = typeof evidence?.pass === 'boolean';
+      const status: QuantLayerResult['status'] = !hasBooleanResult
+        ? 'UNAVAILABLE'
+        : evidence.pass === true ? 'PASS' : 'FAIL';
+      const score = typeof evidence?.score === 'number' &&
+        Number.isFinite(evidence.score) && evidence.score >= 0 && evidence.score <= 100
+        ? evidence.score : null;
+      const detailParts: string[] = [];
+      if (typeof evidence?.reason_code === 'string' && evidence.reason_code.trim()) {
+        detailParts.push(evidence.reason_code.trim());
+      }
+      if (typeof evidence?.reason === 'string' && evidence.reason.trim()) {
+        detailParts.push(evidence.reason.trim());
+      }
+      if (evidence) {
+        const context = Object.entries(evidence)
+          .filter(([name, value]) =>
+            !['pass', 'score', 'reason', 'reason_code'].includes(name) &&
+            (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') &&
+            value !== '')
+          .slice(0, 3)
+          .map(([name, value]) => `${name}: ${String(value)}`);
+        detailParts.push(...context);
+      }
+      if (!hasBooleanResult) {
+        detailParts.push('The backend has not supplied this layer result; no local estimate is substituted.');
+      } else if (detailParts.length === 0) {
+        detailParts.push(status === 'PASS'
+          ? 'Backend rule check passed.'
+          : 'Backend rule check failed.');
+      }
+      detailParts.push('Rule-gate status is not a probability of profit.');
+      return {
+        layer: definition.layer,
+        name: definition.name,
+        status,
+        score,
+        detail: [...new Set(detailParts)].join(' • '),
+      };
+    });
   }
 
   public async getDiagnostics(): Promise<SystemDiagnostics> {
     try {
       const resp = await fetch(`${this.signalBackendUrl}/v1/system/diagnostics`, {
-        headers: { 'X-Device-Id': this.deviceId },
+        headers: await this.getAuthHeaders(),
       });
       if (resp.ok) return sanitizeRepositoryLinks(await resp.json()) as SystemDiagnostics;
     } catch (_) {}

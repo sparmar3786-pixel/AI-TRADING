@@ -102,7 +102,7 @@ export interface QuantLayerResult {
   name: string;
   status: 'PASS' | 'WARN' | 'FAIL' | 'UNAVAILABLE';
   score: number | null;
-  weight: number;
+  weight?: number;
   detail: string;
 }
 

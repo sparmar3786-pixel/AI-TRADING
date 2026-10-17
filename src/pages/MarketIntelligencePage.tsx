@@ -67,10 +67,7 @@ export const MarketIntelligencePage: React.FC = () => {
         let response: Response;
         try {
           response = await fetch(`${backendUrl}/v1/market-intelligence`, {
-            headers: {
-              Accept: 'application/json',
-              'X-Device-Id': apiService.getDeviceId(),
-            },
+            headers: await apiService.getAuthHeaders(),
             signal: controller.signal,
             cache: 'no-store',
           });
