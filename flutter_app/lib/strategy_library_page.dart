@@ -216,6 +216,7 @@ class _StrategyCard extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               'Underlying entry: ${value(candidate['entry'])}  •  SL: ${value(candidate['stop_loss'])}  •  Target: ${value(candidate['target'])}',
+              key: ValueKey('candidate-levels-${item.keyName}'),
               softWrap: true,
               style: const TextStyle(fontSize: 12, color: Colors.white70),
             ),
