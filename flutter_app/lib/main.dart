@@ -241,7 +241,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         'required_minutes': 10,
         'required_seconds': requiredSeconds >= 600 ? requiredSeconds : 600,
         if (serverConfirming) 'elapsed_seconds': elapsedSeconds,
-        if (serverConfirming) 'remaining_seconds': (requiredSeconds - elapsedSeconds!).clamp(0, requiredSeconds),
+        if (serverConfirming) 'remaining_seconds': (requiredSeconds - elapsedSeconds).clamp(0, requiredSeconds),
         'server_confirmed': false,
       };
       validation['decision'] = 'WAIT';
