@@ -12,6 +12,10 @@ class StabilityGateContractTests(unittest.TestCase):
             "observed_at": self.now.isoformat(),
             "underlying_ltp": 22010,
             "sentiment_score": 0.55,
+            "indicators": {
+                "ema_fast_8": 22010, "ema_slow_21": 22000,
+                "rsi_14": 61, "macd_histogram": 2.5, "vwap": 21980,
+            },
             "timeframe_closes": {
                 "5m": [21970, 21980, 21995, 22000, 22010],
                 "15m": [21930, 21945, 21960, 21980, 22000],
