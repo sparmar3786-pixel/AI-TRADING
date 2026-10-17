@@ -72,7 +72,7 @@ def test_verify_wiring_reports_hero_zero_candidate_pipeline_but_keeps_it_wait_ga
     result = response.json()
     assert result["status"] == "WAIT"
     assert result["live_api_wiring"] == "CANDIDATE_PIPELINE_WIRED; ACTIONABILITY_NOT_VERIFIED"
-    assert result["candidate_route"] == "/v1/signals.hero_zero"
+    assert result["candidate_route"] == "/v1/signals.strategy_candidates.hero_zero"
     assert result["checks"]["candidate_pipeline_wired"] is True
     assert result["checks"]["fresh_live_market_data"] is False
     assert result["checks"]["risk_gate_verified"] is False
@@ -103,7 +103,10 @@ def test_direct_evaluate_never_trusts_caller_snapshot_or_emits_trade_levels():
     assert result["target"] is None
     assert result["strike"] is None
     assert result["live_validation"]["decision"] == "WAIT"
-    assert "ADAPTER_NOT_REGISTERED" in result["guards"]
+    assert "NO_ACTIONABLE_SIGNAL" in result["guards"]
+    assert result["candidate_snapshot"]["candidate_decision"] is None
+    assert result["candidate_snapshot"]["data_fresh"] is False
+    assert result["order_placement_enabled"] is False
 
 
 def test_verify_wiring_rejects_unknown_strategy_and_invalid_device():
