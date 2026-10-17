@@ -5454,8 +5454,17 @@ def signal_outcome_calendar(start_date: str, end_date: str, _: str = Depends(_de
     rows = _load_signal_outcomes()
     daily: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
-        opened = str(row.get("opened_at") or "")[:10]
-        if not opened or opened < start_date or opened > end_date:
+        opened_raw = str(row.get("opened_at") or row.get("timestamp") or "")
+        if not opened_raw:
+            continue
+        try:
+            opened_dt = datetime.fromisoformat(opened_raw.replace("Z", "+00:00"))
+            if opened_dt.tzinfo is None:
+                opened_dt = opened_dt.replace(tzinfo=timezone.utc)
+            opened = opened_dt.astimezone(ZoneInfo("Asia/Kolkata")).date().isoformat()
+        except (ValueError, TypeError):
+            continue
+        if opened < start.isoformat() or opened > end.isoformat():
             continue
         daily.setdefault(opened, []).append(row)
     days: dict[str, Any] = {}
