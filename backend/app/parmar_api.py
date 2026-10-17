@@ -71,13 +71,28 @@ def list_parmar_strategies(x_device_id: str = Header(default="")) -> dict[str, A
         available = _module_available(module_name)
         item["engine_module"] = module_name
         item["engine_loaded"] = available
-        item["status"] = source_status if available else ("ENGINE_SOURCE_MISSING_IN_DEPLOYMENT" if module_name else "NOT_IMPLEMENTED")
+        candidate_ids = {"oi_price_action", "hero_zero", "failed_move_pdh_pdl", "ema_crossover", "orb", "vwap"}
+        detector_ids = {"day_hl_liquidity_sweep"}
+        candidate_wired = item["id"] in candidate_ids
+        detector_wired = item["id"] in detector_ids
+        if not available:
+            item["status"] = "ENGINE_SOURCE_MISSING_IN_DEPLOYMENT" if module_name else "NOT_IMPLEMENTED"
+        elif candidate_wired:
+            item["status"] = "CANDIDATE_PIPELINE_WIRED_WAIT_GATED"
+        elif detector_wired:
+            item["status"] = "DETECTOR_PIPELINE_WIRED_WAIT_GATED"
+        else:
+            item["status"] = source_status
         item["live_api_wiring"] = (
-            "CANDIDATE_PIPELINE_WIRED; ACTIONABILITY_NOT_VERIFIED"
-            if item["id"] in {"orb", "vwap"} else "NOT_VERIFIED"
+            "CANDIDATE_PIPELINE_WIRED; ACTIONABILITY_NOT_VERIFIED" if candidate_wired
+            else "DETECTOR_PIPELINE_WIRED; ACTIONABILITY_NOT_VERIFIED" if detector_wired
+            else "NOT_VERIFIED"
         )
-        if item["id"] in {"orb", "vwap"}:
-            item["candidate_route"] = "/v1/signals.strategy_candidates"
+        if candidate_wired or detector_wired:
+            item["candidate_route"] = (
+                "/v1/signals.hero_zero" if item["id"] == "hero_zero"
+                else "/v1/signals.strategy_candidates"
+            )
         item["actionable"] = False
         strategies.append(item)
     return {"status": "ok", "engine": "PARMAR", "count": len(strategies), "strategies": strategies}
@@ -97,10 +112,13 @@ def verify_strategy_wiring(strategy_id: str, x_device_id: str = Header(default="
         raise HTTPException(status_code=404, detail="Unknown Parmar strategy id")
     module_name, _ = _ENGINE_MODULES[strategy_id]
     engine_loaded = _module_available(module_name)
-    candidate_pipeline_wired = strategy_id in {"orb", "vwap"} and engine_loaded
+    candidate_ids = {"oi_price_action", "failed_move_pdh_pdl", "ema_crossover", "orb", "vwap"}
+    detector_ids = {"day_hl_liquidity_sweep"}
+    candidate_pipeline_wired = strategy_id in candidate_ids and engine_loaded
+    detector_pipeline_wired = strategy_id in detector_ids and engine_loaded
     checks = {
         "backend_route_registered": True,
-        "candidate_pipeline_wired": candidate_pipeline_wired,
+        "candidate_pipeline_wired": candidate_pipeline_wired or detector_pipeline_wired,
         "engine_module_available": engine_loaded,
         "fresh_live_market_data": False,
         "signal_contract_validated": False,
@@ -114,12 +132,26 @@ def verify_strategy_wiring(strategy_id: str, x_device_id: str = Header(default="
     return {
         "strategy_id": strategy_id,
         "status": "WAIT",
-        "live_api_wiring": "NOT_VERIFIED",
+        "live_api_wiring": (
+            "CANDIDATE_PIPELINE_WIRED; ACTIONABILITY_NOT_VERIFIED" if candidate_pipeline_wired
+            else "DETECTOR_PIPELINE_WIRED; ACTIONABILITY_NOT_VERIFIED" if detector_pipeline_wired
+            else "NOT_VERIFIED"
+        ),
         "actionable": False,
         "checks": checks,
         "blockers": blockers,
-        "candidate_route": "/v1/signals.strategy_candidates" if strategy_id in {"orb", "vwap"} else None,
-        "reason": "ORB/VWAP candidates are emitted by the canonical /v1/signals pipeline but remain non-actionable until fresh option mapping, five-layer validation, risk checks and server confirmation are proven." if strategy_id in {"orb", "vwap"} else "Diagnostic route and module presence do not prove fresh live feed, risk mapping, or end-to-end wiring.",
+        "candidate_route": (
+            "/v1/signals.hero_zero" if strategy_id == "hero_zero"
+            else "/v1/signals.strategy_candidates" if candidate_pipeline_wired or detector_pipeline_wired
+            else None
+        ),
+        "reason": (
+            "Candidate calculation is connected to the server-owned /v1/signals payload, but fresh live feed, option mapping, five-layer validation, risk and 600-second confirmation are not certified."
+            if candidate_pipeline_wired else
+            "DAY-HL reports sweep evidence only; it is not a complete trade planner and remains WAIT-gated."
+            if detector_pipeline_wired else
+            "Diagnostic route and module presence do not prove fresh live feed, risk mapping, or end-to-end wiring."
+        ),
     }
 
 

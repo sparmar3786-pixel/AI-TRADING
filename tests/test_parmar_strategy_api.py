@@ -30,11 +30,15 @@ def test_parmar_strategy_inventory_is_backend_computed_and_non_actionable():
     } <= ids
     for strategy in payload["strategies"]:
         assert strategy["actionable"] is False
-        if strategy["id"] in {"orb", "vwap"}:
-            # Candidate computation exists, but live option mapping/risk/confirmation
-            # is not verified. Do not mislabel the candidate path as absent.
+        if strategy["id"] in {"oi_price_action", "hero_zero", "failed_move_pdh_pdl", "ema_crossover", "orb", "vwap"}:
+            # Candidate evaluation is wired to the server-owned signal payload,
+            # but contract/risk/stability gates still prohibit actionability.
             assert strategy["status"] == "CANDIDATE_PIPELINE_WIRED_WAIT_GATED"
             assert strategy["live_api_wiring"] == "CANDIDATE_PIPELINE_WIRED; ACTIONABILITY_NOT_VERIFIED"
+            assert strategy["candidate_route"]
+        elif strategy["id"] == "day_hl_liquidity_sweep":
+            assert strategy["status"] == "DETECTOR_PIPELINE_WIRED_WAIT_GATED"
+            assert strategy["live_api_wiring"] == "DETECTOR_PIPELINE_WIRED; ACTIONABILITY_NOT_VERIFIED"
         else:
             assert strategy["live_api_wiring"] == "NOT_VERIFIED"
 
@@ -48,7 +52,7 @@ def test_verify_wiring_never_promotes_from_route_or_source_presence():
     assert response.status_code == 200, response.text
     result = response.json()
     assert result["status"] == "WAIT"
-    assert result["live_api_wiring"] == "NOT_VERIFIED"
+    assert result["live_api_wiring"] == "CANDIDATE_PIPELINE_WIRED; ACTIONABILITY_NOT_VERIFIED"
     assert result["actionable"] is False
     assert result["checks"]["backend_route_registered"] is True
     assert result["checks"]["fresh_live_market_data"] is False
