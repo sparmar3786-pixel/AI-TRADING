@@ -10,8 +10,8 @@ export const OptionChainPage: React.FC = () => {
   const cfg = INDEX_CONFIG[selectedIndex];
 
   const strikes = currentMarket?.option_chain || [];
-  const ltp = marketActionable ? currentMarket!.ltp : null;
   const marketActionable = apiService.isFreshLiveMarketRow(currentMarket);
+  const ltp = marketActionable ? currentMarket!.ltp : null;
 
   const [selectedStrike, setSelectedStrike] = useState<{
     row: OptionChainRow;
