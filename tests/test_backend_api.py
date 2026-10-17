@@ -1035,3 +1035,33 @@ class BackendApiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    def test_blocked_final_validation_clears_all_trade_levels(self):
+        payload = {
+            "decision": "CALL BUY",
+            "strike": 25000,
+            "expiry": "2026-10-29",
+            "option_side": "CE",
+            "option_type": "CALL",
+            "entry": 100.0,
+            "stop_loss": 80.0,
+            "target": 140.0,
+            "five_layer_engine": {
+                "decision": "CALL BUY", "strike": 25000, "entry": 100.0,
+                "stop_loss": 80.0, "target": 140.0,
+            },
+            "trade_plan": {
+                "selection_grade": "A", "strike": 25000, "expiry": "2026-10-29",
+                "entry": 100.0, "stop_loss": 80.0, "target": 140.0,
+            },
+        }
+        api._clear_blocked_trade_levels(payload)
+        self.assertEqual(payload["decision"], "WAIT")
+        self.assertEqual(payload["candidate_decision"], "CALL BUY")
+        for key in ("strike", "expiry", "option_side", "option_type", "entry", "stop_loss", "target"):
+            self.assertIsNone(payload[key], key)
+            self.assertIsNone(payload["five_layer_engine"][key], key)
+            self.assertIsNone(payload["trade_plan"][key], key)
+        self.assertEqual(payload["five_layer_engine"]["decision"], "WAIT")
+        self.assertEqual(payload["trade_plan"]["selection_grade"], "WAIT")
