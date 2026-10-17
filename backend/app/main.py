@@ -3287,12 +3287,36 @@ def _stale_signal_snapshot(cached: dict[str, Any], age_seconds: float | None) ->
     snapshot["message"] = "Showing cached quotes as stale while the broker snapshot refreshes in the background."
     return snapshot
 
+def _cached_signal_source_is_fresh(cached: dict[str, Any], cache_age_seconds: float) -> bool:
+    """A cache hit is live only while every source timestamp remains within the quant limit."""
+    rows = cached.get("signals")
+    if not isinstance(rows, dict) or not rows:
+        return False
+    for row in rows.values():
+        if not isinstance(row, dict):
+            return False
+        layers = row.get("layers")
+        if not isinstance(layers, dict):
+            layers = (row.get("five_layer_engine") or {}).get("layers")
+        quality = layers.get("data_quality") if isinstance(layers, dict) else None
+        if not isinstance(quality, dict) or quality.get("pass") is not True:
+            return False
+        source_age = _number(quality.get("age_seconds"))
+        if source_age is None or source_age < 0 or source_age + cache_age_seconds > 15.0:
+            return False
+    return True
+
+
 def _get_signals(force: bool = False) -> dict[str, Any]:
     """Serve immediately and refresh expired market snapshots in a single background worker."""
     global _signal_build_metrics
     with _lock:
         age = time.monotonic() - _signal_cache_at if _signal_cache is not None else None
-        fresh = _signal_cache is not None and age is not None and age < SIGNAL_CACHE_SECONDS
+        fresh = (
+            _signal_cache is not None and age is not None
+            and age < SIGNAL_CACHE_SECONDS
+            and _cached_signal_source_is_fresh(_signal_cache, age)
+        )
         if fresh and not force:
             return _signal_cache
         cached = _signal_cache
