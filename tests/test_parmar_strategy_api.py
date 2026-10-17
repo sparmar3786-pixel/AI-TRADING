@@ -5,7 +5,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
 from fastapi.testclient import TestClient
-from app.main import app
+from app.main import app, _complete_strategy_candidate_inventory
+import app.main as backend_main
 
 
 DEVICE_HEADERS = {"X-Device-Id": "A" * 43}
@@ -115,3 +116,42 @@ def test_verify_wiring_rejects_unknown_strategy_and_invalid_device():
     assert unknown.status_code == 404
     unauthenticated = client.get("/v1/parmar/strategies")
     assert unauthenticated.status_code == 401
+
+
+
+def test_candidate_inventory_preserves_successful_results_and_fills_missing_engines():
+    successful = {
+        "orb": {"strategy_id": "orb", "decision": "WAIT", "actionable": False, "reasons": ["no setup"]},
+        "ema_crossover": {"strategy_id": "ema_crossover", "decision": "WAIT", "actionable": False},
+    }
+    result = _complete_strategy_candidate_inventory(successful, "injected engine failure")
+    assert set(result) == {
+        "oi_price_action", "hero_zero", "failed_move_pdh_pdl", "ema_crossover",
+        "day_hl_liquidity_sweep", "orb", "vwap",
+    }
+    assert result["orb"]["reasons"] == ["no setup"]
+    assert result["ema_crossover"]["decision"] == "WAIT"
+    for strategy_id in {"oi_price_action", "hero_zero", "failed_move_pdh_pdl", "day_hl_liquidity_sweep", "vwap"}:
+        row = result[strategy_id]
+        assert row["decision"] == "WAIT"
+        assert row["actionable"] is False
+        assert row["data_fresh"] is False
+        assert row["entry"] is None
+        assert row["stop_loss"] is None
+        assert row["target"] is None
+        assert row["strike"] is None
+        assert "ENGINE_EVALUATION_INCOMPLETE" in row["guards"]
+
+
+def test_signals_endpoint_returns_fail_closed_wait_payload_on_unexpected_collector_error(monkeypatch):
+    client = TestClient(app)
+    def fail_collection():
+        raise RuntimeError("synthetic test failure")
+    monkeypatch.setattr(backend_main, "_get_signals", fail_collection)
+    response = client.get("/v1/signals", headers=DEVICE_HEADERS)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["live"] is False
+    assert "failed safely" in payload["message"].lower()
+    assert payload["trade_plans"] == []
+    assert payload["qualified_trade_count"] == 0
