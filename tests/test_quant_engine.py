@@ -212,6 +212,30 @@ class FiveLayerEngineTests(unittest.TestCase):
         self.assertFalse(result["layers"]["risk_levels"]["pass"])
         self.assertIsNone(result["stop_loss"])
 
+    def test_option_contract_expires_at_indian_market_close_not_next_utc_day(self):
+        before_close = datetime(2026, 10, 29, 9, 59, tzinfo=timezone.utc)  # 15:29 IST
+        snapshot = dict(self.snapshot)
+        snapshot["observed_at"] = before_close.isoformat()
+        snapshot["option_chain"] = [
+            dict(self.snapshot["option_chain"][0], expiry="2026-10-29", timestamp=before_close.isoformat())
+        ]
+        valid = evaluate_five_layer_signal(snapshot, now=before_close)
+        self.assertTrue(valid["layers"]["option_selection"]["pass"], valid["layers"]["option_selection"])
+
+        at_close = datetime(2026, 10, 29, 10, 0, tzinfo=timezone.utc)  # 15:30 IST
+        expired_snapshot = dict(snapshot)
+        expired_snapshot["observed_at"] = at_close.isoformat()
+        expired_snapshot["option_chain"] = [
+            dict(snapshot["option_chain"][0], timestamp=at_close.isoformat())
+        ]
+        expired = evaluate_five_layer_signal(expired_snapshot, now=at_close)
+        self.assertFalse(expired["layers"]["option_selection"]["pass"])
+        self.assertEqual(expired["decision"], "WAIT")
+        self.assertIsNone(expired["strike"])
+        self.assertIsNone(expired["entry"])
+        self.assertIsNone(expired["stop_loss"])
+        self.assertIsNone(expired["target"])
+
     def test_invalid_order_flow_blocks_signal(self):
         self.snapshot["order_flow"]["ask"] = 99.0
         result = evaluate_five_layer_signal(self.snapshot, now=self.now)
