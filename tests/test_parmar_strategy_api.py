@@ -30,7 +30,7 @@ def test_parmar_strategy_inventory_is_backend_computed_and_non_actionable():
     } <= ids
     for strategy in payload["strategies"]:
         assert strategy["actionable"] is False
-        if strategy["id"] in {"orb", "vwap"}:
+        if strategy["id"] in {"orb", "vwap", "hero_zero"}:
             # Candidate computation exists, but live option mapping/risk/confirmation
             # is not verified. Do not mislabel the candidate path as absent.
             assert strategy["status"] == "CANDIDATE_PIPELINE_WIRED_WAIT_GATED"
@@ -92,3 +92,20 @@ def test_verify_wiring_rejects_unknown_strategy_and_invalid_device():
     assert unknown.status_code == 404
     unauthenticated = client.get("/v1/parmar/strategies")
     assert unauthenticated.status_code == 401
+
+
+
+def test_hero_zero_diagnostic_reports_candidate_pipeline_but_never_actionable():
+    client = TestClient(app)
+    response = client.post(
+        "/v1/parmar/strategies/hero_zero/verify-wiring",
+        headers=DEVICE_HEADERS,
+    )
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["status"] == "WAIT"
+    assert result["actionable"] is False
+    assert result["checks"]["candidate_pipeline_wired"] is True
+    assert result["checks"]["fresh_live_market_data"] is False
+    assert result["checks"]["risk_gate_verified"] is False
+    assert result["candidate_route"] == "/v1/signals.strategy_candidates"
