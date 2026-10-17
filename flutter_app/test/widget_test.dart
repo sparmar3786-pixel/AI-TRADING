@@ -255,27 +255,24 @@ void main() {
       'candidate-card-orb',
       'candidate-card-vwap',
     ]) {
-      await tester.scrollUntilVisible(find.byKey(ValueKey(key)), 300,
-          scrollable: find.descendant(
-            of: find.byType(StrategyLibraryPage),
-            matching: find.byType(Scrollable),
-          ).first);
-      expect(find.byKey(ValueKey(key)), findsOneWidget, reason: '$key must render from canonical strategy_candidates');
+      // The tall viewport renders all seven canonical cards; do not scroll to
+      // obsolete duplicate candidate cards or depend on a fragile Scrollable finder.
+      expect(find.byKey(ValueKey(key)), findsOneWidget,
+          reason: '$key must render from canonical strategy_candidates');
     }
-    await tester.scrollUntilVisible(
-      find.byKey(const ValueKey('candidate-card-day-hl-liquidity-sweep')),
-      300,
-      scrollable: find.descendant(
-        of: find.byType(StrategyLibraryPage),
-        matching: find.byType(Scrollable),
-      ).first,
-    );
     expect(find.textContaining('Approved decision: WAIT'), findsWidgets);
     expect(find.textContaining('Underlying spot levels only—not option-premium prices'), findsWidgets);
     expect(find.textContaining('Sweep detected; detector-only'), findsOneWidget);
   });
 
   testWidgets('Strategy Library shows ORB/VWAP backend candidates but keeps them non-actionable', (tester) async {
+    // Keep the complete canonical cards in the test viewport so assertions
+    // verify rendered content, not a removed/duplicated legacy candidate card.
+    tester.view.physicalSize = const Size(1200, 5000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
     await tester.pumpWidget(MaterialApp(
       home: StrategyLibraryPage(
         selectedIndex: 'NIFTY',
@@ -309,24 +306,33 @@ void main() {
       ),
     ));
     await tester.pumpAndSettle();
-    final strategyScroll = find.descendant(
-      of: find.byType(StrategyLibraryPage),
-      matching: find.byType(Scrollable),
-    ).first;
-    final orbDecision = find.descendant(
-      of: find.byKey(const ValueKey('candidate-card-orb')),
-      matching: find.textContaining('Candidate: CALL BUY'),
+    final orbCard = find.byKey(const ValueKey('candidate-card-orb'));
+    expect(orbCard, findsOneWidget);
+    expect(
+      find.descendant(of: orbCard, matching: find.textContaining('Candidate: CALL BUY')),
+      findsOneWidget,
     );
-    await tester.scrollUntilVisible(orbDecision, 250, scrollable: strategyScroll);
-    expect(orbDecision, findsOneWidget);
-    expect(find.textContaining('Underlying entry: 25000.0 • SL: 24900.0 • Target: 25200.0'), findsOneWidget);
+    expect(
+      find.descendant(of: orbCard, matching: find.textContaining('Approved decision: WAIT')),
+      findsOneWidget,
+      reason: 'Candidate direction must never override the approved WAIT gate.',
+    );
+
+    final orbLevels = find.byKey(const ValueKey('candidate-levels-orb'));
+    expect(orbLevels, findsOneWidget);
+    final levelsText = tester.widget<Text>(orbLevels).data!;
+    expect(levelsText, contains('Underlying entry: 25000.0'));
+    expect(levelsText, contains('SL: 24900.0'));
+    expect(levelsText, contains('Target: 25200.0'));
     expect(find.textContaining('Five-layer quant validation required'), findsOneWidget);
-    final vwapDecision = find.descendant(
-      of: find.byKey(const ValueKey('candidate-card-vwap')),
-      matching: find.textContaining('Candidate: WAIT'),
+
+    final vwapCard = find.byKey(const ValueKey('candidate-card-vwap'));
+    expect(vwapCard, findsOneWidget);
+    expect(
+      find.descendant(of: vwapCard, matching: find.textContaining('Candidate: WAIT')),
+      findsOneWidget,
     );
-    await tester.scrollUntilVisible(vwapDecision, 250, scrollable: strategyScroll);
-    expect(vwapDecision, findsOneWidget);
+    expect(find.byKey(const ValueKey('candidate-levels-vwap')), findsOneWidget);
     expect(find.textContaining('Underlying spot levels only—not option-premium prices'), findsWidgets);
   });
 
