@@ -9,7 +9,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from backend.app import main as api
-from backend.app.api_auth import AuthenticationError, authenticate_request
+from backend.app.api_auth import AuthenticationError, authenticate_request, require_authenticated_device
 from backend.app.exchange_calendar import day_status, _parse_date_cell
 
 
@@ -74,6 +74,58 @@ class AuditRemediationTests(unittest.TestCase):
                 "X-API-Access-Key": secret,
             })
             self.assertEqual(accepted.status_code, 200, accepted.text)
+
+
+    def test_firebase_device_namespace_is_scoped_to_verified_uid(self):
+        import hashlib
+
+        device_id = "A" * 43
+        with patch.dict(os.environ, {
+            "API_AUTH_MODE": "required",
+            "API_ACCESS_KEY": "",
+            "FIREBASE_PROJECT_ID": "audit-test-project",
+            "AUTH_ALLOWED_UIDS": "owner-a,owner-b",
+        }, clear=False):
+            with patch("google.oauth2.id_token.verify_firebase_token", return_value={"user_id": "owner-a"}):
+                owner_a = require_authenticated_device(device_id, "", "Bearer signed-token")
+            with patch("google.oauth2.id_token.verify_firebase_token", return_value={"user_id": "owner-b"}):
+                owner_b = require_authenticated_device(device_id, "", "Bearer signed-token")
+
+        self.assertNotEqual(owner_a, owner_b)
+        self.assertEqual(
+            owner_a,
+            hashlib.sha256(f"firebase:owner-a\\0{device_id}".encode("utf-8")).hexdigest(),
+        )
+
+    def test_secondary_routers_reject_device_id_without_server_auth(self):
+        secret = "test-only-long-random-access-key-1234567890"
+        client = TestClient(api.app)
+        headers = {"X-Device-Id": "A" * 43}
+        with patch.dict(os.environ, {"API_AUTH_MODE": "required", "API_ACCESS_KEY": secret}, clear=False):
+            checks = [
+                ("get", "/v1/ai/kumo/status"),
+                ("get", "/v1/parmar/strategies"),
+                ("get", "/v1/market/candles"),
+                ("post", "/v1/smc/analyze"),
+                ("get", "/snapshot?symbol=NIFTY&tf=1m"),
+            ]
+            for method, path in checks:
+                with self.subTest(path=path):
+                    response = getattr(client, method)(path, headers=headers, json={} if method == "post" else None) if method == "post" else client.get(path, headers=headers)
+                    self.assertEqual(response.status_code, 401, f"{path}: {response.status_code} {response.text}")
+
+    def test_websockets_reject_device_id_without_server_auth(self):
+        from starlette.websockets import WebSocketDisconnect
+
+        secret = "test-only-long-random-access-key-1234567890"
+        client = TestClient(api.app)
+        headers = {"X-Device-Id": "A" * 43}
+        with patch.dict(os.environ, {"API_AUTH_MODE": "required", "API_ACCESS_KEY": secret}, clear=False):
+            for path in ("/ws?symbol=NIFTY", "/ws/chart?symbol=NIFTY&tf=1m"):
+                with self.subTest(path=path):
+                    with self.assertRaises(WebSocketDisconnect):
+                        with client.websocket_connect(path, headers=headers) as websocket:
+                            websocket.receive_json()
 
     def test_rate_limiter_rejects_requests_over_the_window_and_recovers(self):
         key = ("audit-unit-test", "calendar")

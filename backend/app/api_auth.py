@@ -7,9 +7,13 @@ device ID is never treated as proof of identity.
 """
 from __future__ import annotations
 
+import hashlib
 import hmac
 import os
-from typing import Any
+import re
+from typing import Annotated, Any
+
+from fastapi import Header, HTTPException
 
 
 class AuthConfigurationError(RuntimeError):
@@ -77,3 +81,39 @@ def authenticate_request(authorization: str = "", access_key: str = "") -> dict[
     if configured_key:
         raise AuthenticationError("Missing or invalid API access key.")
     return {"method": "legacy_device_id", "subject": None}
+
+
+_DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{43,128}$")
+
+
+def require_authenticated_device(
+    x_device_id: Annotated[str, Header(alias="X-Device-Id")] = "",
+    x_api_access_key: Annotated[str, Header(alias="X-API-Access-Key")] = "",
+    authorization: Annotated[str, Header()] = "",
+) -> str:
+    """Authenticate an API caller and bind Firebase-authorized requests to their UID.
+
+    Device IDs identify a client installation, not a user. For Firebase callers,
+    derive the server-side storage scope from both the verified UID and device ID
+    so one allow-listed user cannot select another user's namespace by spoofing
+    the X-Device-Id header. The single-owner access-key mode retains the legacy
+    per-device namespace for staged migration.
+    """
+    try:
+        identity = authenticate_request(authorization=authorization, access_key=x_api_access_key)
+    except AuthConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except AuthenticationError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    if not _DEVICE_ID_RE.fullmatch(x_device_id or ""):
+        raise HTTPException(status_code=401, detail="Missing or invalid X-Device-Id")
+
+    if identity.get("method") == "firebase_id_token":
+        subject = str(identity.get("subject") or "").strip()
+        if not subject:
+            raise HTTPException(status_code=401, detail="Authenticated identity has no subject")
+        namespace = f"firebase:{subject}\0{x_device_id}"
+        return hashlib.sha256(namespace.encode("utf-8")).hexdigest()
+
+    return x_device_id

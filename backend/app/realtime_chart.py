@@ -13,7 +13,12 @@ from collections import defaultdict, deque
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
+
+try:
+    from app.api_auth import require_authenticated_device
+except ModuleNotFoundError:
+    from backend.app.api_auth import require_authenticated_device
 
 router = APIRouter(tags=["realtime-chart"])
 _async_redis_client = None
@@ -67,7 +72,7 @@ async def _async_redis():
         return _async_redis_client
 
 
-@router.get("/snapshot")
+@router.get("/snapshot", dependencies=[Depends(require_authenticated_device)])
 async def candle_snapshot(symbol: str = Query("BANKNIFTY", max_length=32),
                           tf: str = Query("1m", max_length=8),
                           limit: int = Query(1000, ge=1, le=5000)) -> dict[str, Any]:
@@ -147,6 +152,15 @@ async def ingest_chart_tick(payload: dict[str, Any],
 
 @router.websocket("/ws/chart")
 async def chart_delta_socket(websocket: WebSocket) -> None:
+    try:
+        require_authenticated_device(
+            websocket.headers.get("x-device-id", ""),
+            websocket.headers.get("x-api-access-key", ""),
+            websocket.headers.get("authorization", ""),
+        )
+    except HTTPException:
+        await websocket.close(code=1008, reason="Authentication required")
+        return
     symbol = (websocket.query_params.get("symbol") or "BANKNIFTY").upper()
     tf = (websocket.query_params.get("tf") or "1m").lower()
     try:

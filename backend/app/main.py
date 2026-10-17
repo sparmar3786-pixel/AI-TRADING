@@ -57,10 +57,10 @@ from strategies.technical import atr as technical_atr, ema as technical_ema, rsi
 from strategies.advanced import bollinger_bands, macd as advanced_macd, donchian_channels
 from strategies.suite import evaluate_strategy_suite
 try:
-    from app.api_auth import AuthenticationError, AuthConfigurationError, authenticate_request
+    from app.api_auth import require_authenticated_device
     from app.exchange_calendar import day_status as exchange_day_status, holidays_for as exchange_holidays_for, segment_for_symbol, start_refresh_scheduler
 except ModuleNotFoundError:
-    from backend.app.api_auth import AuthenticationError, AuthConfigurationError, authenticate_request
+    from backend.app.api_auth import require_authenticated_device
     from backend.app.exchange_calendar import day_status as exchange_day_status, holidays_for as exchange_holidays_for, segment_for_symbol, start_refresh_scheduler
 try:
     # Docker image runs the service as app.main with backend/app copied to /app/app.
@@ -343,15 +343,7 @@ def _device(
     API_AUTH_MODE=required and configure API_ACCESS_KEY or allow-listed Firebase
     ID tokens before claiming authenticated access.
     """
-    try:
-        authenticate_request(authorization=authorization, access_key=x_api_access_key)
-    except AuthConfigurationError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except AuthenticationError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
-    if not DEVICE_ID_RE.fullmatch(x_device_id or ""):
-        raise HTTPException(status_code=401, detail="Missing or invalid X-Device-Id")
-    return x_device_id
+    return require_authenticated_device(x_device_id, x_api_access_key, authorization)
 
 
 def _utc_now() -> datetime:
@@ -2753,11 +2745,12 @@ def _empty_payload(reason: str) -> dict[str, Any]:
 async def market_snapshot_stream(websocket: WebSocket) -> None:
     """Stream broker-only nearest-future snapshots without running the slow signal fan-out."""
     try:
-        authenticate_request(
-            authorization=websocket.headers.get("authorization", ""),
-            access_key=websocket.headers.get("x-api-access-key", ""),
+        require_authenticated_device(
+            websocket.headers.get("x-device-id", ""),
+            websocket.headers.get("x-api-access-key", ""),
+            websocket.headers.get("authorization", ""),
         )
-    except (AuthenticationError, AuthConfigurationError):
+    except HTTPException:
         await websocket.close(code=1008, reason="Authentication required")
         return
     await websocket.accept()

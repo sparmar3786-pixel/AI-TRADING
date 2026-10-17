@@ -9,10 +9,15 @@ from __future__ import annotations
 
 from typing import Any
 import importlib.util
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
-router = APIRouter(prefix="/v1/parmar", tags=["Parmar strategy engine"])
+try:
+    from app.api_auth import require_authenticated_device
+except ModuleNotFoundError:
+    from backend.app.api_auth import require_authenticated_device
+
+router = APIRouter(prefix="/v1/parmar", tags=["Parmar strategy engine"], dependencies=[Depends(require_authenticated_device)])
 
 STRATEGIES: tuple[dict[str, Any], ...] = (
     {"id": "oi_price_action", "name": "Price Action / OI Price Action", "source": "quant/oi_price_action_engine.py", "status": "SOURCE_PRESENT_ADAPTER_PENDING"},

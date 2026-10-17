@@ -11,9 +11,14 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
+try:
+    from app.api_auth import require_authenticated_device
+except ModuleNotFoundError:
+    from backend.app.api_auth import require_authenticated_device
+
 DEVICE_ID_RE = __import__("re").compile(r"^[A-Za-z0-9_-]{43,128}$")
 NVIDIA_CATALOG_BASE = "https://ai.api.nvidia.com/v1/structured-data/nvidia/kumo-tabular"
-router = APIRouter(tags=["NVIDIA Kumo Tabular"])
+router = APIRouter(tags=["NVIDIA Kumo Tabular"], dependencies=[Depends(require_authenticated_device)])
 DEFAULT_TIMEOUT_SECONDS = 25
 MAX_REQUEST_BYTES = 512_000
 
