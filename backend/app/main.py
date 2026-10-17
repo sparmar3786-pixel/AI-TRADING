@@ -2100,6 +2100,75 @@ def _index_snapshot(
                 "reasons": ["DAY-HL evaluation unavailable: " + type(exc).__name__],
                 "guards": ["ENGINE_EVALUATION_ERROR"],
             }
+
+        # Hero Zero must be expiry-day only and requires the exact expiry and
+        # source timestamps from the broker option chain. Never infer expiry
+        # from weekday rules or borrow the underlying timestamp for option quotes.
+        try:
+            today_expiry_rows = [
+                item for item in chain_payload
+                if _expiry_date(item.get("expiry")) == current_time.date()
+                and str(item.get("option_type") or "").upper() in ("CALL", "PUT")
+            ]
+            hero_quote_times: list[datetime] = []
+            hero_option_records: list[dict[str, Any]] = []
+            for item in today_expiry_rows:
+                stamp = _iso(item.get("source_timestamp") or item.get("timestamp"))
+                parsed_stamp = datetime.fromisoformat(stamp) if stamp else None
+                if parsed_stamp is not None:
+                    hero_quote_times.append(parsed_stamp.astimezone(IST))
+                strike_value = _number(item.get("strike"))
+                kind = str(item.get("option_type") or "").upper()
+                premium = _number(item.get("ltp"))
+                bid_value = _number(item.get("bid"))
+                ask_value = _number(item.get("ask"))
+                if strike_value is None or premium is None or premium <= 0:
+                    continue
+                hero_option_records.append({
+                    "strike": strike_value,
+                    "option_type": "CE" if kind == "CALL" else "PE",
+                    "ltp": premium, "bid": bid_value, "ask": ask_value,
+                })
+            hero_chain_frame = pd.DataFrame(hero_option_records)
+            hero_quote_stamp = min(hero_quote_times) if hero_quote_times else None
+
+            hero_pdh = hero_pdl = None
+            previous_daily = []
+            for candle in daily_candle_rows:
+                if not isinstance(candle, (list, tuple)) or len(candle) < 4:
+                    continue
+                stamp = _iso(candle[0])
+                parsed_stamp = datetime.fromisoformat(stamp) if stamp else None
+                if parsed_stamp is not None and parsed_stamp.astimezone(IST).date() < current_time.date():
+                    high_value, low_value = _number(candle[2]), _number(candle[3])
+                    if high_value is not None and low_value is not None and high_value > 0 and low_value > 0:
+                        previous_daily.append((parsed_stamp, high_value, low_value))
+            previous_daily.sort(key=lambda item: item[0])
+            if previous_daily:
+                hero_pdh, hero_pdl = previous_daily[-1][1], previous_daily[-1][2]
+
+            hero_signal = HeroZeroEngine().generate(
+                intraday_df=strategy_frame, current_spot=spot,
+                is_expiry_day=bool(today_expiry_rows),
+                option_chain=hero_chain_frame, current_time=current_time,
+                strike_step=strike_step,
+                expiry_date=current_time.date() if today_expiry_rows else None,
+                option_chain_timestamp=hero_quote_stamp,
+                day_high=day_high, day_low=day_low, pdh=hero_pdh, pdl=hero_pdl,
+            )
+            hero_payload = hero_zero_to_signal_data(
+                hero_signal, index=index, timestamp=observed,
+                data_fresh=bool(source_fresh and hero_quote_stamp is not None),
+            )
+            strategy_candidates["hero_zero"] = _keep_wait(hero_payload, "hero_zero")
+        except Exception as exc:
+            strategy_candidates["hero_zero"] = {
+                "strategy_id": "hero_zero", "engine_source": "HERO_ZERO",
+                "decision": "WAIT", "candidate_decision": None, "actionable": False,
+                "data_fresh": False, "entry": None, "stop_loss": None, "target": None,
+                "strike": None, "reasons": ["Hero Zero evaluation unavailable: " + type(exc).__name__],
+                "guards": ["ENGINE_EVALUATION_ERROR", "EXPIRY_NOT_VERIFIED"],
+            }
     except Exception:
         logging.exception("ORB/VWAP candidate evaluation failed for %s", index)
         strategy_candidates = {
