@@ -10,7 +10,7 @@ import 'broker_home_prototype_page.dart';
 import 'strategy_library_page.dart';
 import 'quant_engine_page.dart';
 
-const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Backtesting','API','Data Health','API & Railway','Broker Home','Strategies','Quant Engine'];
+const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Backtesting','API','Data Health','Broker Home','Strategies','Quant Engine'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
 
 void main() {
@@ -441,7 +441,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         IndicatorsPage(selected:selectedIndex,signal:_signal(selectedIndex),fast:emaFast,slow:emaSlow,onChanged:(f,s){setState((){emaFast=f;emaSlow=s;});refresh();},onIndex:(v)=>setState(()=>selectedIndex=v)),
         SignalPage(index:selectedIndex,signals:signals,tradePlans:tradePlans,market:market,onChanged:(v)=>setState(()=>selectedIndex=v)),
         RiskPage(index:selectedIndex,signal:_signal(selectedIndex),plans:tradePlans),
-        BacktestingPage(backendUrl: backendUrl),
+        BacktestingPage(backendUrl: AppConfig.signalBackendUrl),
         ApiPage(backendUrl:backendUrl,feed:feed,storeDiagnostics:storeDiagnostics,market:market,onSaved:(url){setState(()=>backendUrl=url);refresh();}),
         DataHealthPage(
           backendUrl: backendUrl,
@@ -455,7 +455,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           lastFetch: lastFetch,
           onRefresh: refresh,
         ),
-        const ApiRailwayPage(),
         BrokerHomePrototypePage(
           backendUrl: backendUrl,
           market: market,
@@ -488,10 +487,9 @@ IconData _tabIcon(int index) => switch (index) {
   7 => Icons.science_outlined,
   8 => Icons.settings_ethernet,
   9 => Icons.monitor_heart_outlined,
-  10 => Icons.cloud_outlined,
-  11 => Icons.account_balance_wallet_outlined,
-  12 => Icons.library_books_outlined,
-  13 => Icons.layers_outlined,
+  10 => Icons.account_balance_wallet_outlined,
+  11 => Icons.library_books_outlined,
+  12 => Icons.layers_outlined,
   _ => Icons.layers_outlined,
 };
 
@@ -599,28 +597,6 @@ String _diagValue(
     if (fieldValue != null) return fieldValue.toString();
   }
   return fallback;
-}
-
-class ApiRailwayPage extends StatelessWidget {
-  const ApiRailwayPage({super.key});
-
-  @override
-  Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.all(12),
-    children: [
-      const Text('ADVANCED API + RAILWAY CONNECTION', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
-      const SizedBox(height: 8),
-      const Text('Use the backend service as the secure bridge between this Android app and Angel One SmartAPI. Keep broker secrets on the server, not inside the APK.', style: TextStyle(color: Colors.white70)),
-      const SizedBox(height: 10),
-      Card(child: Column(children: [
-        const ListTile(leading: Icon(Icons.security), title: Text('Recommended production flow'), subtitle: Text('Android app → HTTPS Railway API → Angel One REST/WebSocket → normalized market store → deterministic signal and risk engines')),
-        const Divider(height: 1),
-        const ListTile(leading: Icon(Icons.health_and_safety), title: Text('Health checks'), subtitle: Text('Expose /health and verify it before debugging market data. Check deployment logs, environment variables, public HTTPS domain, CORS only if browser clients need it, and request timeouts.')),
-        const Divider(height: 1),
-        const ListTile(leading: Icon(Icons.vpn_key_outlined), title: Text('Secret handling'), subtitle: Text('Store credentials as Railway variables or encrypted server-side settings. Never commit .env files, API keys, Angel password, PIN, or TOTP seed.')),
-      ])),
-    ],
-  );
 }
 
 class BacktestingPage extends StatefulWidget {
@@ -794,12 +770,12 @@ class _BacktestingPageState extends State<BacktestingPage> {
               if (_error!.contains('HTTP 404')) ...[
                 const SizedBox(height: 8),
                 const Text(
-                  'The APK requested /v1/backtest/historical, but the server returned 404 (route not found). This route exists in the Fresh-Apk backend source. The deployed service may be running an older image or a different app/root directory. Redeploy the backend from this repository, then confirm /openapi.json lists POST /v1/backtest/historical. This is a server deployment mismatch, not a strategy result.',
+                  'The configured AI-TRADING signal backend returned HTTP 404 for /v1/backtest/historical. Check the deployed service routes and ensure this APK is paired with the matching AI-TRADING backend version. No backtest result was produced.',
                   style: TextStyle(fontSize: 12, color: Colors.white70),
                 ),
                 const SizedBox(height: 6),
                 TextButton.icon(
-                  onPressed: () => launchUrl(Uri.parse('https://nse-algo-backend-final-production.up.railway.app/openapi.json'), mode: LaunchMode.externalApplication),
+                  onPressed: () => launchUrl(Uri.parse('${AppConfig.signalBackendUrl}/openapi.json'), mode: LaunchMode.externalApplication),
                   icon: const Icon(Icons.open_in_new),
                   label: const Text('Check deployed API routes'),
                 ),
