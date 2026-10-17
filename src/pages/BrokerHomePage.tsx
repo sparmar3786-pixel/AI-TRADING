@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useTrading } from '../context/TradingContext';
-import { INDEX_CONFIG } from '../services/api';
+import { apiService, INDEX_CONFIG } from '../services/api';
 import { IndexSymbol } from '../types/market';
 import {
   Wallet,
@@ -28,18 +28,19 @@ export const BrokerHomePage: React.FC = () => {
   const [orderSymbol, setOrderSymbol] = useState<IndexSymbol>(selectedIndex);
   const [orderSide, setOrderSide] = useState<'CE' | 'PE'>('CE');
   const [orderLots, setOrderLots] = useState(2);
-  const [orderPrice, setOrderPrice] = useState(150);
+  const [orderPrice, setOrderPrice] = useState(0);
 
   React.useEffect(() => {
     const cfg = INDEX_CONFIG[orderSymbol];
     const mkt = market[orderSymbol];
-    if (mkt && cfg) {
-      const spot = mkt.ltp || cfg.basePrice;
-      const strike = Math.round(spot / cfg.strikeStep) * cfg.strikeStep;
-      const quote = mkt.option_chain?.find(r => Math.abs(r.strike - strike) < 0.01);
-      const estPrice = quote ? (orderSide === 'CE' ? quote.ce_ltp : quote.pe_ltp) : 145;
-      if (estPrice > 0) setOrderPrice(estPrice);
+    if (!cfg || !apiService.isFreshLiveMarketRow(mkt)) {
+      setOrderPrice(0);
+      return;
     }
+    const strike = Math.round(mkt.ltp / cfg.strikeStep) * cfg.strikeStep;
+    const quote = mkt.option_chain?.find(r => Math.abs(r.strike - strike) < 0.01);
+    const livePrice = quote ? (orderSide === 'CE' ? quote.ce_ltp : quote.pe_ltp) : NaN;
+    setOrderPrice(Number.isFinite(livePrice) && livePrice > 0 ? livePrice : 0);
   }, [orderSymbol, orderSide, market]);
 
   const openTrades = paperTrades.filter(t => t.status === 'OPEN');
@@ -53,8 +54,17 @@ export const BrokerHomePage: React.FC = () => {
     e.preventDefault();
     const cfg = INDEX_CONFIG[orderSymbol];
     const mkt = market[orderSymbol];
-    const spot = mkt?.ltp || cfg.basePrice;
-    const strike = Math.round(spot / cfg.strikeStep) * cfg.strikeStep;
+    if (!cfg || !apiService.isFreshLiveMarketRow(mkt)) {
+      alert('Paper trade blocked: fresh verified live market data is unavailable.');
+      return;
+    }
+    const strike = Math.round(mkt.ltp / cfg.strikeStep) * cfg.strikeStep;
+    const quote = mkt.option_chain?.find(r => Math.abs(r.strike - strike) < 0.01);
+    const livePrice = quote ? (orderSide === 'CE' ? quote.ce_ltp : quote.pe_ltp) : NaN;
+    if (!Number.isFinite(livePrice) || livePrice <= 0) {
+      alert('Paper trade blocked: a fresh live option quote for the selected strike is required.');
+      return;
+    }
 
     executePaperTrade({
       symbol: orderSymbol,
@@ -62,7 +72,7 @@ export const BrokerHomePage: React.FC = () => {
       side: orderSide,
       action: 'BUY',
       lots: orderLots,
-      entry_price: orderPrice,
+      entry_price: livePrice,
       stop_loss: Number((orderPrice * 0.8).toFixed(1)),
       target: Number((orderPrice * 1.4).toFixed(1)),
     });
