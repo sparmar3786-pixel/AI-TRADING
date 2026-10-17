@@ -120,6 +120,8 @@ except Exception:
 IST = ZoneInfo("Asia/Kolkata")
 MASTER_URL = "https://margincalculator.angelone.in/OpenAPI_File/files/OpenAPIScripMaster.json"
 MASTER_TTL_SECONDS = 6 * 60 * 60
+MASTER_DOWNLOAD_TIMEOUT_SECONDS = 8.0
+ADAPTER_PROFILE_CACHE_TTL_SECONDS = 30.0
 SIGNAL_CACHE_SECONDS = 30
 DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{43,128}$")
 INDEXES: dict[str, dict[str, str]] = {
@@ -132,6 +134,8 @@ INDEXES: dict[str, dict[str, str]] = {
 }
 COMMODITY_NAMES = ("CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "GOLD", "GOLDM", "SILVER", "SILVERM", "COPPER", "ZINC", "ALUMINIUM", "LEAD", "NICKEL", "MENTHAOIL", "CASTORSEED", "COTTON", "RUBBER")
 _lock = threading.RLock()
+_adapter_profile_lock = threading.Lock()
+_adapter_profile_verified_at = 0.0
 _adapter: AngelOneReadOnly | None = None
 _stream: AngelOneStream | None = None
 _stream_adapter: AngelOneReadOnly | None = None
@@ -677,36 +681,48 @@ def _credentials_from_env() -> dict[str, str]:
 
 
 def _current_adapter(attempt_env_login: bool = False) -> AngelOneReadOnly | None:
-    global _adapter
+    global _adapter, _adapter_profile_verified_at
     with _lock:
         if _adapter is None and attempt_env_login:
             creds = _credentials_from_env()
             if len(creds) == 4:
-                _adapter = AngelOneReadOnly(creds)
+                candidate = AngelOneReadOnly(creds)
                 try:
-                    _adapter.profile()
+                    candidate.profile()
+                    _adapter = candidate
+                    _adapter_profile_verified_at = time.monotonic()
                     try:
                         _start_stream(_adapter)
                     except Exception:
                         pass  # REST fallback remains available if WebSocket setup fails.
                 except Exception:
                     _adapter = None
+                    _adapter_profile_verified_at = 0.0
         return _adapter
 
 
 def _require_adapter() -> AngelOneReadOnly:
+    global _adapter_profile_verified_at
     adapter = _current_adapter(attempt_env_login=True)
     if adapter is None:
         raise HTTPException(status_code=503, detail="Angel One is not connected. Open API & Railway and connect with API key, Client ID, MPIN and current TOTP.")
     try:
-        adapter.profile()
+        # A newly-created adapter was just verified. Cache that profile check
+        # briefly so mobile polling does not issue another 20-second request.
+        if time.monotonic() - _adapter_profile_verified_at >= ADAPTER_PROFILE_CACHE_TTL_SECONDS:
+            with _adapter_profile_lock:
+                if time.monotonic() - _adapter_profile_verified_at >= ADAPTER_PROFILE_CACHE_TTL_SECONDS:
+                    adapter.profile()
+                    _adapter_profile_verified_at = time.monotonic()
         try:
             _start_stream(adapter)
         except Exception:
             pass  # Never fail a valid REST session solely because WebSocket is unavailable.
     except AngelOneConfigError as exc:
+        _adapter_profile_verified_at = 0.0
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
+        _adapter_profile_verified_at = 0.0
         raise HTTPException(status_code=502, detail="Angel One session is unavailable or expired. Reconnect with a fresh TOTP.") from exc
     return adapter
 
@@ -718,7 +734,7 @@ def _load_master(force: bool = False) -> list[dict[str, Any]]:
             return _master_rows
     request = urllib.request.Request(MASTER_URL, headers={"User-Agent": "AI-TRADING/1.0"})
     try:
-        with urllib.request.urlopen(request, timeout=20) as response:
+        with urllib.request.urlopen(request, timeout=MASTER_DOWNLOAD_TIMEOUT_SECONDS) as response:
             rows = json.loads(response.read().decode("utf-8"))
         if not isinstance(rows, list) or not rows:
             raise ValueError("empty instrument master")
