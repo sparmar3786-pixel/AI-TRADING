@@ -141,54 +141,11 @@ void main() {
     expect(find.text('VALIDATION PERFORMANCE'), findsNothing);
   });
 
-  testWidgets('Research Engines exposes MCX snapshot and keeps commodity CE PE gated', (tester) async {
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(
-        body: ResearchEnginesPage(
-          market: const {},
-          signals: const {},
-          ai: const {},
-          commodities: const [
-            {
-              'name': 'CRUDEOIL',
-              'symbol': 'CRUDEOIL26OCTFUT',
-              'live': true,
-              'ltp': 5500.0,
-              'decision': 'WAIT',
-              'candidate_decision': 'WAIT',
-              'indicators': {'ema_fast': 5501.0, 'ema_slow': 5498.0},
-            },
-          ],
-          optionChains: const {
-            'CRUDEOIL': [
-              {'side': 'CE', 'strike': 5500.0, 'oi': 10},
-              {'side': 'PE', 'strike': 5500.0, 'oi': 20},
-            ],
-          },
-          lastFetch: 'test snapshot',
-          selectedIndex: 'CRUDEOIL',
-          onIndexChanged: (_) {},
-        ),
-      ),
-    ));
-
-    final researchScrollable = find.descendant(
-      of: find.byType(ListView).last,
-      matching: find.byType(Scrollable),
-    ).first;
-    final technicalHeader = find.text('TECHNICAL INDICATOR ENGINE');
-    await tester.scrollUntilVisible(technicalHeader, 200, scrollable: researchScrollable);
-    expect(technicalHeader, findsOneWidget);
-    final optionsHeader = find.text('OPTIONS / OPEN INTEREST ENGINE');
-    await tester.scrollUntilVisible(optionsHeader, 200, scrollable: researchScrollable);
-    expect(optionsHeader, findsOneWidget);
-    final ceQuotes = find.text('MCX CE quotes');
-    await tester.scrollUntilVisible(ceQuotes, 200, scrollable: researchScrollable);
-    expect(ceQuotes, findsOneWidget);
-    expect(find.text('MCX PE quotes'), findsOneWidget);
-    expect(find.text('WAIT'), findsWidgets);
-    expect(find.textContaining('Commodity CE/PE entries remain blocked'), findsOneWidget);
-    expect(find.textContaining('5500.00'), findsWidgets);
+  testWidgets('Strategy Signal tab is available without legacy ResearchEnginesPage', (tester) async {
+    await tester.pumpWidget(const FreshApp());
+    expect(tabs, contains('Strategy Signal'));
+    expect(tabs, contains('Quant Signal'));
+    expect(tabs, contains('Signal Calendar'));
   });
 
   testWidgets('hamburger drawer exposes API and Railway navigation', (tester) async {
