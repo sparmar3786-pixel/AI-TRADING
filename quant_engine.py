@@ -245,7 +245,8 @@ def evaluate_five_layer_signal(
         volume, oi, delta = map(_number, (option.get("volume"), option.get("oi"), option.get("delta")))
         expiry = _timestamp(str(option.get("expiry", "")) + "T23:59:00+00:00") if option.get("expiry") else None
         option_stamp = next((option.get(key) for key in ("timestamp", "source_timestamp", "exchange_timestamp", "time", "t") if option.get(key) is not None), None)
-        option_time = _timestamp(option_stamp) if option_stamp is not None else observed
+        # Option-chain evidence must carry its own source timestamp; do not borrow the spot timestamp.
+        option_time = _timestamp(option_stamp) if option_stamp is not None else None
         option_age = _age_seconds(now_utc, option_time)
         valid = (
             strike is not None and strike > 0 and obid is not None and oask is not None
@@ -315,11 +316,12 @@ def evaluate_five_layer_signal(
         new_state = {}
         decision = "WAIT"
         stability = "BLOCKED"
+        reasons.append("Stability reset: live validation failed; a fresh 10-minute confirmation is required")
     elif not state_key_matches or since is None or last_seen is None or gap is None or gap < 0 or gap > max_confirmation_gap_seconds:
         new_state = {"candidate_key": candidate, "since_utc": now_utc.isoformat(), "last_seen_utc": now_utc.isoformat()}
         decision = "WAIT"
         stability = "CONFIRMING"
-        reasons.append("New candidate or refresh gap: restarting 10-minute confirmation")
+        reasons.append("Candidate side/strike/expiry changed or refresh gap exceeded 60 seconds: restarting 10-minute confirmation")
     else:
         new_state = {"candidate_key": candidate, "since_utc": since.isoformat(), "last_seen_utc": now_utc.isoformat()}
         elapsed = (now_utc - since).total_seconds()
@@ -335,6 +337,16 @@ def evaluate_five_layer_signal(
         "pass": decision in ("CALL BUY", "PUT BUY"),
         "state": stability, "required_seconds": confirmation_seconds,
     }
+    # Expose the exact same gate semantics consumed by API/UI contract tests.
+    signal_stability = {
+        "state": stability,
+        "required_minutes": confirmation_seconds / 60,
+        "required_seconds": confirmation_seconds,
+        "max_refresh_gap_seconds": max_confirmation_gap_seconds,
+        "candidate_key": candidate,
+        "since_utc": new_state.get("since_utc"),
+        "last_seen_utc": new_state.get("last_seen_utc"),
+    }
     # Keep five validation layers separate from the independent stability gate.
     return {
         "decision": decision,
@@ -348,10 +360,12 @@ def evaluate_five_layer_signal(
         "target": round(target, 4) if candidate and target is not None else None,
         "layers": layers,
         "confirmation": confirmation_result,
+        "signal_stability": signal_stability,
         "reasons": reasons,
         "confirmation_state": new_state,
-        "score_semantics": "Layer pass status is a rule checklist, not probability of profit",
         "signal_only": True,
+        "order_placement_enabled": False,
+        "score_semantics": "Layer pass status is a rule checklist, not probability of profit",
     }
 
 
