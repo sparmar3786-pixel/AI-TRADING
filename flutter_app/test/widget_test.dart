@@ -257,6 +257,14 @@ void main() {
           ).first);
       expect(find.byKey(ValueKey(key)), findsOneWidget, reason: '$key must render from canonical strategy_candidates');
     }
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('candidate-card-day-hl-liquidity-sweep')),
+      300,
+      scrollable: find.descendant(
+        of: find.byType(StrategyLibraryPage),
+        matching: find.byType(Scrollable),
+      ).first,
+    );
     expect(find.textContaining('Approved decision: WAIT'), findsWidgets);
     expect(find.textContaining('Underlying spot levels only—not option-premium prices'), findsWidgets);
     expect(find.textContaining('Sweep detected; detector-only'), findsOneWidget);
