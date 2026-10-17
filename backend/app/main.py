@@ -23,7 +23,7 @@ import uuid
 import asyncio
 from datetime import date, datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 from zoneinfo import ZoneInfo
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -333,9 +333,9 @@ class BacktestRequest(BaseModel):
 
 
 def _device(
-    x_device_id: str = Header(default=""),
-    x_api_access_key: str = Header(default="", alias="X-API-Access-Key"),
-    authorization: str = Header(default=""),
+    x_device_id: Annotated[str, Header()] = "",
+    x_api_access_key: Annotated[str, Header(alias="X-API-Access-Key")] = "",
+    authorization: Annotated[str, Header()] = "",
 ) -> str:
     """Validate a device label only after server-side authentication succeeds.
 

@@ -57,6 +57,12 @@ class AuditRemediationTests(unittest.TestCase):
                 with self.assertRaises(AuthenticationError):
                     authenticate_request(authorization="Bearer signed-token")
 
+    def test_direct_device_helper_call_does_not_receive_fastapi_header_objects(self):
+        # Nested FastAPI routers invoke api._device(x_device_id) directly.
+        # Annotated headers must keep plain-string Python defaults in that path.
+        device_id = "A" * 43
+        self.assertEqual(api._device(device_id), device_id)
+
     def test_metadata_rejects_forged_device_id_without_server_auth(self):
         secret = "test-only-long-random-access-key-1234567890"
         client = TestClient(api.app)
