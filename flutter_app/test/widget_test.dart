@@ -42,7 +42,13 @@ void main() {
       expect(find.text(tab), findsAtLeastNWidgets(1));
     }
     expect(find.text('Paper Trades'), findsNothing);
-    expect(tabs, contains('Research Engines'));
+    expect(tabs, contains('Strategies'));
+    expect(tabs, contains('Quant Engine'));
+    expect(tabs, contains('Strategy Signal'));
+    expect(tabs, contains('Quant Signal'));
+    expect(tabs, contains('Signal Calendar'));
+    expect(tabs, isNot(contains('Research Engines')));
+    expect(tabs, isNot(contains('API & Railway')));
   });
 
 
@@ -86,28 +92,6 @@ void main() {
     expect(find.text('Normalized store diagnostics'), findsNothing);
   });
 
-  testWidgets('Quant Engine Lab exposes all five research capabilities', (tester) async {
-    await tester.pumpWidget(const FreshApp());
-    final tabBarContext = tester.element(find.byType(TabBar).first);
-    DefaultTabController.of(tabBarContext).animateTo(tabs.indexOf('Quant Engine Lab'));
-    await tester.pumpAndSettle();
-    expect(find.text('QUANT ENGINE LAB'), findsOneWidget);
-    expect(find.text('1. Streaming vs offline research'), findsOneWidget);
-    // The diagnostics added to the first card make the AI section lower on
-    // small screens. Scroll the ListView rather than assuming it is on-screen.
-    final labScrollable = find.descendant(
-      of: find.byType(ListView).last,
-      matching: find.byType(Scrollable),
-    ).first;
-    final sentimentHeading = find.text('2. AI news sentiment + reasoning');
-    await tester.scrollUntilVisible(sentimentHeading, 250, scrollable: labScrollable);
-    expect(sentimentHeading, findsOneWidget);
-    final sentimentButton = find.text('Analyze sentiment with AI');
-    await tester.scrollUntilVisible(sentimentButton, 250, scrollable: labScrollable);
-    expect(sentimentButton, findsOneWidget);
-    expect(tabs, contains('Quant Engine Lab'));
-  });
-
   testWidgets('historical backtest runs from a configurable UI, not an empty hardcoded sample', (tester) async {
     await tester.pumpWidget(const FreshApp());
     final tabBarContext = tester.element(find.byType(TabBar).first);
@@ -119,28 +103,6 @@ void main() {
     expect(find.text('PAPER TRADING'), findsNothing);
   });
 
-  testWidgets('Research Engines shows live validation outputs without repository links', (tester) async {
-    await tester.pumpWidget(const FreshApp());
-    final tabBarContext = tester.element(find.byType(TabBar).first);
-    DefaultTabController.of(tabBarContext).animateTo(tabs.indexOf('Research Engines'));
-    await tester.pumpAndSettle();
-    final researchScrollable = find.descendant(
-      of: find.byType(ListView).last,
-      matching: find.byType(Scrollable),
-    ).first;
-    final researchHeader = find.text('RESEARCH ENGINES • LIVE BACKEND OUTPUT');
-    await tester.scrollUntilVisible(researchHeader, 200, scrollable: researchScrollable);
-    expect(researchHeader, findsOneWidget);
-    final technicalHeader = find.text('TECHNICAL INDICATOR ENGINE');
-    await tester.scrollUntilVisible(technicalHeader, 200, scrollable: researchScrollable);
-    expect(technicalHeader, findsOneWidget);
-    final optionsHeader = find.text('OPTIONS / OPEN INTEREST ENGINE');
-    await tester.scrollUntilVisible(optionsHeader, 200, scrollable: researchScrollable);
-    expect(optionsHeader, findsOneWidget);
-    expect(find.textContaining('github.com'), findsNothing);
-    expect(find.text('VALIDATION PERFORMANCE'), findsNothing);
-  });
-
   testWidgets('Strategy Signal tab is available without legacy ResearchEnginesPage', (tester) async {
     await tester.pumpWidget(const FreshApp());
     expect(tabs, contains('Strategy Signal'));
@@ -148,134 +110,6 @@ void main() {
     expect(tabs, contains('Signal Calendar'));
   });
 
-  testWidgets('hamburger drawer exposes API and Railway navigation', (tester) async {
-    await tester.pumpWidget(const FreshApp());
-    await tester.tap(find.byKey(const ValueKey('open-navigation-menu')));
-    await tester.pumpAndSettle();
-
-    final drawerScrollable = find.descendant(
-      of: find.byType(Drawer),
-      matching: find.byType(Scrollable),
-    );
-    final apiRailway = find.byKey(const ValueKey('drawer-tab-API & Railway'));
-    await tester.scrollUntilVisible(apiRailway, 250, scrollable: drawerScrollable);
-    expect(apiRailway, findsOneWidget);
-    final dataHealth = find.byKey(const ValueKey('drawer-tab-Data Health'));
-    await tester.scrollUntilVisible(dataHealth, 250, scrollable: drawerScrollable);
-    expect(dataHealth, findsOneWidget);
-    final repositoryLibrary = find.byKey(const ValueKey('drawer-tab-Market Diagnostics'));
-    await tester.scrollUntilVisible(repositoryLibrary, 250, scrollable: drawerScrollable);
-    expect(repositoryLibrary, findsOneWidget);
-    await tester.scrollUntilVisible(apiRailway, 250, scrollable: drawerScrollable);
-    await tester.tap(apiRailway);
-    await tester.pumpAndSettle();
-    expect(find.text('ADVANCED API + RAILWAY CONNECTION'), findsOneWidget);
-    expect(find.text('Secret handling'), findsOneWidget);
-    expect(find.textContaining('github.com'), findsNothing);
-  });
-
-  testWidgets('Trading Setup shows Angel One architecture without repository links', (tester) async {
-    await tester.pumpWidget(const FreshApp());
-    await tester.tap(find.byTooltip('Open navigation menu'));
-    await tester.pumpAndSettle();
-    final drawerScrollable = find.descendant(
-      of: find.byType(Drawer),
-      matching: find.byType(Scrollable),
-    );
-    final tradingSetup = find.byKey(const ValueKey('drawer-tab-Trading Setup'));
-    await tester.scrollUntilVisible(tradingSetup, 250, scrollable: drawerScrollable);
-    await tester.tap(tradingSetup);
-    await tester.pumpAndSettle();
-
-    expect(find.text('COMPLETE TRADING SYSTEM • ANGEL ONE EDITION'), findsOneWidget);
-    final setupScrollable = find.descendant(
-      of: find.byType(ListView).last,
-      matching: find.byType(Scrollable),
-    );
-    final brokerChoice = find.text('Broker choice: Angel One SmartAPI. No Zerodha/Kite integration is required for this app.');
-    await tester.scrollUntilVisible(brokerChoice, 250, scrollable: setupScrollable);
-    expect(brokerChoice, findsOneWidget);
-    final systemFlow = find.text('SYSTEM FLOW');
-    await tester.scrollUntilVisible(systemFlow, 250, scrollable: setupScrollable);
-    expect(systemFlow, findsOneWidget);
-    expect(find.textContaining('github.com'), findsNothing);
-  });
-
-  testWidgets('5-Layer Quant Signal Engine shows signal, validation and monitoring layers', (tester) async {
-    await tester.pumpWidget(const FreshApp());
-    await tester.tap(find.byKey(const ValueKey('open-navigation-menu')));
-    await tester.pumpAndSettle();
-    final drawerScrollable = find.descendant(
-      of: find.byType(Drawer),
-      matching: find.byType(Scrollable),
-    );
-    final engineTab = find.byKey(const ValueKey('drawer-tab-5-Layer Quant Signal Engine'));
-    await tester.scrollUntilVisible(engineTab, 250, scrollable: drawerScrollable);
-    await tester.tap(engineTab);
-    await tester.pumpAndSettle();
-
-    expect(find.text('TRADE ENGINE'), findsOneWidget);
-    expect(find.text('SIGNAL ENGINE'), findsOneWidget);
-    final engineList = find.byKey(const ValueKey('trade-engine-primary-list'));
-    expect(engineList, findsOneWidget);
-    final engineScrollable = find.descendant(
-      of: engineList,
-      matching: find.byType(Scrollable),
-    );
-    expect(engineScrollable, findsOneWidget);
-    final riskLayer = find.text('RISK & 10-MINUTE STABILITY');
-    await tester.scrollUntilVisible(riskLayer, 250, scrollable: engineScrollable);
-    expect(riskLayer, findsOneWidget);
-    final monitorLayer = find.text('READ-ONLY BROKER MONITOR');
-    await tester.scrollUntilVisible(monitorLayer, 250, scrollable: engineScrollable);
-    expect(monitorLayer, findsOneWidget);
-    final orderBookButton = find.text('LOAD / REFRESH ANGEL ONE ORDER BOOK');
-    await tester.scrollUntilVisible(orderBookButton, 250, scrollable: engineScrollable);
-    expect(orderBookButton, findsOneWidget);
-  });
-
-  testWidgets('Flow Monitor exposes measured API and provider validation telemetry', (tester) async {
-    await tester.pumpWidget(const FreshApp());
-
-    final tabBar = find.byType(TabBar).first;
-    final tabBarContext = tester.element(tabBar);
-    final controller = DefaultTabController.of(tabBarContext);
-    controller.animateTo(tabs.indexOf('Flow Monitor'));
-
-    // Advance the tab transition deterministically. Do not wait for the
-    // periodic diagnostics timer or live HTTP calls to settle.
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 350));
-    await tester.pump();
-
-    expect(controller.index, tabs.indexOf('Flow Monitor'));
-    expect(find.textContaining('FLOW MONITOR'), findsOneWidget);
-
-    final monitorScrollable = find.descendant(
-      of: find.byType(RefreshIndicator),
-      matching: find.byType(Scrollable),
-    ).first;
-    await tester.scrollUntilVisible(
-      find.text('SERVER API ROUTE METRICS'),
-      250,
-      scrollable: monitorScrollable,
-    );
-    expect(find.text('SERVER API ROUTE METRICS'), findsOneWidget);
-
-    await tester.scrollUntilVisible(
-      find.text('NVIDIA + OPENROUTER DATA VALIDATION'),
-      250,
-      scrollable: monitorScrollable,
-    );
-    expect(find.text('NVIDIA + OPENROUTER DATA VALIDATION'), findsOneWidget);
-    expect(find.text('TEST NVIDIA + OPENROUTER'), findsOneWidget);
-
-    // Dispose Flow Monitor first so its periodic poll is cancelled, then let
-    // outstanding Future.timeout timers finish. This tests real cleanup rather
-    // than leaving pending fake timers behind at test teardown.
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pump(const Duration(seconds: 13));
-  });
 
   testWidgets('Pro chart clearly reports missing candles instead of fabricating data', (tester) async {
     await tester.pumpWidget(
