@@ -1319,6 +1319,30 @@ def _live_validation_contract(
         "order_placement_enabled": False,
     }
 
+def _clear_blocked_trade_levels(result: dict[str, Any]) -> dict[str, Any]:
+    """Keep a blocked candidate informational while removing all stale/executable levels."""
+    if str(result.get("decision") or "WAIT").upper() in ("CALL BUY", "PUT BUY"):
+        result["candidate_decision"] = result.get("decision")
+    result["decision"] = "WAIT"
+    fields = ("strike", "expiry", "option_side", "option_type", "entry", "stop_loss", "target")
+    for field in fields:
+        result[field] = None
+    for engine_key in ("five_layer_engine", "quant_engine"):
+        engine_payload = result.get(engine_key)
+        if isinstance(engine_payload, dict):
+            engine_payload["decision"] = "WAIT"
+            for field in fields:
+                engine_payload[field] = None
+    result["quant_engine"] = result.get("five_layer_engine") or result.get("quant_engine")
+    trade_plan = result.get("trade_plan")
+    if isinstance(trade_plan, dict):
+        trade_plan.update({
+            "selection_grade": "WAIT", "strike": None, "expiry": None,
+            "entry": None, "stop_loss": None, "target": None,
+        })
+    return result
+
+
 def _aggregate_hourly_chart_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Aggregate complete same-session 5-minute bars; never bridge overnight gaps."""
     buckets: dict[tuple[str, int], list[dict[str, Any]]] = {}
@@ -2101,6 +2125,73 @@ def _index_snapshot(
                 "reasons": ["DAY-HL evaluation unavailable: " + type(exc).__name__],
                 "guards": ["ENGINE_EVALUATION_ERROR"],
             }
+
+        # Hero Zero requires an actual contract expiring today plus fresh source
+        # quote timestamps; expiry is never inferred from the weekday/calendar.
+        try:
+            today_expiry_rows = [
+                item for item in chain_payload
+                if _expiry_date(item.get("expiry")) == current_time.date()
+                and str(item.get("option_type") or "").upper() in ("CALL", "PUT")
+            ]
+            hero_quote_times: list[datetime] = []
+            hero_option_records: list[dict[str, Any]] = []
+            for item in today_expiry_rows:
+                stamp = _iso(item.get("source_timestamp") or item.get("timestamp"))
+                parsed_stamp = datetime.fromisoformat(stamp) if stamp else None
+                if parsed_stamp is not None:
+                    hero_quote_times.append(parsed_stamp.astimezone(IST))
+                strike_value = _number(item.get("strike"))
+                kind = str(item.get("option_type") or "").upper()
+                premium = _number(item.get("ltp"))
+                if strike_value is None or premium is None or premium <= 0:
+                    continue
+                hero_option_records.append({
+                    "strike": strike_value,
+                    "option_type": "CE" if kind == "CALL" else "PE",
+                    "ltp": premium, "bid": _number(item.get("bid")),
+                    "ask": _number(item.get("ask")),
+                })
+            hero_chain_frame = pd.DataFrame(hero_option_records)
+            hero_quote_stamp = min(hero_quote_times) if hero_quote_times else None
+
+            hero_pdh = hero_pdl = None
+            previous_daily = []
+            for candle in daily_candle_rows:
+                if not isinstance(candle, (list, tuple)) or len(candle) < 4:
+                    continue
+                stamp = _iso(candle[0])
+                parsed_stamp = datetime.fromisoformat(stamp) if stamp else None
+                if parsed_stamp is not None and parsed_stamp.astimezone(IST).date() < current_time.date():
+                    high_value, low_value = _number(candle[2]), _number(candle[3])
+                    if high_value is not None and low_value is not None and high_value > 0 and low_value > 0:
+                        previous_daily.append((parsed_stamp, high_value, low_value))
+            previous_daily.sort(key=lambda item: item[0])
+            if previous_daily:
+                hero_pdh, hero_pdl = previous_daily[-1][1], previous_daily[-1][2]
+
+            hero_signal = HeroZeroEngine().generate(
+                intraday_df=strategy_frame, current_spot=spot,
+                is_expiry_day=bool(today_expiry_rows),
+                option_chain=hero_chain_frame, current_time=current_time,
+                strike_step=strike_step,
+                expiry_date=current_time.date() if today_expiry_rows else None,
+                option_chain_timestamp=hero_quote_stamp,
+                day_high=day_high, day_low=day_low, pdh=hero_pdh, pdl=hero_pdl,
+            )
+            hero_payload = hero_zero_to_signal_data(
+                hero_signal, index=index, timestamp=observed,
+                data_fresh=bool(source_fresh and hero_quote_stamp is not None),
+            )
+            strategy_candidates["hero_zero"] = _keep_wait(hero_payload, "hero_zero")
+        except Exception as exc:
+            strategy_candidates["hero_zero"] = {
+                "strategy_id": "hero_zero", "engine_source": "HERO_ZERO",
+                "decision": "WAIT", "candidate_decision": None, "actionable": False,
+                "data_fresh": False, "entry": None, "stop_loss": None, "target": None,
+                "strike": None, "reasons": ["Hero Zero evaluation unavailable: " + type(exc).__name__],
+                "guards": ["ENGINE_EVALUATION_ERROR", "EXPIRY_NOT_VERIFIED"],
+            }
     except Exception:
         logging.exception("ORB/VWAP candidate evaluation failed for %s", index)
         strategy_candidates = {
@@ -2155,12 +2246,7 @@ def _index_snapshot(
     ), None)
     live_validation = _live_validation_contract(result, engine_layers, option_age_seconds)
     if live_validation["verdict"] != "PASS":
-        if result.get("decision") in ("CALL BUY", "PUT BUY"):
-            result["candidate_decision"] = result.get("decision")
-        result["decision"] = "WAIT"
-        result["five_layer_engine"]["decision"] = "WAIT"
-        result["quant_engine"] = result["five_layer_engine"]
-        result["trade_plan"]["selection_grade"] = "WAIT"
+        _clear_blocked_trade_levels(result)
         existing_reasons = list(result.get("reasons") or [])
         existing_reasons.extend("VALIDATION_BLOCKED:" + item for item in live_validation["blocks"])
         result["reasons"] = list(dict.fromkeys(existing_reasons))
