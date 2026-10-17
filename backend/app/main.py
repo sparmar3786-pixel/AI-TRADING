@@ -46,6 +46,10 @@ from integrations.angelone_stream import AngelOneStream, EXCHANGE_TYPES
 from integrations.news_sentiment import cached_market_news_sentiment, fetch_market_news_sentiment
 from quant_engine import evaluate_five_layer_signal, evaluate_futures_signal
 from quant.hero_zero import HeroZeroEngine, hero_zero_to_signal_data
+from quant.ema_quant_engine import EMAQuantEngine, to_signal_data as ema_to_signal_data
+from quant.oi_price_action_engine import OIPriceActionEngine, to_signal_data as oi_pa_to_signal_data
+from quant.failed_move_fade import FailedMoveFadeEngine, failed_move_to_signal_data
+from quant.day_hl_liquidity import detect_pdh_pdl_sweeps
 from quant.orb_engine import OpeningRangeBreakoutEngine
 from quant.vwap_strategy import VWAPStrategyEngine
 
@@ -1938,6 +1942,164 @@ def _index_snapshot(
             "orb": _candidate_payload(orb_signal, "orb"),
             "vwap": _candidate_payload(vwap_signal, "vwap"),
         }
+
+        # Run the additional repository engines against the same server-owned
+        # candle/option snapshot. Results are research candidates only: the
+        # canonical five-layer, contract, risk and 600-second gates remain final.
+        # Missing historical OI deltas or prior-day candles produce WAIT, never
+        # fabricated evidence.
+        source_fresh = (
+            result.get("layers", {}).get("data_quality", {}).get("pass") is True
+            and strategy_candles_fresh
+        )
+        daily_records = []
+        for candle in daily_candle_rows:
+            if not isinstance(candle, (list, tuple)) or len(candle) < 6:
+                continue
+            stamp = _iso(candle[0])
+            parsed_stamp = datetime.fromisoformat(stamp) if stamp else None
+            vals = [_number(candle[j]) for j in (1, 2, 3, 4, 5)]
+            if parsed_stamp is None or any(v is None for v in vals):
+                continue
+            daily_records.append({"timestamp": parsed_stamp, "open": vals[0], "high": vals[1],
+                                  "low": vals[2], "close": vals[3], "volume": vals[4]})
+        daily_frame = pd.DataFrame(daily_records)
+        if not daily_frame.empty:
+            daily_frame["timestamp"] = pd.to_datetime(daily_frame["timestamp"], utc=True, errors="coerce")
+            daily_frame = daily_frame.dropna(subset=["timestamp"]).set_index("timestamp").sort_index()
+
+        def _keep_wait(payload: dict[str, Any], strategy_id: str) -> dict[str, Any]:
+            candidate = str(payload.get("candidate_decision") or "").upper()
+            guards = list(payload.get("guards") or [])
+            if candidate in ("CALL BUY", "PUT BUY"):
+                guards = list(dict.fromkeys(guards + [
+                    "OPTION_CONTRACT_MAPPING_REQUIRED",
+                    "FIVE_LAYER_QUANT_GATE_REQUIRED",
+                    "SERVER_600_SECOND_CONFIRMATION_REQUIRED",
+                ]))
+            payload.update({
+                "strategy_id": strategy_id, "decision": "WAIT", "actionable": False,
+                "data_fresh": bool(source_fresh),
+                "entry_price_basis": payload.get("entry_price_basis") or "UNDERLYING_SPOT",
+                "guards": guards,
+            })
+            if not source_fresh:
+                payload["candidate_decision"] = None
+                payload["strike"] = None
+                payload["entry"] = None
+                payload["stop_loss"] = None
+                payload["target"] = None
+                payload["guards"] = list(dict.fromkeys(guards + ["STALE_OR_INCOMPLETE_SOURCE_DATA"]))
+            return payload
+
+        try:
+            ema_q = EMAQuantEngine().generate(strategy_frame, spot, strike_step=strike_step, current_time=current_time)
+            strategy_candidates["ema_crossover"] = _keep_wait(
+                ema_to_signal_data(ema_q, index=index, timestamp=observed), "ema_crossover"
+            )
+        except Exception as exc:
+            strategy_candidates["ema_crossover"] = {
+                "strategy_id": "ema_crossover", "decision": "WAIT", "candidate_decision": None,
+                "actionable": False, "data_fresh": False, "entry": None, "stop_loss": None,
+                "target": None, "reasons": ["EMA evaluation unavailable: " + type(exc).__name__],
+                "guards": ["ENGINE_EVALUATION_ERROR"],
+            }
+
+        try:
+            failed_q = FailedMoveFadeEngine().generate(
+                daily_df=daily_frame, intraday_df=strategy_frame, current_spot=spot,
+                current_time=current_time, strike_step=strike_step,
+            )
+            failed_payload = failed_move_to_signal_data(
+                failed_q, index=index, timestamp=observed, data_fresh=source_fresh,
+            )
+            strategy_candidates["failed_move_pdh_pdl"] = _keep_wait(failed_payload, "failed_move_pdh_pdl")
+        except Exception as exc:
+            strategy_candidates["failed_move_pdh_pdl"] = {
+                "strategy_id": "failed_move_pdh_pdl", "decision": "WAIT", "candidate_decision": None,
+                "actionable": False, "data_fresh": False, "entry": None, "stop_loss": None,
+                "target": None, "reasons": ["Failed-Move evaluation unavailable: " + type(exc).__name__],
+                "guards": ["ENGINE_EVALUATION_ERROR"],
+            }
+
+        # OI-PA requires a genuine prior OI observation. The quote-history helper
+        # computes deltas from observed contracts; on cold start missing deltas
+        # are rejected by the engine instead of being set to zero.
+        try:
+            chain_by_strike: dict[float, dict[str, Any]] = {}
+            quote_times: list[datetime] = []
+            for option in chain_payload:
+                strike_value = _number(option.get("strike"))
+                kind = str(option.get("option_type") or "").upper()
+                if strike_value is None or kind not in ("CALL", "PUT"):
+                    continue
+                row = chain_by_strike.setdefault(strike_value, {"strike": strike_value})
+                prefix = "ce" if kind == "CALL" else "pe"
+                row[prefix + "_oi"] = _number(option.get("oi"))
+                row[prefix + "_oi_ch"] = _number(option.get("oi_change"))
+                stamp = _iso(option.get("timestamp"))
+                parsed_stamp = datetime.fromisoformat(stamp) if stamp else None
+                if parsed_stamp is not None:
+                    quote_times.append(parsed_stamp.astimezone(IST))
+            chain_df = pd.DataFrame(list(chain_by_strike.values()))
+            quote_stamp = min(quote_times) if quote_times else None
+            oi_q = OIPriceActionEngine().generate(
+                intraday_df=strategy_frame, option_chain=chain_df, current_spot=spot,
+                current_time=current_time, strike_step=strike_step,
+                market_depth={"bid_depth": bid, "ask_depth": ask},
+                option_chain_timestamp=quote_stamp,
+            )
+            oi_payload = oi_pa_to_signal_data(
+                oi_q, index=index, timestamp=observed, data_fresh=source_fresh and quote_stamp is not None,
+            )
+            strategy_candidates["oi_price_action"] = _keep_wait(oi_payload, "oi_price_action")
+        except Exception as exc:
+            strategy_candidates["oi_price_action"] = {
+                "strategy_id": "oi_price_action", "decision": "WAIT", "candidate_decision": None,
+                "actionable": False, "data_fresh": False, "entry": None, "stop_loss": None,
+                "target": None, "reasons": ["OI Price Action evaluation unavailable: " + type(exc).__name__],
+                "guards": ["ENGINE_EVALUATION_ERROR"],
+            }
+
+        # DAY-HL is a detector only; it reports real sweep evidence but no trade
+        # levels until a separate option/risk adapter is verified.
+        try:
+            prior_levels = []
+            for candle in daily_candle_rows:
+                if not isinstance(candle, (list, tuple)) or len(candle) < 4:
+                    continue
+                stamp = _iso(candle[0])
+                parsed_stamp = datetime.fromisoformat(stamp) if stamp else None
+                if parsed_stamp is not None and parsed_stamp.astimezone(IST).date() < current_time.date():
+                    prior_levels.append((parsed_stamp, _number(candle[2]), _number(candle[3])))
+            prior_levels.sort(key=lambda item: item[0])
+            pdh_value = prior_levels[-1][1] if prior_levels else None
+            pdl_value = prior_levels[-1][2] if prior_levels else None
+            sweep_events = []
+            if pdh_value is not None and pdl_value is not None and not strategy_frame.empty:
+                sweep_candles = [
+                    {"timestamp": stamp.isoformat(), "open": row.get("open"), "high": row.get("high"),
+                     "low": row.get("low"), "close": row.get("close")}
+                    for stamp, row in strategy_frame.iterrows()
+                ]
+                sweep_events = [event.to_dict() for event in detect_pdh_pdl_sweeps(sweep_candles, pdh_value, pdl_value)]
+            strategy_candidates["day_hl_liquidity_sweep"] = {
+                "strategy_id": "day_hl_liquidity_sweep", "engine_source": "DAY_HL_LIQUIDITY",
+                "decision": "WAIT", "candidate_decision": None, "actionable": False,
+                "data_fresh": bool(source_fresh), "pdh": pdh_value, "pdl": pdl_value,
+                "sweep_events": sweep_events, "entry": None, "stop_loss": None, "target": None,
+                "reasons": (["Liquidity sweep detected; full risk/option mapping is not implemented."] if sweep_events
+                            else ["No PDH/PDL sweep detected or prior-day levels unavailable."]),
+                "guards": ["DETECTOR_ONLY", "FULL_RISK_AND_OPTION_MAPPING_REQUIRED"],
+            }
+        except Exception as exc:
+            strategy_candidates["day_hl_liquidity_sweep"] = {
+                "strategy_id": "day_hl_liquidity_sweep", "decision": "WAIT",
+                "candidate_decision": None, "actionable": False, "data_fresh": False,
+                "entry": None, "stop_loss": None, "target": None,
+                "reasons": ["DAY-HL evaluation unavailable: " + type(exc).__name__],
+                "guards": ["ENGINE_EVALUATION_ERROR"],
+            }
     except Exception:
         logging.exception("ORB/VWAP candidate evaluation failed for %s", index)
         strategy_candidates = {
