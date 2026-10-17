@@ -2082,11 +2082,7 @@ def _index_snapshot(
                                           "high": row.get("high"), "low": row.get("low"),
                                           "close": row.get("close")})
                 detected = detect_pdh_pdl_sweeps(sweep_candles, pdh_value, pdl_value)
-                sweep_events = [
-                    {"kind": getattr(event, "kind", None), "direction": getattr(event, "direction", None),
-                     "timestamp": getattr(event, "timestamp", None), "level": getattr(event, "level", None)}
-                    for event in detected
-                ]
+                sweep_events = [event.to_dict() for event in detected]
             strategy_candidates["day_hl_liquidity_sweep"] = {
                 "strategy_id": "day_hl_liquidity_sweep", "engine_source": "DAY_HL_LIQUIDITY",
                 "decision": "WAIT", "candidate_decision": None, "actionable": False,
