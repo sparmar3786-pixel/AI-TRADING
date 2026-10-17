@@ -2226,9 +2226,22 @@ def _index_snapshot(
         if result.get("decision") in ("CALL BUY", "PUT BUY"):
             result["candidate_decision"] = result.get("decision")
         result["decision"] = "WAIT"
-        result["five_layer_engine"]["decision"] = "WAIT"
-        result["quant_engine"] = result["five_layer_engine"]
-        result["trade_plan"]["selection_grade"] = "WAIT"
+        # A blocked final validator must clear every displayable trade level,
+        # not merely flip the decision text. Keep candidate_decision as research
+        # context only; it is never an executable signal.
+        for field in ("strike", "expiry", "option_side", "option_type", "entry", "stop_loss", "target"):
+            result[field] = None
+        for engine_key in ("five_layer_engine", "quant_engine"):
+            engine_payload = result.get(engine_key)
+            if isinstance(engine_payload, dict):
+                engine_payload["decision"] = "WAIT"
+                for field in ("strike", "expiry", "option_side", "option_type", "entry", "stop_loss", "target"):
+                    engine_payload[field] = None
+        result["quant_engine"] = result.get("five_layer_engine") or result.get("quant_engine")
+        result["trade_plan"].update({
+            "selection_grade": "WAIT", "strike": None, "expiry": None,
+            "entry": None, "stop_loss": None, "target": None,
+        })
         existing_reasons = list(result.get("reasons") or [])
         existing_reasons.extend("VALIDATION_BLOCKED:" + item for item in live_validation["blocks"])
         result["reasons"] = list(dict.fromkeys(existing_reasons))
