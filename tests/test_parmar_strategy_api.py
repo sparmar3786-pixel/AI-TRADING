@@ -155,3 +155,40 @@ def test_signals_endpoint_returns_fail_closed_wait_payload_on_unexpected_collect
     assert "failed safely" in payload["message"].lower()
     assert payload["trade_plans"] == []
     assert payload["qualified_trade_count"] == 0
+
+
+
+def test_require_adapter_does_not_repeat_a_recent_profile_check(monkeypatch):
+    import time
+
+    class FakeAdapter:
+        def __init__(self):
+            self.profile_calls = 0
+        def profile(self):
+            self.profile_calls += 1
+            return {"status": True}
+
+    fake = FakeAdapter()
+    monkeypatch.setattr(backend_main, "_adapter", fake)
+    monkeypatch.setattr(backend_main, "_adapter_profile_verified_at", time.monotonic())
+    monkeypatch.setattr(backend_main, "_start_stream", lambda adapter: None)
+    assert backend_main._require_adapter() is fake
+    assert fake.profile_calls == 0
+
+
+def test_require_adapter_refreshes_expired_profile_cache(monkeypatch):
+    import time
+
+    class FakeAdapter:
+        def __init__(self):
+            self.profile_calls = 0
+        def profile(self):
+            self.profile_calls += 1
+            return {"status": True}
+
+    fake = FakeAdapter()
+    monkeypatch.setattr(backend_main, "_adapter", fake)
+    monkeypatch.setattr(backend_main, "_adapter_profile_verified_at", time.monotonic() - 120)
+    monkeypatch.setattr(backend_main, "_start_stream", lambda adapter: None)
+    assert backend_main._require_adapter() is fake
+    assert fake.profile_calls == 1
