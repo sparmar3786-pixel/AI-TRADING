@@ -51,30 +51,30 @@ jobs:
           text = path.read_text()
           if path.suffix == ".kts":
               if "isCoreLibraryDesugaringEnabled = true" not in text:
-                  pattern = r"(compileOptions\\s*\\{)"
-                  text, count = re.subn(pattern, r"\\1\\n        isCoreLibraryDesugaringEnabled = true", text, count=1)
+                  pattern = r"(compileOptions\s*\{)"
+                  text, count = re.subn(pattern, r"\1\n        isCoreLibraryDesugaringEnabled = true", text, count=1)
                   if count != 1:
                       raise SystemExit("Could not enable core library desugaring in Kotlin Gradle file")
               dep = 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")'
               if dep not in text:
-                  match = re.search(r"dependencies\\s*\\{", text)
+                  match = re.search(r"dependencies\s*\{", text)
                   if match:
-                      text = text[:match.end()] + "\\n    " + dep + text[match.end():]
+                      text = text[:match.end()] + "\n    " + dep + text[match.end():]
                   else:
-                      text += "\\n\\ndependencies {\\n    " + dep + "\\n}\\n"
+                      text += "\n\ndependencies {\n    " + dep + "\n}\n"
           else:
               if "coreLibraryDesugaringEnabled true" not in text:
-                  pattern = r"(compileOptions\\s*\\{)"
-                  text, count = re.subn(pattern, r"\\1\\n        coreLibraryDesugaringEnabled true", text, count=1)
+                  pattern = r"(compileOptions\s*\{)"
+                  text, count = re.subn(pattern, r"\1\n        coreLibraryDesugaringEnabled true", text, count=1)
                   if count != 1:
                       raise SystemExit("Could not enable core library desugaring in Groovy Gradle file")
               dep = "coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'"
               if dep not in text:
-                  match = re.search(r"dependencies\\s*\\{", text)
+                  match = re.search(r"dependencies\s*\{", text)
                   if match:
-                      text = text[:match.end()] + "\\n    " + dep + text[match.end():]
+                      text = text[:match.end()] + "\n    " + dep + text[match.end():]
                   else:
-                      text += "\\n\\ndependencies {\\n    " + dep + "\\n}\\n"
+                      text += "\n\ndependencies {\n    " + dep + "\n}\n"
           path.write_text(text)
           print(f"Enabled core library desugaring in {path}")
           PY
