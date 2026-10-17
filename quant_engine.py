@@ -6,9 +6,10 @@ Scores are evidence alignment, never a probability of profit.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timezone
 from math import isfinite
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from risk.position_sizing import atr_stop_target
 
@@ -45,6 +46,30 @@ def _timestamp(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+
+_IST = ZoneInfo("Asia/Kolkata")
+
+
+def _option_expiry_cutoff(value: Any) -> datetime | None:
+    """Return the option expiry-session close in UTC using the exchange-local date."""
+    if value is None:
+        return None
+    try:
+        if isinstance(value, datetime):
+            local_date = (value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value).astimezone(_IST).date()
+        elif isinstance(value, date):
+            local_date = value
+        else:
+            raw = str(value).strip()
+            if not raw:
+                return None
+            local_date = date.fromisoformat(raw[:10])
+    except (TypeError, ValueError, OverflowError):
+        return None
+    # Index options are not valid after 15:30 Asia/Kolkata on expiry day.
+    return datetime.combine(local_date, time(15, 30), tzinfo=_IST).astimezone(timezone.utc)
 
 
 def _snapshot_timestamp(snapshot: dict[str, Any]) -> datetime | None:
@@ -247,7 +272,7 @@ def evaluate_five_layer_signal(
         side = str(option.get("option_type") or "").upper()
         strike_value = _number(option.get("strike"))
         expiry_text = str(option.get("expiry") or "")
-        expiry_value = _timestamp(expiry_text + "T23:59:00+00:00") if expiry_text else None
+        expiry_value = _option_expiry_cutoff(expiry_text)
         if side in ("CALL", "PUT") and strike_value is not None and expiry_value is not None:
             identity = (side, strike_value, expiry_value.date().isoformat())
             contract_counts[identity] = contract_counts.get(identity, 0) + 1
@@ -257,14 +282,14 @@ def evaluate_five_layer_signal(
             continue
         strike = _number(option.get("strike"))
         expiry_text = str(option.get("expiry") or "")
-        expiry_identity = _timestamp(expiry_text + "T23:59:00+00:00") if expiry_text else None
+        expiry_identity = _option_expiry_cutoff(expiry_text)
         if strike is not None and expiry_identity is not None:
             identity = (option_type or "", strike, expiry_identity.date().isoformat())
             if contract_counts.get(identity, 0) != 1:
                 continue
         obid, oask, ltp = map(_number, (option.get("bid"), option.get("ask"), option.get("ltp")))
         volume, oi, delta = map(_number, (option.get("volume"), option.get("oi"), option.get("delta")))
-        expiry = _timestamp(str(option.get("expiry", "")) + "T23:59:00+00:00") if option.get("expiry") else None
+        expiry = _option_expiry_cutoff(option.get("expiry"))
         option_stamp = next((option.get(key) for key in ("timestamp", "source_timestamp", "exchange_timestamp", "time", "t") if option.get(key) is not None), None)
         # Option-chain evidence must carry its own source timestamp; do not borrow the spot timestamp.
         option_time = _timestamp(option_stamp) if option_stamp is not None else None

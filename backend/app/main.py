@@ -1134,6 +1134,32 @@ def _session_range() -> tuple[str, str]:
     return start.strftime("%Y-%m-%d %H:%M"), end.strftime("%Y-%m-%d %H:%M")
 
 
+STRATEGY_CANDIDATE_IDS = (
+    "oi_price_action", "hero_zero", "failed_move_pdh_pdl", "ema_crossover",
+    "day_hl_liquidity_sweep", "orb", "vwap",
+)
+
+
+def _complete_strategy_candidate_inventory(
+    candidates: dict[str, Any], reason: str = "Strategy evaluation did not complete."
+) -> dict[str, dict[str, Any]]:
+    """Preserve successful engine results and fail closed for every missing strategy."""
+    completed: dict[str, dict[str, Any]] = {}
+    for strategy_id in STRATEGY_CANDIDATE_IDS:
+        candidate = candidates.get(strategy_id)
+        if isinstance(candidate, dict):
+            completed[strategy_id] = dict(candidate)
+        else:
+            completed[strategy_id] = {
+                "strategy_id": strategy_id, "decision": "WAIT", "candidate_decision": None,
+                "actionable": False, "data_fresh": False, "entry": None, "stop_loss": None,
+                "target": None, "strike": None, "expiry": None, "option_side": None,
+                "risk_reward": None, "contract_symbol": None, "reasons": [reason],
+                "guards": ["ENGINE_EVALUATION_INCOMPLETE"],
+            }
+    return completed
+
+
 def _gate_strategy_candidate_payload(payload: dict[str, Any], *, source_fresh: bool, strategy_id: str) -> dict[str, Any]:
     """Keep research candidates non-actionable and clear every invalid/stale level.
 
@@ -2223,18 +2249,15 @@ def _index_snapshot(
                 "strike": None, "reasons": ["Hero Zero evaluation unavailable: " + type(exc).__name__],
                 "guards": ["ENGINE_EVALUATION_ERROR", "EXPIRY_NOT_VERIFIED"],
             }
-    except Exception:
-        logging.exception("ORB/VWAP candidate evaluation failed for %s", index)
-        strategy_candidates = {
-            "orb": {"strategy_id": "orb", "decision": "WAIT", "candidate_decision": None,
-                    "entry": None, "stop_loss": None, "target": None, "actionable": False,
-                    "data_fresh": False, "reasons": ["ORB evaluation unavailable; inspect backend logs."],
-                    "guards": ["ENGINE_EVALUATION_ERROR"]},
-            "vwap": {"strategy_id": "vwap", "decision": "WAIT", "candidate_decision": None,
-                     "entry": None, "stop_loss": None, "target": None, "actionable": False,
-                     "data_fresh": False, "reasons": ["VWAP evaluation unavailable; inspect backend logs."],
-                     "guards": ["ENGINE_EVALUATION_ERROR"]},
-        }
+    except Exception as exc:
+        # One engine failure must not erase successful candidates from other strategies.
+        logging.exception("Strategy candidate evaluation interrupted for %s", index)
+        strategy_candidates = _complete_strategy_candidate_inventory(
+            strategy_candidates,
+            reason=f"Strategy evaluation interrupted safely ({type(exc).__name__}).",
+        )
+    else:
+        strategy_candidates = _complete_strategy_candidate_inventory(strategy_candidates)
     result["strategy_candidates"] = strategy_candidates
     if selected:
         result["strike"] = selected["strike"] if result.get("strike") is not None else None
@@ -5249,6 +5272,11 @@ def signals(ema_fast: int = Query(default=8, ge=2, le=50), ema_slow: int = Query
             # The app still receives explicit WAIT rows and a clear feed error.
             return _empty_payload(str(exc.detail))
         raise
+    except Exception as exc:
+        # Keep unexpected collector failures visible in logs while returning a
+        # complete fail-closed payload instead of stranding the mobile client.
+        logging.exception("Unhandled /v1/signals collection error; returning WAIT")
+        return _empty_payload(f"Signal collection failed safely ({type(exc).__name__}).")
 
 
 @app.post("/v1/backtest/historical")
