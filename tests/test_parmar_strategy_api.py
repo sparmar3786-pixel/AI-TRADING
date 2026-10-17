@@ -104,8 +104,7 @@ def test_direct_evaluate_never_trusts_caller_snapshot_or_emits_trade_levels():
     assert result["target"] is None
     assert result["strike"] is None
     assert result["live_validation"]["decision"] == "WAIT"
-    assert "NO_ACTIONABLE_SIGNAL" in result["guards"
-    ]
+    assert "NO_ACTIONABLE_SIGNAL" in result["guards"]
     assert result["candidate_snapshot"]["candidate_decision"] is None
     assert result["candidate_snapshot"]["data_fresh"] is False
     assert result["order_placement_enabled"] is False
