@@ -5748,6 +5748,54 @@ def evaluate_strategies(body: dict[str, Any], _: str = Depends(_device)) -> dict
     }
 
 
+@app.get("/v1/calendar/holidays")
+def exchange_holiday_calendar(
+    year: int = Query(default=datetime.now(IST).year, ge=2020, le=2100),
+    segment: str = Query(default="NSE_FO"),
+    _: str = Depends(_device),
+) -> dict[str, Any]:
+    """Return exchange-segment holiday dates with source freshness and coverage status."""
+    normalized = segment.strip().upper()
+    if normalized not in {"NSE_EQ", "NSE_FO", "BSE_EQ", "BSE_FO", "MCX"}:
+        raise HTTPException(status_code=400, detail="Unsupported segment. Use NSE_EQ, NSE_FO, BSE_EQ, BSE_FO, or MCX.")
+    return {"status": "ok", **exchange_holidays_for(normalized, year)}
+
+
+@app.get("/v1/signals/events")
+def signal_events(
+    start_date: str,
+    end_date: str,
+    limit: int = Query(default=1000, ge=1, le=5000),
+    offset: int = Query(default=0, ge=0, le=25000),
+    _: str = Depends(_device),
+) -> dict[str, Any]:
+    """Read the durable state-transition journal for Quant and Strategy signals."""
+    try:
+        start = date.fromisoformat(start_date)
+        end = date.fromisoformat(end_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Dates must use YYYY-MM-DD") from exc
+    if end < start or (end - start).days > 366:
+        raise HTTPException(status_code=400, detail="Date range must be ordered and no longer than 367 days")
+    rows = _load_signal_events()
+    matching = [row for row in rows if start_date <= str(row.get("trade_date") or "") <= end_date]
+    matching.sort(key=lambda row: str(row.get("occurred_at") or ""))
+    page = matching[offset:offset + limit]
+    return {
+        "status": "ok",
+        "source": "persisted_signal_state_transition_journal",
+        "timezone": "Asia/Kolkata",
+        "events": page,
+        "total": len(matching),
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + len(page) < len(matching),
+        "persistence": dict(_signal_event_persistence),
+        "retention_limit": SIGNAL_EVENTS_MAX_ROWS,
+        "note": "Records state transitions and changed candidate evidence, including WAIT/blocked rows. It is not an execution/fill ledger.",
+    }
+
+
 @app.get("/v1/signals/performance")
 def signal_performance(_: str = Depends(_device)) -> dict[str, Any]:
     rows = _load_signal_outcomes()
@@ -5826,22 +5874,38 @@ def signal_outcome_calendar(start_date: str, end_date: str, _: str = Depends(_de
         if not opened or opened < start_date or opened > end_date:
             continue
         daily.setdefault(opened, []).append(row)
+    event_rows = _load_signal_events()
+    event_daily: dict[str, list[dict[str, Any]]] = {}
+    for event in event_rows:
+        trade_date = str(event.get("trade_date") or "")
+        if trade_date and start_date <= trade_date <= end_date:
+            event_daily.setdefault(trade_date, []).append(event)
     days: dict[str, Any] = {}
     cursor = start
     while cursor <= end:
         key = cursor.isoformat()
         day_rows = daily.get(key, [])
+        day_events = event_daily.get(key, [])
+        market_calendar = {
+            segment: exchange_day_status(cursor, segment)
+            for segment in ("NSE_FO", "BSE_FO", "MCX")
+        }
         closed = [row for row in day_rows if row.get("status") == "CLOSED" and row.get("exit_reason") in {"TARGET", "STOP_LOSS"}]
         targets = sum(1 for row in closed if row.get("exit_reason") == "TARGET")
         stops = sum(1 for row in closed if row.get("exit_reason") == "STOP_LOSS")
         days[key] = {
             "signals_opened": len(day_rows),
+            "event_count": len(day_events),
+            "state_transition_events": day_events,
             "open": sum(1 for row in day_rows if row.get("status") == "OPEN"),
+            "expired_unresolved": sum(1 for row in day_rows if row.get("status") == "EXPIRED_UNRESOLVED"),
             "closed": len(closed),
             "targets": targets,
             "stop_losses": stops,
             "accuracy_percent": round(100 * targets / len(closed), 2) if closed else None,
             "accuracy_status": "OBSERVED" if closed else "NO_CLOSED_OUTCOMES",
+            "market_calendar": market_calendar,
+            "is_exchange_holiday": any(value.get("market_status") == "EXCHANGE_HOLIDAY" for value in market_calendar.values()),
             "signals": day_rows,
         }
         cursor += timedelta(days=1)
@@ -5851,7 +5915,8 @@ def signal_outcome_calendar(start_date: str, end_date: str, _: str = Depends(_de
         "timezone": "Asia/Kolkata",
         "days": days,
         "persistence": dict(_signal_outcome_persistence),
-        "note": "Observed quote outcomes only, not broker fills. Accuracy is target hits divided by target/stop-loss closed outcomes; open signals are excluded.",
+        "event_persistence": dict(_signal_event_persistence),
+        "note": "state_transition_events records distinct Quant/Strategy state changes including WAIT. accuracy_percent is target hits divided by target/stop-loss closed quote outcomes, not broker fills; open and expired-unresolved signals are excluded.",
         "order_placement_enabled": False,
     }
 
