@@ -7,7 +7,6 @@ import {
   getDocs,
   getFirestore,
   limit,
-  orderBy,
   query,
   serverTimestamp,
   setDoc,
@@ -26,7 +25,8 @@ export const firebaseConfig = {
   appId: env.VITE_FIREBASE_APP_ID?.trim() ?? '',
 };
 
-export const FIRESTORE_DATABASE_ID = env.VITE_FIRESTORE_DATABASE_ID?.trim() || '(default)';
+const configuredDatabaseId = env.VITE_FIRESTORE_DATABASE_ID?.trim() ?? '';
+export const FIRESTORE_DATABASE_ID = configuredDatabaseId || '(default)';
 
 const firebaseConfigured = Object.values(firebaseConfig).every(value => value.length > 0);
 let firebaseApp: FirebaseApp | null = null;
@@ -35,7 +35,9 @@ let firestoreDb: Firestore | null = null;
 if (firebaseConfigured) {
   try {
     firebaseApp = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-    firestoreDb = getFirestore(firebaseApp, FIRESTORE_DATABASE_ID);
+    firestoreDb = configuredDatabaseId
+      ? getFirestore(firebaseApp, configuredDatabaseId)
+      : getFirestore(firebaseApp);
   } catch (error) {
     // Cloud sync is optional: a Firebase configuration error must not crash the terminal.
     console.warn('Firebase cloud sync unavailable; continuing offline.', error);
@@ -89,6 +91,7 @@ export async function syncTradeToCloud(trade: PaperTrade, deviceId: string) {
 
 /**
  * Fetch only the current authenticated user's cloud trades.
+ * Sort locally to avoid requiring a composite Firestore index for this query.
  */
 export async function fetchCloudTrades(): Promise<PaperTrade[]> {
   if (!db) return [];
@@ -98,7 +101,6 @@ export async function fetchCloudTrades(): Promise<PaperTrade[]> {
     const q = query(
       collection(db, 'paper_trades'),
       where('userId', '==', userId),
-      orderBy('timestamp', 'desc'),
       limit(50),
     );
     const snap = await getDocs(q);
@@ -106,7 +108,7 @@ export async function fetchCloudTrades(): Promise<PaperTrade[]> {
     snap.forEach(docSnap => {
       trades.push(docSnap.data() as PaperTrade);
     });
-    return trades;
+    return trades.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
   } catch (error) {
     console.debug('Firebase paper trade fetch unavailable:', error);
     return [];
