@@ -199,15 +199,28 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     return result;
   }
 
+  Future<bool> _probeGeneralBackend(FreshApi api) async {
+    try {
+      await api.health();
+      return true;
+    } catch (e) {
+      // The general backend is separate from AI-TRADING's signal service.
+      // A health failure here must never prevent a signal-backend request.
+      debugPrint('GENERAL_BACKEND_HEALTH_FAILED: $e');
+      return false;
+    }
+  }
+
   Future<void> refresh() async {
     if (_refreshing) return;
     _refreshing = true;
+    bool generalApiOnline = false;
     Map<String, dynamic> latestSystemDiagnostics = const {};
     String? latestSystemDiagnosticsError;
     try {
       final api = FreshApi(backendUrl);
       final signalApi = FreshApi.signal();
-      await api.health();
+      generalApiOnline = await _probeGeneralBackend(api);
       // Broker/session diagnostics must not prevent the independent signal
       // endpoint from being queried. A broken /v1/angel/status route used to
       // abort refresh here and incorrectly mask signal/API diagnostics.
@@ -247,7 +260,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       }
       if (!mounted) return;
       setState(() {
-        apiOnline = true;
+        apiOnline = generalApiOnline || signalsEndpointOnline;
         systemDiagnostics = latestSystemDiagnostics;
         systemDiagnosticsError = latestSystemDiagnosticsError;
         angelOnline = a['authenticated'] == true;
@@ -268,11 +281,11 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
                     : (lastFetch != null ? 'LIVE unavailable — showing last fetched market data.' : 'Backend online — waiting for Angel One market data. Check broker credentials and connection status.')));
       });
     } catch (e) {
-      if (mounted) setState(() { apiOnline = false; signalsEndpointOnline = false; signalsFetchError = e.toString().replaceFirst('Exception: ', ''); systemDiagnostics = const {}; systemDiagnosticsError = e.toString().replaceFirst('Exception: ', ''); });
+      if (mounted) setState(() { apiOnline = generalApiOnline; signalsEndpointOnline = false; signalsFetchError = e.toString().replaceFirst('Exception: ', ''); systemDiagnostics = const {}; systemDiagnosticsError = e.toString().replaceFirst('Exception: ', ''); });
       final s = _makeCachedSignalsNonActionable(await _loadCachedSignals());
       if (!mounted) return;
       setState(() {
-        apiOnline = false;
+        apiOnline = generalApiOnline;
         signalsEndpointOnline = false;
         systemDiagnostics = const {};
         systemDiagnosticsError = e.toString().replaceFirst('Exception: ', '');
@@ -283,7 +296,11 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         tradePlans = ((s['trade_plans'] as List?) ?? const []).whereType<Map>().map((plan) => Map<String, dynamic>.from(plan)).toList();
         qualifiedCount = (s['qualified_trade_count'] as num?)?.toInt() ?? tradePlans.length;
         lastFetch = s['last_fetch']?.toString();
-        status = lastFetch != null ? 'Backend unavailable — showing last fetched market data. Error: ${signalsFetchError ?? 'request failed'}' : 'Backend offline or unreachable: ${signalsFetchError ?? 'health check failed'}';
+        status = generalApiOnline
+            ? 'Signal backend unavailable; generic backend remains online. Error: ${signalsFetchError ?? 'request failed'}'
+            : (lastFetch != null
+                ? 'Backend unavailable — showing last fetched market data. Error: ${signalsFetchError ?? 'request failed'}'
+                : 'Signal and generic backends are unavailable: ${signalsFetchError ?? 'health check failed'}');
       });
     } finally {
       _refreshing = false;
