@@ -30,7 +30,7 @@ export const DashboardPage: React.FC = () => {
   const cfg = INDEX_CONFIG[selectedIndex];
 
   const marketActionable = apiService.isFreshLiveMarketRow(currentMarket);
-  const ltp = currentMarket ? currentMarket.ltp : cfg.basePrice;
+  const ltp = currentMarket?.ltp ?? 0;
   const change = currentMarket && Number.isFinite(currentMarket.change)
     ? currentMarket.change
     : currentMarket?.day_move_pct !== undefined && Number.isFinite(currentMarket.day_move_pct)
@@ -149,15 +149,17 @@ export const DashboardPage: React.FC = () => {
             <div
               className="h-full bg-gradient-to-r from-rose-500 via-amber-400 to-emerald-400 rounded-full"
               style={{
-                width: `${Math.min(
-                  100,
-                  Math.max(
-                    5,
-                    (((ltp - (currentMarket?.low || ltp * 0.99)) /
-                      ((currentMarket?.high || ltp * 1.01) - (currentMarket?.low || ltp * 0.99))) *
-                      100) || 50
-                  )
-                )}%`,
+                width: marketActionable
+                  ? `${Math.min(
+                      100,
+                      Math.max(
+                        5,
+                        (((ltp - (currentMarket?.low || ltp * 0.99)) /
+                          ((currentMarket?.high || ltp * 1.01) - (currentMarket?.low || ltp * 0.99))) *
+                          100) || 50
+                      )
+                    )}%`
+                  : '0%',
               }}
             ></div>
           </div>

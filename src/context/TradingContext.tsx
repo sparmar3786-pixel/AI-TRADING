@@ -246,25 +246,36 @@ export const TradingProvider: React.FC<{ children: ReactNode }> = ({ children })
     setDrawerOpen(prev => !prev);
   }, []);
 
-  // Periodic polling every 5 seconds (matching Android app)
+  // Adaptive polling: 15s during the equity session, 60s outside it.
+  // Refresh immediately when the user returns to the foreground.
   useEffect(() => {
-    refresh();
-    const interval = setInterval(() => {
-      // only refresh if tab is visible
-      if (!document.hidden) {
-        refresh();
-      }
-    }, 5000);
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let disposed = false;
+
+    const scheduleNext = () => {
+      if (disposed) return;
+      const { equityOpen } = apiService.getMarketOpenStatus();
+      timeoutId = setTimeout(async () => {
+        if (!document.hidden) {
+          await refresh();
+        }
+        scheduleNext();
+      }, equityOpen ? 15000 : 60000);
+    };
+
+    void refresh();
+    scheduleNext();
 
     const handleVisibilityChange = () => {
       if (!document.hidden) {
-        refresh();
+        void refresh();
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => {
-      clearInterval(interval);
+      disposed = true;
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [refresh]);

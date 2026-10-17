@@ -10,8 +10,8 @@ export const OptionChainPage: React.FC = () => {
   const cfg = INDEX_CONFIG[selectedIndex];
 
   const strikes = currentMarket?.option_chain || [];
-  const ltp = currentMarket?.ltp || cfg.basePrice;
   const marketActionable = apiService.isFreshLiveMarketRow(currentMarket);
+  const ltp = marketActionable ? currentMarket!.ltp : null;
 
   const [selectedStrike, setSelectedStrike] = useState<{
     row: OptionChainRow;
@@ -58,13 +58,13 @@ export const OptionChainPage: React.FC = () => {
           <div>
             <div className="text-[10px] text-slate-400 font-mono">PCR</div>
             <div className="text-sm font-bold text-emerald-400 font-mono">
-              {currentMarket?.pcr || 1.15}
+              {marketActionable ? currentMarket?.pcr ?? 'N/A' : 'N/A'}
             </div>
           </div>
           <div>
             <div className="text-[10px] text-slate-400 font-mono">MAX PAIN</div>
             <div className="text-sm font-bold text-cyan-400 font-mono">
-              {currentMarket?.max_pain || Math.round(ltp / cfg.strikeStep) * cfg.strikeStep}
+              {marketActionable ? currentMarket?.max_pain ?? 'N/A' : 'N/A'}
             </div>
           </div>
         </div>
@@ -72,7 +72,7 @@ export const OptionChainPage: React.FC = () => {
 
       {/* Instruction hint */}
       <div className="text-[11px] text-slate-400 px-1 flex items-center justify-between">
-        <span>{marketActionable ? 'Tap any CE or PE quote to place a paper order' : 'OFFLINE PREVIEW — orders disabled until live quotes are verified'}</span>
+        <span>{marketActionable ? 'Tap any CE or PE quote to place a paper order' : 'OFFLINE — live option quotes unavailable; no preview prices shown'}</span>
         <span className="text-cyan-400 font-mono">Lot Size: {cfg.lotSize}</span>
       </div>
 
@@ -102,6 +102,13 @@ export const OptionChainPage: React.FC = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-[#17223B]">
+            {strikes.length === 0 && (
+              <tr>
+                <td colSpan={7} className="py-8 px-3 text-center text-slate-400">
+                  Live option-chain data unavailable. Reconnect to the verified signal backend; no synthetic quotes are shown.
+                </td>
+              </tr>
+            )}
             {strikes.map(row => {
               const isAtm = row.is_atm;
 

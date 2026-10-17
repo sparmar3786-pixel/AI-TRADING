@@ -13,13 +13,13 @@ export const DEFAULT_SIGNAL_BACKEND = 'https://ai-trading-signals-api-production
 export const DEFAULT_LEGACY_BACKEND = 'https://nse-algo-backend-final-production.up.railway.app';
 
 // Instrument configurations
-export const INDEX_CONFIG: Record<IndexSymbol, { name: string; lotSize: number; strikeStep: number; basePrice: number }> = {
-  NIFTY: { name: 'NIFTY 50', lotSize: 75, strikeStep: 50, basePrice: 24865.50 },
-  BANKNIFTY: { name: 'NIFTY BANK', lotSize: 30, strikeStep: 100, basePrice: 51420.20 },
-  FINNIFTY: { name: 'NIFTY FINANCIAL', lotSize: 65, strikeStep: 50, basePrice: 23680.10 },
-  MIDCPNIFTY: { name: 'NIFTY MIDCAP SELECT', lotSize: 120, strikeStep: 25, basePrice: 12990.40 },
-  SENSEX: { name: 'BSE SENSEX', lotSize: 20, strikeStep: 100, basePrice: 81750.60 },
-  BANKEX: { name: 'BSE BANKEX', lotSize: 30, strikeStep: 100, basePrice: 58180.30 },
+export const INDEX_CONFIG: Record<IndexSymbol, { name: string; lotSize: number; strikeStep: number }> = {
+  NIFTY: { name: 'NIFTY 50', lotSize: 75, strikeStep: 50 },
+  BANKNIFTY: { name: 'NIFTY BANK', lotSize: 30, strikeStep: 100 },
+  FINNIFTY: { name: 'NIFTY FINANCIAL', lotSize: 65, strikeStep: 50 },
+  MIDCPNIFTY: { name: 'NIFTY MIDCAP SELECT', lotSize: 120, strikeStep: 25 },
+  SENSEX: { name: 'BSE SENSEX', lotSize: 20, strikeStep: 100 },
+  BANKEX: { name: 'BSE BANKEX', lotSize: 30, strikeStep: 100 },
 };
 
 
@@ -352,70 +352,29 @@ class ApiService {
           };
         }
       }
-    } catch {
-      // Never describe locally generated preview values as live market data.
-      const fallbackMarket = this.generateFallbackMarket();
-      const safeMarket = Object.fromEntries(
-        Object.entries(fallbackMarket).map(([key, row]) => [key, { ...row, live: false }]),
-      ) as Record<string, MarketRow>;
+    } catch (error) {
+      // Do not synthesize prices/OI when the backend is unavailable.
       return {
-        signals: this.generateFallbackSignals(safeMarket),
-        market: safeMarket,
+        signals: this.generateFallbackSignals({}),
+        market: {},
         isLive: false,
-        error: 'Live backend unavailable. Display values are offline preview only; all trade signals are WAIT.',
+        error: error instanceof Error && error.name === 'AbortError'
+          ? 'Signal backend timed out. No market values are displayed; all signals are WAIT.'
+          : 'Signal backend unavailable. No market values are displayed; all signals are WAIT.',
       };
     }
 
-    const fallbackMarket = this.generateFallbackMarket();
-    const safeMarket = Object.fromEntries(
-      Object.entries(fallbackMarket).map(([key, row]) => [key, { ...row, live: false }]),
-    ) as Record<string, MarketRow>;
     return {
-      signals: this.generateFallbackSignals(safeMarket),
-      market: safeMarket,
+      signals: this.generateFallbackSignals({}),
+      market: {},
       isLive: false,
-      error: 'Live backend returned no fresh exchange-timestamped market snapshot. Trade signals are WAIT.',
+      error: 'Backend returned no verified fresh exchange snapshot. No market values are displayed; all signals are WAIT.',
     };
   }
 
-  // Generate realistic high-fidelity market data
+  // Offline state deliberately contains no synthetic market prices or option-chain data.
   public generateFallbackMarket(): Record<string, MarketRow> {
-    const market: Record<string, MarketRow> = {};
-    const indices: IndexSymbol[] = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'];
-
-    indices.forEach(idx => {
-      const cfg = INDEX_CONFIG[idx];
-      // small deterministic drift based on current minute
-      const minute = new Date().getMinutes();
-      const driftPercent = Math.sin(minute / 5 + idx.length) * 0.45 + (idx === 'NIFTY' ? 0.32 : -0.15);
-      const ltp = Number((cfg.basePrice * (1 + driftPercent / 100)).toFixed(2));
-      const change = Number((ltp - cfg.basePrice).toFixed(2));
-      const change_percent = Number((change / cfg.basePrice * 100).toFixed(2));
-
-      const option_chain = this.generateOptionChain(idx, ltp, cfg.strikeStep);
-
-      market[idx] = {
-        symbol: idx,
-        ltp,
-        change,
-        change_percent,
-        open: Number((cfg.basePrice * 0.998).toFixed(2)),
-        high: Number((Math.max(ltp, cfg.basePrice) * 1.004).toFixed(2)),
-        low: Number((Math.min(ltp, cfg.basePrice) * 0.995).toFixed(2)),
-        close: cfg.basePrice,
-        vwap: Number((ltp * 0.9992).toFixed(2)),
-        volume: 4500000 + Math.floor(Math.sin(minute) * 1000000),
-        pcr: Number((1.08 + Math.cos(minute / 3) * 0.18).toFixed(2)),
-        max_pain: Math.round(ltp / cfg.strikeStep) * cfg.strikeStep,
-        india_vix: 13.85,
-        trend: change >= 0 ? 'BULLISH' : 'BEARISH',
-        option_chain,
-        timestamp: new Date().toISOString(),
-        live: false, // Synthetic preview data is never live.
-      };
-    });
-
-    return market;
+    return {};
   }
 
   public generateOptionChain(symbol: IndexSymbol, spotPrice: number, strikeStep: number): OptionChainRow[] {
@@ -463,11 +422,12 @@ class ApiService {
     return strikes;
   }
 
-  public generateFallbackSignals(market: Record<string, MarketRow>): Record<string, SignalData> {
-    // Offline preview data must never create a synthetic CALL/PUT recommendation.
+  public generateFallbackSignals(_market: Record<string, MarketRow>): Record<string, SignalData> {
+    // Offline state is explicit WAIT for every supported index, with no synthetic prices.
     const generatedAt = new Date().toISOString();
+    const indices: IndexSymbol[] = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'];
     return Object.fromEntries(
-      Object.keys(market).map(key => [key, {
+      indices.map(key => [key, {
         index: key,
         decision: 'WAIT',
         candidate_decision: 'WAIT',
@@ -475,10 +435,10 @@ class ApiService {
         confidence: 0,
         guards: ['LIVE_BACKEND_UNAVAILABLE', 'MARKET_DATA_NOT_VERIFIED'],
         live_validation: {
-          verdict: 'WARN',
+          verdict: 'FAIL',
           decision: 'WAIT',
           blocks: ['Live market data and cloud validation are unavailable; no trade is actionable.'],
-          reasons: ['Offline preview values are not exchange quotes.'],
+          reasons: ['No synthetic or cached price is accepted as a live quote.'],
         },
         reasons: ['Backend unavailable or snapshot stale. Reconnect before reviewing any trade.'],
         timestamp: generatedAt,
