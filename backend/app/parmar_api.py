@@ -89,10 +89,7 @@ def list_parmar_strategies(x_device_id: str = Header(default="")) -> dict[str, A
             else "NOT_VERIFIED"
         )
         if candidate_wired or detector_wired:
-            item["candidate_route"] = (
-                "/v1/signals.hero_zero" if item["id"] == "hero_zero"
-                else "/v1/signals.strategy_candidates"
-            )
+            item["candidate_route"] = f"/v1/signals.strategy_candidates.{item['id']}"
         item["actionable"] = False
         strategies.append(item)
     return {"status": "ok", "engine": "PARMAR", "count": len(strategies), "strategies": strategies}
@@ -141,9 +138,8 @@ def verify_strategy_wiring(strategy_id: str, x_device_id: str = Header(default="
         "checks": checks,
         "blockers": blockers,
         "candidate_route": (
-            "/v1/signals.hero_zero" if strategy_id == "hero_zero"
-            else "/v1/signals.strategy_candidates" if candidate_pipeline_wired or detector_pipeline_wired
-            else None
+            f"/v1/signals.strategy_candidates.{strategy_id}"
+            if candidate_pipeline_wired or detector_pipeline_wired else None
         ),
         "reason": (
             "Candidate calculation is connected to the server-owned /v1/signals payload, but fresh live feed, option mapping, five-layer validation, risk and 600-second confirmation are not certified."
@@ -162,24 +158,80 @@ def evaluate_parmar_strategy(body: EvaluateRequest, x_device_id: str = Header(de
     definition = next((item for item in STRATEGIES if item["id"] == strategy_id), None)
     if definition is None:
         raise HTTPException(status_code=404, detail="Unknown Parmar strategy id")
-    # This direct endpoint deliberately refuses to trust caller-supplied snapshots.
-    # ORB/VWAP candidates are evaluated only by the canonical server-owned /v1/signals path.
+    # Ignore caller-supplied market_snapshot. Reuse the canonical server-owned
+    # Angel One signal snapshot so Strategy, Signals and Quant tabs cannot diverge.
+    try:
+        try:
+            from app.main import _get_signals
+        except ModuleNotFoundError:
+            from backend.app.main import _get_signals
+        canonical = _get_signals()
+    except Exception:
+        canonical = {}
+    index = body.index.strip().upper()
+    signal = (canonical.get("signals") or {}).get(index) if isinstance(canonical, dict) else None
+    if not isinstance(signal, dict):
+        raise HTTPException(status_code=400, detail="Unsupported index or canonical signal snapshot unavailable")
+    candidates = signal.get("strategy_candidates")
+    candidate = candidates.get(strategy_id) if isinstance(candidates, dict) else None
+    if not isinstance(candidate, dict):
+        candidate = {
+            "strategy_id": strategy_id, "decision": "WAIT", "candidate_decision": None,
+            "entry": None, "stop_loss": None, "target": None, "strike": None,
+            "entry_price_basis": "UNDERLYING_SPOT", "data_fresh": False,
+            "reasons": ["Canonical strategy candidate is unavailable; retry after signal refresh."],
+            "guards": ["STRATEGY_CANDIDATE_UNAVAILABLE", "NO_ACTIONABLE_SIGNAL"],
+        }
+    layers = signal.get("layers") if isinstance(signal.get("layers"), dict) else {}
+    required_layers = ("data_quality", "trend_sentiment", "order_flow", "option_selection", "risk_levels")
+    quant_pass = all(
+        isinstance(layers.get(key), dict) and layers[key].get("pass") is True
+        for key in required_layers
+    )
+    validation = signal.get("live_validation") if isinstance(signal.get("live_validation"), dict) else {}
+    candidate_decision = str(candidate.get("candidate_decision") or "").upper()
+    if candidate_decision not in {"CALL BUY", "PUT BUY"}:
+        candidate_decision = None
     return {
-        "status": "wait",
-        "engine": "PARMAR",
-        "strategy_id": strategy_id,
-        "name": definition["name"],
-        "decision": "WAIT",
-        "candidate_decision": None,
-        "entry": None,
-        "stop_loss": None,
-        "target": None,
-        "strike": None,
-        "reasons": [("Use the canonical /v1/signals strategy_candidates output; direct caller-supplied evaluation is disabled." if strategy_id in {"orb", "vwap"} else "Engine adapter and verified live-data mapping are not yet registered.")],
-        "guards": ["DIRECT_EVALUATE_DISABLED" if strategy_id in {"orb", "vwap"} else "ADAPTER_NOT_REGISTERED", "NO_ACTIONABLE_SIGNAL"],
-        "live_validation": {
-            "verdict": "FAIL",
-            "decision": "WAIT",
-            "blocks": ["Adapter pending", "Freshness, risk and 10-minute stability gates required"],
+        "status": "wait", "engine": "PARMAR", "strategy_id": strategy_id,
+        "name": definition["name"], "index": index,
+        "decision": "WAIT", "candidate_decision": candidate_decision,
+        # Executable trade fields remain empty. Candidate levels below are spot-based research evidence.
+        "entry": None, "stop_loss": None, "target": None, "strike": None,
+        "candidate_snapshot": {
+            "candidate_decision": candidate_decision,
+            "entry": candidate.get("entry"), "stop_loss": candidate.get("stop_loss"),
+            "target": candidate.get("target"),
+            "entry_price_basis": candidate.get("entry_price_basis") or "UNDERLYING_SPOT",
+            "timestamp": candidate.get("timestamp") or signal.get("generated_at"),
+            "data_fresh": candidate.get("data_fresh") is True,
+            "reasons": list(candidate.get("reasons") or []),
+            "guards": list(candidate.get("guards") or []),
+            "strategy_fields": {
+                key: candidate.get(key)
+                for key in ("opening_range_high", "opening_range_low", "vwap", "atr_value", "pdh", "pdl", "sweep_events")
+                if key in candidate
+            },
         },
+        "checks": {
+            "canonical_signal_found": True,
+            "fresh_live_market_data": signal.get("data_fresh") is True,
+            "five_layer_quant_pass": quant_pass,
+            "risk_gate_pass": (validation.get("checks") or {}).get("risk_checks") is True,
+            "ten_minute_confirmation": (signal.get("signal_stability") or {}).get("state") == "CONFIRMED",
+            "order_placement_enabled": False,
+        },
+        "reasons": list(candidate.get("reasons") or []) + [
+            "Candidate is informational only; option contract and risk mapping are not certified."
+        ],
+        "guards": list(dict.fromkeys(list(candidate.get("guards") or []) + [
+            "OPTION_CONTRACT_MAPPING_REQUIRED", "FIVE_LAYER_QUANT_GATE_REQUIRED",
+            "SERVER_600_SECOND_CONFIRMATION_REQUIRED", "NO_ACTIONABLE_SIGNAL",
+        ])),
+        "live_validation": {
+            "verdict": "WAIT", "decision": "WAIT",
+            "blocks": ["Executable option mapping/risk not certified", "Freshness, five-layer validation and 600-second stability gates must pass"],
+            "order_placement_enabled": False,
+        },
+        "order_placement_enabled": False,
     }
