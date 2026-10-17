@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
 from fastapi.testclient import TestClient
-from app.main import app, _complete_strategy_candidate_inventory
+from app.main import app, _complete_strategy_candidate_inventory, _quant_layer_display_status
 import app.main as backend_main
 
 
@@ -192,3 +192,50 @@ def test_require_adapter_refreshes_expired_profile_cache(monkeypatch):
     monkeypatch.setattr(backend_main, "_start_stream", lambda adapter: None)
     assert backend_main._require_adapter() is fake
     assert fake.profile_calls == 1
+
+
+
+def test_quant_layer_status_marks_missing_evidence_unavailable_not_pass_or_false_fail():
+    assert _quant_layer_display_status(
+        "data_quality",
+        {"pass": False, "reason_code": "MISSING_OR_INVALID_TIMESTAMP"},
+        normalized_option_count=0, selected=None, option_atr=None,
+    ) == "UNAVAILABLE"
+    assert _quant_layer_display_status(
+        "trend_sentiment",
+        {"pass": False, "trend": "UNKNOWN", "indicators_complete": False, "sentiment_score": None},
+        normalized_option_count=0, selected=None, option_atr=None,
+    ) == "UNAVAILABLE"
+    assert _quant_layer_display_status(
+        "order_flow",
+        {"pass": False, "spread_pct": None, "direction": "UNKNOWN"},
+        normalized_option_count=0, selected=None, option_atr=None,
+    ) == "UNAVAILABLE"
+    assert _quant_layer_display_status(
+        "option_selection",
+        {"pass": False, "candidate_count": 0},
+        normalized_option_count=0, selected=None, option_atr=None,
+    ) == "UNAVAILABLE"
+    assert _quant_layer_display_status(
+        "risk_levels",
+        {"pass": False, "entry_reference": None, "stop_loss": None, "target": None},
+        normalized_option_count=0, selected=None, option_atr=None,
+    ) == "UNAVAILABLE"
+
+
+def test_quant_layer_status_keeps_measured_validation_failures_as_fail():
+    assert _quant_layer_display_status(
+        "data_quality",
+        {"pass": False, "reason_code": "STALE_MARKET_DATA"},
+        normalized_option_count=5, selected={"strike": 25000}, option_atr=2.0,
+    ) == "FAIL"
+    assert _quant_layer_display_status(
+        "trend_sentiment",
+        {"pass": False, "trend": "BULLISH", "indicators_complete": True, "sentiment_score": -0.5},
+        normalized_option_count=5, selected={"strike": 25000}, option_atr=2.0,
+    ) == "FAIL"
+    assert _quant_layer_display_status(
+        "order_flow",
+        {"pass": False, "spread_pct": 3.2, "direction": "BULLISH"},
+        normalized_option_count=5, selected={"strike": 25000}, option_atr=2.0,
+    ) == "FAIL"
