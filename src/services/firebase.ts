@@ -1,79 +1,116 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
+import { FirebaseApp, getApp, getApps, initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously } from 'firebase/auth';
 import {
-  getFirestore,
+  Firestore,
   collection,
   doc,
-  setDoc,
   getDocs,
-  query,
-  orderBy,
+  getFirestore,
   limit,
+  query,
   serverTimestamp,
+  setDoc,
+  where,
 } from 'firebase/firestore';
 import { PaperTrade } from '../types/market';
 
-const env = (import.meta as any).env || {};
+const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env ?? {};
 
 export const firebaseConfig = {
-  apiKey: env.VITE_FIREBASE_API_KEY || 'AIzaSyBQI3jf_RlgapjR1FX95Z0y6LQZ1HsXb1w',
-  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || 'project-d55f227e-a5a3-4161-b06.firebaseapp.com',
-  projectId: env.VITE_FIREBASE_PROJECT_ID || 'project-d55f227e-a5a3-4161-b06',
-  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || 'project-d55f227e-a5a3-4161-b06.firebasestorage.app',
-  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || '937795693519',
-  appId: env.VITE_FIREBASE_APP_ID || '1:937795693519:android:5df61a6227bd8e250b80ba',
+  apiKey: env.VITE_FIREBASE_API_KEY?.trim() ?? '',
+  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN?.trim() ?? '',
+  projectId: env.VITE_FIREBASE_PROJECT_ID?.trim() ?? '',
+  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET?.trim() ?? '',
+  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID?.trim() ?? '',
+  appId: env.VITE_FIREBASE_APP_ID?.trim() ?? '',
 };
 
-export const FIRESTORE_DATABASE_ID = 'ai-studio-android-aitradin-e7389ca7-bc19-45aa-98a6-f0fe07c8611b';
+const configuredDatabaseId = env.VITE_FIRESTORE_DATABASE_ID?.trim() ?? '';
+export const FIRESTORE_DATABASE_ID = configuredDatabaseId || '(default)';
 
-// Initialize Firebase
-const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+const firebaseConfigured = Object.values(firebaseConfig).every(value => value.length > 0);
+let firebaseApp: FirebaseApp | null = null;
+let firestoreDb: Firestore | null = null;
 
-let firestoreDb = null;
-try {
-  firestoreDb = getFirestore(app, FIRESTORE_DATABASE_ID);
-} catch {
+if (firebaseConfigured) {
   try {
-    firestoreDb = getFirestore(app);
-  } catch (e) {
-    console.warn('Firestore initialization fallback:', e);
+    firebaseApp = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+    firestoreDb = configuredDatabaseId
+      ? getFirestore(firebaseApp, configuredDatabaseId)
+      : getFirestore(firebaseApp);
+  } catch (error) {
+    // Cloud sync is optional: a Firebase configuration error must not crash the terminal.
+    console.warn('Firebase cloud sync unavailable; continuing offline.', error);
+    firebaseApp = null;
+    firestoreDb = null;
+  }
+} else {
+  console.info('Firebase is not configured; cloud paper-trade sync is disabled.');
+}
+
+export const db: Firestore | null = firestoreDb;
+
+/**
+ * Return the current Firebase UID, creating an anonymous session when needed.
+ * Anonymous auth must be enabled in the Firebase console; otherwise cloud sync
+ * remains unavailable and local paper trading continues to work.
+ */
+async function getAuthenticatedUid(): Promise<string | null> {
+  if (!firebaseApp) return null;
+  try {
+    const auth = getAuth(firebaseApp);
+    const user = auth.currentUser ?? (await signInAnonymously(auth)).user;
+    return user.uid || null;
+  } catch (error) {
+    console.warn('Firebase authentication unavailable; cloud sync skipped.', error);
+    return null;
   }
 }
 
-export const db = firestoreDb;
-
 /**
- * Sync paper trade to Cloud Firestore (Free Firebase integration)
+ * Sync a paper trade only under the authenticated Firebase UID expected by
+ * firestore.rules. Cloud failures never interrupt local paper trading.
  */
 export async function syncTradeToCloud(trade: PaperTrade, deviceId: string) {
   if (!db) return;
   try {
-    const tradeRef = doc(db, 'paper_trades', trade.id);
+    const userId = await getAuthenticatedUid();
+    if (!userId) return;
+    const tradeRef = doc(db, 'paper_trades', `${userId}_${trade.id}`);
     await setDoc(tradeRef, {
       ...trade,
+      userId,
       deviceId,
       syncedAt: serverTimestamp(),
       updatedAt: new Date().toISOString(),
     }, { merge: true });
   } catch (err) {
-    // Graceful offline fallback
     console.debug('Firebase paper trade sync notice:', err);
   }
 }
 
 /**
- * Fetch past cloud trades
+ * Fetch only the current authenticated user's cloud trades.
+ * Sort locally to avoid requiring a composite Firestore index for this query.
  */
 export async function fetchCloudTrades(): Promise<PaperTrade[]> {
   if (!db) return [];
   try {
-    const q = query(collection(db, 'paper_trades'), orderBy('timestamp', 'desc'), limit(50));
+    const userId = await getAuthenticatedUid();
+    if (!userId) return [];
+    const q = query(
+      collection(db, 'paper_trades'),
+      where('userId', '==', userId),
+      limit(50),
+    );
     const snap = await getDocs(q);
     const trades: PaperTrade[] = [];
     snap.forEach(docSnap => {
       trades.push(docSnap.data() as PaperTrade);
     });
-    return trades;
-  } catch {
+    return trades.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+  } catch (error) {
+    console.debug('Firebase paper trade fetch unavailable:', error);
     return [];
   }
 }
