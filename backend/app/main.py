@@ -162,6 +162,23 @@ _signal_build_metrics: dict[str, Any] = {"last_duration_ms": None, "build_count"
 _request_metrics: dict[str, dict[str, Any]] = {}
 _ai_provider_test_cache: dict[str, dict[str, Any]] = {}
 _confirmation_states: dict[str, dict[str, Any]] = {}
+
+
+def _load_persistent_confirmation_state(key: str) -> dict[str, Any] | None:
+    """Load gate state only from durable server storage; memory-only timing is not authoritative."""
+    try:
+        reachable, value = get_state("signal_confirmation:" + key)
+        return dict(value) if reachable and isinstance(value, dict) else None
+    except Exception:
+        return None
+
+
+def _save_persistent_confirmation_state(key: str, value: dict[str, Any]) -> bool:
+    """Persist candidate timer state; failed writes prevent continuity on the next refresh."""
+    try:
+        return bool(put_state("signal_confirmation:" + key, value))
+    except Exception:
+        return False
 _last_market: dict[str, Any] = {}
 _option_history: dict[str, dict[str, float]] = {}
 # Retain only real broker candles/depth observed since this process started,
@@ -1932,7 +1949,7 @@ def _index_snapshot(
     engine_started = time.perf_counter()
     result = evaluate_five_layer_signal(
         snapshot,
-        confirmation_state=_confirmation_states.get(index),
+        confirmation_state=_load_persistent_confirmation_state(index),
         max_data_age_seconds=15.0,
         confirmation_seconds=600,
         max_confirmation_gap_seconds=60,
@@ -2023,6 +2040,7 @@ def _index_snapshot(
         "semantics": "bid_ask_depth_not_classified_trade_volume",
     }
     _confirmation_states[index] = result.get("confirmation_state") or {}
+    _save_persistent_confirmation_state(index, result.get("confirmation_state") or {})
     chain_payload = _market_chain_rows(normalized_options)
     result.update({
         "index": index, "data_source": "angelone_smartapi",
@@ -3884,12 +3902,13 @@ def _commodity_snapshot(adapter: AngelOneReadOnly, rows: list[dict[str, Any]]) -
                     confirmation_key = f"MCX_{name}"
                     futures_signal = evaluate_futures_signal(
                         future_snapshot,
-                        confirmation_state=_confirmation_states.get(confirmation_key),
+                        confirmation_state=_load_persistent_confirmation_state(confirmation_key),
                         max_data_age_seconds=60.0,
                         confirmation_seconds=600,
                         max_confirmation_gap_seconds=60,
                     )
                     _confirmation_states[confirmation_key] = futures_signal.get("confirmation_state") or {}
+                    _save_persistent_confirmation_state(confirmation_key, futures_signal.get("confirmation_state") or {})
                 else:
                     reason = reason or "Quote is live; candle history is insufficient for a trend label"
             except Exception:
