@@ -10,7 +10,7 @@ import 'broker_home_prototype_page.dart';
 import 'strategy_library_page.dart';
 import 'quant_engine_page.dart';
 
-const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Backtesting','API','Data Health','Broker Home','Strategies','Quant Engine'];
+const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Backtesting','API','Data Health','Broker Home','Strategies','Quant Engine','Quant Signal','Strategy Signal','Signal Calendar'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
 
 void main() {
@@ -471,6 +471,9 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           marketOpen: _marketOpenNow,
           onIndexChanged: (value) => setState(() => selectedIndex = value),
         ),
+        const IsolatedSignalPage(endpoint: '/v1/signals/quant', title: 'Quant Engine Signal', description: 'Quant owns the final validated decision and its evidence. Missing/stale evidence remains WAIT/BLOCK.'),
+        const IsolatedSignalPage(endpoint: '/v1/signals/strategies', title: 'Parmar Engine Strategy Signals', description: 'Strategy candidates are separate from Quant decisions and cannot override safety gates.'),
+        const SignalCalendarPage(),
       ]),
     ),
   );
@@ -1470,3 +1473,148 @@ class TradePlanCard extends StatelessWidget {
 }
 
 String _val(dynamic v){if(v==null)return '—';if(v is num)return v.toStringAsFixed(v.abs()>=100?2:3);return v.toString();}
+
+
+class IsolatedSignalPage extends StatefulWidget {
+  const IsolatedSignalPage({required this.endpoint, required this.title, required this.description, super.key});
+  final String endpoint, title, description;
+  @override
+  State<IsolatedSignalPage> createState() => _IsolatedSignalPageState();
+}
+
+class _IsolatedSignalPageState extends State<IsolatedSignalPage> {
+  Map<String, dynamic> payload = const {};
+  bool loading = false;
+  String? error;
+  @override
+  void initState() { super.initState(); refresh(); }
+  Future<void> refresh() async {
+    if (loading) return;
+    setState(() { loading = true; error = null; });
+    try {
+      final result = await FreshApi.signal().getJson(widget.endpoint, timeout: const Duration(seconds: 20));
+      if (!mounted) return;
+      setState(() { payload = result; loading = false; });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { error = e.toString(); loading = false; });
+    }
+  }
+  @override
+  Widget build(BuildContext context) {
+    final rows = payload['signals'] is Map ? Map<String,dynamic>.from(payload['signals'] as Map) : <String,dynamic>{};
+    final candidates = payload['strategy_candidates'] is List ? List<dynamic>.from(payload['strategy_candidates'] as List) : <dynamic>[];
+    final isStrategies = widget.endpoint.endsWith('/strategies');
+    return RefreshIndicator(onRefresh: refresh, child: ListView(padding: const EdgeInsets.all(12), children: [
+      Text(widget.title, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+      const SizedBox(height: 6), Text(widget.description),
+      const SizedBox(height: 10),
+      Card(child: ListTile(
+        leading: Icon(loading ? Icons.sync : error == null ? Icons.cloud_done : Icons.cloud_off),
+        title: Text(error != null ? 'DATA CHECK NEEDED' : (payload['status']?.toString().toUpperCase() ?? 'WAIT')),
+        subtitle: Text(error ?? 'Source: ${payload['source'] ?? widget.endpoint} • refresh to fetch latest backend snapshot'),
+        trailing: IconButton(onPressed: refresh, icon: const Icon(Icons.refresh)),
+      )),
+      if (error != null) Card(child: Padding(padding: const EdgeInsets.all(12), child: Text(error!, style: const TextStyle(color: Colors.orangeAccent)))),
+      if (!isStrategies) ...rows.entries.map((entry) {
+        final row = entry.value is Map ? Map<String,dynamic>.from(entry.value as Map) : <String,dynamic>{};
+        final q = row['quant_engine'] is Map ? Map<String,dynamic>.from(row['quant_engine'] as Map) : <String,dynamic>{};
+        return Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(entry.key, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+          Text('Decision: ${row['decision'] ?? 'WAIT'}  •  Strike: ${row['strike'] ?? '—'}  •  Expiry: ${row['expiry'] ?? '—'}'),
+          Text('Entry: ${row['entry'] ?? '—'}  •  SL: ${row['stop_loss'] ?? '—'}  •  Target: ${row['target'] ?? '—'}'),
+          Text('Quant: ${q['passed_layers'] ?? '—'}/${q['total_layers'] ?? 5} layers • Fresh: ${row['data_fresh'] == true ? 'YES' : 'NO'}'),
+          Text('Stability: ${(row['signal_stability'] as Map?)?['state'] ?? 'UNVERIFIED'}'),
+          if (row['blockers'] is List) Text('Blockers: ${(row['blockers'] as List).join(', ')}'),
+        ])));
+      }),
+      if (isStrategies && candidates.isEmpty) const Card(child: ListTile(title: Text('No strategy candidates returned'), subtitle: Text('This is not a failure by itself; the backend must return explicit candidate evidence.'))),
+      if (isStrategies) ...candidates.map((item) {
+        final row = item is Map ? Map<String,dynamic>.from(item) : <String,dynamic>{'detail': item.toString()};
+        return Card(child: ListTile(
+          leading: const Icon(Icons.hub_outlined),
+          title: Text((row['strategy'] ?? row['strategy_id'] ?? row['name'] ?? 'Strategy candidate').toString()),
+          subtitle: Text('Candidate: ${row['candidate_decision'] ?? row['decision'] ?? 'WAIT'} • Status: ${row['status'] ?? row['state'] ?? 'UNVERIFIED'}\n${row['reason'] ?? row['detail'] ?? 'Candidate only; Quant and risk gates still apply.'}'),
+        ));
+      }),
+      const Padding(padding: EdgeInsets.all(8), child: Text('Signal-only mode. No broker orders are placed. Do not treat a candidate or a shadow outcome as a guaranteed fill.', style: TextStyle(color: Colors.orangeAccent))),
+    ]));
+  }
+}
+
+class SignalCalendarPage extends StatefulWidget {
+  const SignalCalendarPage({super.key});
+  @override
+  State<SignalCalendarPage> createState() => _SignalCalendarPageState();
+}
+
+class _SignalCalendarPageState extends State<SignalCalendarPage> {
+  DateTime month = DateTime.now();
+  Map<String,dynamic> days = const {};
+  bool loading = false;
+  String? error;
+  String dayKey(DateTime d) => '${d.year.toString().padLeft(4,'0')}-${d.month.toString().padLeft(2,'0')}-${d.day.toString().padLeft(2,'0')}';
+  @override
+  void initState() { super.initState(); refresh(); }
+  Future<void> refresh() async {
+    setState(() { loading = true; error = null; });
+    final first = DateTime(month.year, month.month, 1);
+    final last = DateTime(month.year, month.month + 1, 0);
+    try {
+      final data = await FreshApi.signal().getJson('/v1/signals/calendar?start_date=${dayKey(first)}&end_date=${dayKey(last)}', timeout: const Duration(seconds: 20));
+      if (!mounted) return;
+      setState(() { days = data['days'] is Map ? Map<String,dynamic>.from(data['days'] as Map) : {}; loading = false; });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { error = e.toString(); loading = false; });
+    }
+  }
+  @override
+  Widget build(BuildContext context) {
+    final first = DateTime(month.year, month.month, 1);
+    final count = DateTime(month.year, month.month + 1, 0).day;
+    final offset = first.weekday % 7;
+    final selected = days.values.whereType<Map>().toList();
+    final targets = selected.fold<int>(0, (v,d) => v + ((d['targets'] as num?)?.toInt() ?? 0));
+    final stops = selected.fold<int>(0, (v,d) => v + ((d['stop_losses'] as num?)?.toInt() ?? 0));
+    final closed = targets + stops;
+    return ListView(padding: const EdgeInsets.all(12), children: [
+      Row(children: [
+        IconButton(onPressed: () { setState(() { month = DateTime(month.year, month.month - 1, 1); }); refresh(); }, icon: const Icon(Icons.chevron_left)),
+        Expanded(child: Text('${month.year}-${month.month.toString().padLeft(2,'0')} • Signal accuracy', textAlign: TextAlign.center, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900))),
+        IconButton(onPressed: () { setState(() { month = DateTime(month.year, month.month + 1, 1); }); refresh(); }, icon: const Icon(Icons.chevron_right)),
+        IconButton(onPressed: refresh, icon: const Icon(Icons.refresh)),
+      ]),
+      if (error != null) Card(child: Padding(padding: const EdgeInsets.all(12), child: Text('Calendar data unavailable: $error', style: const TextStyle(color: Colors.orangeAccent)))),
+      if (loading) const LinearProgressIndicator(),
+      Card(child: Padding(padding: const EdgeInsets.all(12), child: Wrap(spacing: 12, runSpacing: 8, children: [
+        Text('Targets: $targets', style: const TextStyle(color: Colors.greenAccent)),
+        Text('SL: $stops', style: const TextStyle(color: Colors.redAccent)),
+        Text('Closed: $closed'),
+        Text('Target hit rate: ${closed == 0 ? '—' : '${(targets * 100 / closed).toStringAsFixed(1)}%'}'),
+      ]))),
+      const Row(children: [Expanded(child: Center(child: Text('Sun'))),Expanded(child: Center(child: Text('Mon'))),Expanded(child: Center(child: Text('Tue'))),Expanded(child: Center(child: Text('Wed'))),Expanded(child: Center(child: Text('Thu'))),Expanded(child: Center(child: Text('Fri'))),Expanded(child: Center(child: Text('Sat')))]),
+      GridView.count(
+        crossAxisCount: 7, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+        children: [
+          for (var i = 0; i < offset; i++) const SizedBox.shrink(),
+          for (var d = 1; d <= count; d++) Builder(builder: (context) {
+            final row = days[dayKey(DateTime(month.year, month.month, d))] is Map ? Map<String,dynamic>.from(days[dayKey(DateTime(month.year, month.month, d))] as Map) : <String,dynamic>{};
+            final t = (row['targets'] as num?)?.toInt() ?? 0;
+            final sl = (row['stop_losses'] as num?)?.toInt() ?? 0;
+            final open = (row['open'] as num?)?.toInt() ?? 0;
+            return Card(color: t + sl == 0 ? null : t >= sl ? const Color(0xFF12352D) : const Color(0xFF3B2025), child: InkWell(
+              onTap: () => showDialog<void>(context: context, builder: (context) => AlertDialog(title: Text(dayKey(DateTime(month.year, month.month, d))), content: Text('Opened: ${row['signals_opened'] ?? 0}\nOpen: $open\nTargets: $t\nStop losses: $sl\nAccuracy: ${row['accuracy_percent'] == null ? 'Not enough closed outcomes' : '${row['accuracy_percent']}%'}'), actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))]),
+              child: Padding(padding: const EdgeInsets.all(3), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                Text('$d', style: const TextStyle(fontWeight: FontWeight.w800)),
+                if (t + sl > 0) Text('T$t / S$sl', style: const TextStyle(fontSize: 9)),
+                if (open > 0) Text('O$open', style: const TextStyle(fontSize: 9)),
+              ])),
+            ));
+          }),
+        ],
+      ),
+      const Text('Accuracy is based on closed shadow outcomes observed from market quotes, not actual broker fills. Open signals remain visible until a target/SL outcome is observed.', style: TextStyle(color: Colors.orangeAccent)),
+    ]);
+  }
+}
