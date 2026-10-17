@@ -169,7 +169,7 @@ class FreshApi {
   /// Try the canonical route first, then legacy aliases used by older
   /// Railway deployments. Only fall back for HTTP 404; authentication,
   /// broker and server errors must remain visible to the UI.
-  Future<Map<String, dynamic>> signals({int emaFast = 8, int emaSlow = 13}) async {
+  Future<Map<String, dynamic>> signals({int emaFast = 8, int emaSlow = 21}) async {
     final query = Uri(queryParameters: {
       'ema_fast': '$emaFast',
       'ema_slow': '$emaSlow',
