@@ -651,6 +651,8 @@ def _ensure_market_intelligence_scheduler() -> None:
 
 @app.on_event("startup")
 def _start_market_intelligence_scheduler_on_startup() -> None:
+    # Holiday refresh is best-effort and retains the checked-in last-known-good calendar.
+    start_refresh_scheduler()
     # Migrate legacy volume state only after a reachable PostgreSQL is available.
     # Keep /data as a fallback until diagnostics verifies row-count parity.
     if database_configured():
@@ -2747,6 +2749,14 @@ def _empty_payload(reason: str) -> dict[str, Any]:
 @app.websocket("/ws")
 async def market_snapshot_stream(websocket: WebSocket) -> None:
     """Stream broker-only nearest-future snapshots without running the slow signal fan-out."""
+    try:
+        authenticate_request(
+            authorization=websocket.headers.get("authorization", ""),
+            access_key=websocket.headers.get("x-api-access-key", ""),
+        )
+    except (AuthenticationError, AuthConfigurationError):
+        await websocket.close(code=1008, reason="Authentication required")
+        return
     await websocket.accept()
     symbol = (websocket.query_params.get("symbol") or "NIFTY").strip().upper()
     timeframe = (websocket.query_params.get("tf") or "1").strip().lower()
