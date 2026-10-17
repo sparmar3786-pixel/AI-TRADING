@@ -118,86 +118,142 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
   /// Actionable candidates must keep the same side and strike for 10 minutes.
   /// Any candidate change or failed validation returns the UI to WAIT. This is
   /// a conservative client-side confirmation gate, not a profit guarantee.
+  /// Validate server-owned confirmation; never create or advance the 600-second timer on-device.
   Future<Map<String, dynamic>> _applyTenMinuteSignalGate(Map<String, dynamic> response) async {
-    final prefs = await SharedPreferences.getInstance();
     final result = Map<String, dynamic>.from(response);
     final rawSignals = Map<String, dynamic>.from(result['signals'] as Map? ?? const {});
     final stableIndices = <String>{};
-    final now = DateTime.now().toUtc();
+    final nowUtc = DateTime.now().toUtc();
+
+    bool isBuy(String value) => value == 'CALL BUY' || value == 'PUT BUY';
+    double? positiveNumber(dynamic value) {
+      if (value is! num) return null;
+      final parsed = value.toDouble();
+      return parsed.isFinite && parsed > 0 ? parsed : null;
+    }
+
     for (final entry in rawSignals.entries) {
       final index = entry.key.toString().toUpperCase();
       final row = Map<String, dynamic>.from(entry.value as Map? ?? const {});
-      final decision = (row['decision'] ?? 'WAIT').toString().toUpperCase();
+      final rawDecision = (row['decision'] ?? 'WAIT').toString().toUpperCase();
+      final rawCandidate = (row['candidate_decision'] ?? rawDecision).toString().toUpperCase();
+      final candidateDecision = isBuy(rawCandidate)
+          ? rawCandidate
+          : isBuy(rawDecision) ? rawDecision : 'WAIT';
+      final wantsBuy = isBuy(candidateDecision);
+
       final validation = Map<String, dynamic>.from(row['live_validation'] as Map? ?? const {});
-      final guards = (row['guards'] as List?) ?? const <dynamic>[];
-      final isCandidate = (decision == 'CALL BUY' || decision == 'PUT BUY') &&
-          row['strike'] != null && row['option_side'] != null &&
-          row['entry'] != null && row['stop_loss'] != null && row['target'] != null &&
-          validation['verdict'] == 'PASS' && guards.isEmpty;
+      final blocks = List<dynamic>.from(validation['blocks'] as List? ?? const []);
+      final guards = List<dynamic>.from(row['guards'] as List? ?? const []);
+      final timestamp = DateTime.tryParse(row['timestamp']?.toString() ?? '')?.toUtc();
+      final signalAgeSeconds = timestamp == null ? null : nowUtc.difference(timestamp).inSeconds;
+      final signalFresh = row['data_fresh'] == true &&
+          signalAgeSeconds != null &&
+          signalAgeSeconds >= 0 &&
+          signalAgeSeconds <= 120;
+
+      final strike = positiveNumber(row['strike']);
+      final entryPrice = positiveNumber(row['entry']);
+      final stopLoss = positiveNumber(row['stop_loss']);
+      final target = positiveNumber(row['target']);
+      final validTradeNumbers = strike != null && entryPrice != null &&
+          stopLoss != null && target != null &&
+          stopLoss < entryPrice && target > entryPrice;
+      final side = (row['option_side'] ?? '').toString().toUpperCase();
+      final sideMatchesDecision =
+          (candidateDecision == 'CALL BUY' && side == 'CE') ||
+          (candidateDecision == 'PUT BUY' && side == 'PE');
+      final candidateIsValid = wantsBuy && signalFresh && validTradeNumbers &&
+          sideMatchesDecision && validation['verdict'] == 'PASS' && guards.isEmpty;
+
       final serverStability = Map<String, dynamic>.from(row['signal_stability'] as Map? ?? const {});
-      if (isCandidate && row['data_fresh'] == true && serverStability['state'] == 'CONFIRMED') {
-        // The server already enforced 600 seconds of continuous market evidence;
-        // don't accidentally impose a second ten-minute wait on the same signal.
+      final requiredSeconds = serverStability['required_seconds'] is num
+          ? (serverStability['required_seconds'] as num).toInt()
+          : serverStability['required_minutes'] is num
+              ? ((serverStability['required_minutes'] as num) * 60).toInt()
+              : 0;
+      final since = DateTime.tryParse(serverStability['since_utc']?.toString() ?? '')?.toUtc();
+      final lastSeen = DateTime.tryParse(serverStability['last_seen_utc']?.toString() ?? '')?.toUtc();
+      final elapsedSeconds = since != null && lastSeen != null && !lastSeen.isBefore(since)
+          ? lastSeen.difference(since).inSeconds : null;
+      final lastSeenAgeSeconds = lastSeen == null ? null : nowUtc.difference(lastSeen).inSeconds;
+      final lastSeenFresh = lastSeenAgeSeconds != null && lastSeenAgeSeconds.abs() <= 120;
+      final serverConfirmed = candidateIsValid &&
+          rawDecision == candidateDecision &&
+          serverStability['state'] == 'CONFIRMED' &&
+          requiredSeconds >= 600 &&
+          elapsedSeconds != null &&
+          elapsedSeconds >= requiredSeconds &&
+          lastSeenFresh;
+
+      row['candidate_decision'] = candidateDecision;
+      if (!candidateIsValid) {
+        if (wantsBuy || isBuy(rawDecision)) {
+          row['decision'] = 'WAIT';
+          if (validation['verdict'] != 'PASS') {
+            blocks.add('Server live validation is not PASS; candidate remains WAIT.');
+          }
+          if (guards.isNotEmpty) blocks.add('Signal blocked by risk guards: ${guards.join(', ')}');
+          if (!signalFresh) blocks.add('Signal timestamp missing, stale, malformed, or not marked data_fresh.');
+          if (!validTradeNumbers) blocks.add('Strike, entry, stop-loss and target must be valid positive prices.');
+          if (!sideMatchesDecision) blocks.add('Option side conflicts with candidate decision.');
+          validation['decision'] = 'WAIT';
+          validation['verdict'] = validation['verdict'] == 'FAIL' ? 'FAIL' : 'WARN';
+          validation['blocks'] = blocks.map((item) => item.toString()).toSet().toList();
+          row['live_validation'] = validation;
+        }
+        row['signal_stability'] = <String, dynamic>{
+          'state': 'NOT_ACTIONABLE',
+          'required_minutes': 10,
+          'server_confirmed': false,
+        };
+        rawSignals[entry.key] = row;
+        continue;
+      }
+
+      if (serverConfirmed) {
         stableIndices.add(index);
+        row['decision'] = candidateDecision;
         row['signal_stability'] = <String, dynamic>{
           ...serverStability,
+          'state': 'CONFIRMED',
           'required_minutes': 10,
+          'required_seconds': requiredSeconds,
+          'elapsed_seconds': elapsedSeconds,
+          'remaining_seconds': 0,
           'server_confirmed': true,
         };
         rawSignals[entry.key] = row;
         continue;
       }
-      final storageKey = 'ai_trading_signal_gate_$index';
-      if (!isCandidate) {
-        await prefs.remove(storageKey);
-        row['signal_stability'] = <String, dynamic>{'state': 'NOT_ACTIONABLE', 'required_minutes': 10};
-        rawSignals[entry.key] = row;
-        continue;
-      }
-      final candidateKey = '$decision|${row['strike']}|${row['option_side']}';
-      final savedRaw = prefs.getString(storageKey);
-      Map<String, dynamic>? saved;
-      if (savedRaw != null) {
-        try {
-          final parsed = jsonDecode(savedRaw);
-          if (parsed is Map) saved = Map<String, dynamic>.from(parsed);
-        } catch (_) { saved = null; }
-      }
-      final lastSeen = DateTime.tryParse(saved?['last_seen_utc']?.toString() ?? '')?.toUtc();
-      final gapTooLong = lastSeen == null || now.difference(lastSeen).inSeconds > 60;
-      if (saved == null || saved['candidate'] != candidateKey || saved['since_utc'] == null || gapTooLong) {
-        saved = <String, dynamic>{'candidate': candidateKey, 'since_utc': now.toIso8601String()};
-      }
-      saved['last_seen_utc'] = now.toIso8601String();
-      await prefs.setString(storageKey, jsonEncode(saved));
-      final since = DateTime.tryParse(saved['since_utc'].toString())?.toUtc() ?? now;
-      final elapsed = now.difference(since).inSeconds;
-      final remaining = (600 - elapsed).clamp(0, 600);
-      row['candidate_decision'] = decision;
-      if (elapsed < 600) {
-        row['decision'] = 'WAIT';
-        final gatedValidation = Map<String, dynamic>.from(validation);
-        gatedValidation['decision'] = 'WAIT';
-        gatedValidation['verdict'] = 'WARN';
-        final blocks = List<dynamic>.from(gatedValidation['blocks'] as List? ?? const []);
-        if (!blocks.any((item) => item.toString().contains('10-minute stability gate'))) {
-          blocks.add('10-minute stability gate: candidate must remain unchanged for 600 seconds');
-        }
-        gatedValidation['blocks'] = blocks;
-        row['live_validation'] = gatedValidation;
-        row['signal_stability'] = <String, dynamic>{
-          'state': 'CONFIRMING', 'required_minutes': 10, 'elapsed_seconds': elapsed,
-          'remaining_seconds': remaining, 'since_utc': since.toIso8601String(),
-        };
-      } else {
-        stableIndices.add(index);
-        row['signal_stability'] = <String, dynamic>{
-          'state': 'CONFIRMED', 'required_minutes': 10, 'elapsed_seconds': elapsed,
-          'remaining_seconds': 0, 'since_utc': since.toIso8601String(),
-        };
-      }
+
+      // Client countdown is derived only from timestamps authored by the server.
+      // Missing or inconsistent metadata must never turn a signal into CONFIRMED.
+      final serverConfirming = serverStability['state'] == 'CONFIRMING' &&
+          requiredSeconds >= 600 &&
+          elapsedSeconds != null &&
+          elapsedSeconds < requiredSeconds &&
+          lastSeenFresh;
+      row['decision'] = 'WAIT';
+      row['signal_stability'] = <String, dynamic>{
+        ...serverStability,
+        'state': serverConfirming ? 'CONFIRMING' : 'NOT_ACTIONABLE',
+        'required_minutes': 10,
+        'required_seconds': requiredSeconds >= 600 ? requiredSeconds : 600,
+        if (serverConfirming) 'elapsed_seconds': elapsedSeconds,
+        if (serverConfirming) 'remaining_seconds': (requiredSeconds - (elapsedSeconds ?? 0)).clamp(0, requiredSeconds),
+        'server_confirmed': false,
+      };
+      validation['decision'] = 'WAIT';
+      validation['verdict'] = validation['verdict'] == 'FAIL' ? 'FAIL' : 'WARN';
+      blocks.add(serverConfirming
+          ? 'Waiting for the backend-owned 600-second confirmation gate.'
+          : 'Backend has not supplied verifiable server-owned confirmation metadata.');
+      validation['blocks'] = blocks.map((item) => item.toString()).toSet().toList();
+      row['live_validation'] = validation;
       rawSignals[entry.key] = row;
     }
+
     result['signals'] = rawSignals;
     final plans = (result['trade_plans'] as List? ?? const [])
         .whereType<Map>()
