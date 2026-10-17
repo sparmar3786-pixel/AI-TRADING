@@ -199,6 +199,41 @@ _option_history: dict[str, dict[str, float]] = {}
 _footprint_history: dict[str, list[dict[str, Any]]] = {}
 _footprint_history_interval: dict[str, str] = {}
 
+_rate_limit_lock = threading.Lock()
+_rate_limit_windows: dict[tuple[str, str], list[float]] = {}
+_RATE_WINDOW_SECONDS = 60.0
+
+
+def _rate_limit_policy(path: str, method: str) -> tuple[str, int]:
+    normalized = path.rstrip("/") or "/"
+    if normalized.startswith(("/v1/ai/", "/v1/providers/")) or normalized == "/v1/market-intelligence/refresh":
+        return "provider", 30
+    if method.upper() == "POST" and (
+        normalized.startswith(("/v1/angel/connect", "/v1/instruments/sync", "/v1/stream/start",
+                               "/v1/backtest/", "/v1/research/", "/v1/paper/trades"))
+    ):
+        return "mutation", 30
+    return "general", 300
+
+
+def _consume_rate_limit(identity: str, bucket: str, limit: int, now: float | None = None) -> tuple[bool, int]:
+    moment = time.monotonic() if now is None else now
+    key = (identity or "unknown", bucket)
+    with _rate_limit_lock:
+        window = [stamp for stamp in _rate_limit_windows.get(key, []) if moment - stamp < _RATE_WINDOW_SECONDS]
+        if len(window) >= limit:
+            _rate_limit_windows[key] = window
+            return False, max(1, int(_RATE_WINDOW_SECONDS - (moment - window[0])))
+        window.append(moment)
+        _rate_limit_windows[key] = window
+        if len(_rate_limit_windows) > 4096:
+            expired = [candidate for candidate, stamps in _rate_limit_windows.items()
+                       if not stamps or moment - stamps[-1] >= _RATE_WINDOW_SECONDS]
+            for candidate in expired[:2048]:
+                _rate_limit_windows.pop(candidate, None)
+        return True, max(0, limit - len(window))
+
+
 def _record_request_metric(path: str, status_code: int, elapsed_ms: float, response_bytes: int | None) -> None:
     with _lock:
         item = dict(_request_metrics.get(path) or {"count": 0, "errors": 0, "total_ms": 0.0})
@@ -220,11 +255,29 @@ def _record_request_metric(path: str, status_code: int, elapsed_ms: float, respo
 @app.middleware("http")
 async def request_timing_middleware(request, call_next):
     started = time.perf_counter()
+    path = request.url.path
+    if path not in {"/health", "/favicon.ico"} and request.method.upper() != "OPTIONS":
+        client_host = request.client.host if request.client else "unknown"
+        bucket, limit = _rate_limit_policy(path, request.method)
+        allowed, remaining = _consume_rate_limit(client_host, bucket, limit)
+        if not allowed:
+            elapsed_ms = (time.perf_counter() - started) * 1000
+            response = JSONResponse(
+                status_code=429,
+                content={"detail": "Rate limit exceeded; retry after the supplied interval."},
+                headers={"Retry-After": str(remaining), "X-RateLimit-Limit": str(limit), "X-RateLimit-Remaining": "0"},
+            )
+            response.headers["X-Response-Time-Ms"] = f"{elapsed_ms:.1f}"
+            _record_request_metric(path, 429, elapsed_ms, None)
+            return response
+    else:
+        remaining = None
+        limit = None
     try:
         response = await call_next(request)
     except Exception:
         elapsed_ms = (time.perf_counter() - started) * 1000
-        _record_request_metric(request.url.path, 500, elapsed_ms, None)
+        _record_request_metric(path, 500, elapsed_ms, None)
         raise
     elapsed_ms = (time.perf_counter() - started) * 1000
     try:
@@ -233,7 +286,10 @@ async def request_timing_middleware(request, call_next):
         response_bytes = None
     response.headers["X-Response-Time-Ms"] = f"{elapsed_ms:.1f}"
     response.headers["Server-Timing"] = f"app;dur={elapsed_ms:.1f}"
-    _record_request_metric(request.url.path, response.status_code, elapsed_ms, response_bytes)
+    if limit is not None:
+        response.headers["X-RateLimit-Limit"] = str(limit)
+        response.headers["X-RateLimit-Remaining"] = str(remaining or 0)
+    _record_request_metric(path, response.status_code, elapsed_ms, response_bytes)
     return response
 
 
