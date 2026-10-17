@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - fix/cloud-nvidia-ai-truthful-status-20261015
+      - fix/server-authoritative-quant-lab-20261017
     paths:
       - 'src/**'
       - 'package.json'
