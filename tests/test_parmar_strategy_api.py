@@ -73,7 +73,7 @@ def test_verify_wiring_reports_hero_zero_candidate_pipeline_but_keeps_it_wait_ga
     result = response.json()
     assert result["status"] == "WAIT"
     assert result["live_api_wiring"] == "CANDIDATE_PIPELINE_WIRED; ACTIONABILITY_NOT_VERIFIED"
-    assert result["candidate_route"] == "/v1/signals.hero_zero"
+    assert result["candidate_route"] == "/v1/signals.strategy_candidates.hero_zero"
     assert result["checks"]["candidate_pipeline_wired"] is True
     assert result["checks"]["fresh_live_market_data"] is False
     assert result["checks"]["risk_gate_verified"] is False
@@ -104,7 +104,10 @@ def test_direct_evaluate_never_trusts_caller_snapshot_or_emits_trade_levels():
     assert result["target"] is None
     assert result["strike"] is None
     assert result["live_validation"]["decision"] == "WAIT"
-    assert "ADAPTER_NOT_REGISTERED" in result["guards"]
+    assert "NO_ACTIONABLE_SIGNAL" in result["guards"]
+    assert result["candidate_snapshot"]["candidate_decision"] is None
+    assert result["candidate_snapshot"]["data_fresh"] is False
+    assert result["order_placement_enabled"] is False
 
 
 def test_verify_wiring_rejects_unknown_strategy_and_invalid_device():
@@ -192,3 +195,60 @@ def test_require_adapter_refreshes_expired_profile_cache(monkeypatch):
     monkeypatch.setattr(backend_main, "_start_stream", lambda adapter: None)
     assert backend_main._require_adapter() is fake
     assert fake.profile_calls == 1
+
+
+def test_evaluate_uses_canonical_strategy_candidate_not_caller_snapshot(monkeypatch):
+    canonical_layers = {
+        key: {"pass": True}
+        for key in ("data_quality", "trend_sentiment", "order_flow", "option_selection", "risk_levels")
+    }
+    monkeypatch.setattr(backend_main, "_get_signals", lambda: {
+        "generated_at": "2026-10-17T10:00:00+05:30",
+        "signals": {
+            "NIFTY": {
+                "data_fresh": True,
+                "layers": canonical_layers,
+                "live_validation": {"checks": {"risk_checks": True}},
+                "signal_stability": {"state": "CONFIRMED"},
+                "strategy_candidates": {
+                    "ema_crossover": {
+                        "strategy_id": "ema_crossover",
+                        "decision": "WAIT",
+                        "candidate_decision": "CALL BUY",
+                        "entry": 25000.0,
+                        "stop_loss": 24950.0,
+                        "target": 25100.0,
+                        "entry_price_basis": "UNDERLYING_SPOT",
+                        "timestamp": "2026-10-17T10:00:00+05:30",
+                        "data_fresh": True,
+                        "reasons": ["EMA crossover candidate"],
+                        "guards": ["OPTION_CONTRACT_MAPPING_REQUIRED"],
+                    }
+                },
+            }
+        },
+    })
+    client = TestClient(app)
+    response = client.post(
+        "/v1/parmar/evaluate",
+        headers=DEVICE_HEADERS,
+        json={
+            "strategy_id": "ema_crossover",
+            "index": "NIFTY",
+            "market_snapshot": {"underlying_ltp": -1, "option_chain": [{"strike": 0, "ltp": 0}]},
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["candidate_decision"] == "CALL BUY"
+    assert result["candidate_snapshot"]["entry"] == 25000.0
+    assert result["candidate_snapshot"]["entry_price_basis"] == "UNDERLYING_SPOT"
+    assert result["decision"] == "WAIT"
+    assert result["entry"] is None
+    assert result["stop_loss"] is None
+    assert result["target"] is None
+    assert result["strike"] is None
+    assert result["order_placement_enabled"] is False
+    assert result["checks"]["five_layer_quant_pass"] is True
+    assert result["checks"]["ten_minute_confirmation"] is True
