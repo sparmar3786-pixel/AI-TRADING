@@ -133,17 +133,17 @@ export const SettingsPage: React.FC = () => {
             <div className="space-y-1">
               <div className="flex items-center space-x-2">
                 <span className="text-emerald-400 font-black text-xs uppercase font-mono tracking-wide">
-                  Ready to Use • कोई API Key की ज़रूरत नहीं है
+                  Signal-only • Live data verification required
                 </span>
                 <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold">
-                  ACTIVE
+                  GUARDED
                 </span>
               </div>
               <p className="text-xs text-slate-200 font-semibold leading-relaxed">
-                आपको कोई भी API Key बनाने या डालने की बिल्कुल ज़रूरत नहीं है!
+                Provider credentials backend पर सुरक्षित रूप से configure होने चाहिए; इस browser में provider secrets store नहीं किए जाते।
               </p>
               <p className="text-[11px] text-slate-300 leading-relaxed">
-                यह टर्मिनल तुरंत <strong>₹10,00,000 वर्चुअल बैलेंस</strong>, <strong>10-Minute Signal Stability Gate</strong>, <strong>5-Layer Quant Engine</strong> और <strong>Option Chain</strong> के साथ पूरी तरह चालू है। आप अभी Dashboard, Signals या Paper Trading से तुरंत ट्रेडिंग शुरू कर सकते हैं।
+                यह paper-trading terminal है। Live market snapshots और valid option quotes उपलब्ध न होने पर prices N/A दिखेंगे और paper orders block होंगे। 10-minute stability gate केवल fully validated live candidates पर लागू होता है।
               </p>
             </div>
           </div>
@@ -152,19 +152,19 @@ export const SettingsPage: React.FC = () => {
           <div className="mt-3 pt-3 border-t border-emerald-500/20 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] font-mono">
             <div className="flex items-center space-x-1.5 text-emerald-400">
               <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>₹10L Paper Trading: Ready</span>
+              <span>Paper trading: live quote gated</span>
             </div>
             <div className="flex items-center space-x-1.5 text-emerald-400">
               <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>10m Signal Gate: Ready</span>
+              <span>10m gate: validation required</span>
             </div>
             <div className="flex items-center space-x-1.5 text-emerald-400">
               <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>5-Layer Quant: Ready</span>
+              <span>Quant: backend result required</span>
             </div>
             <div className="flex items-center space-x-1.5 text-cyan-400">
               <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Option Chain: Ready</span>
+              <span>Option chain: live quotes required</span>
             </div>
           </div>
         </div>
