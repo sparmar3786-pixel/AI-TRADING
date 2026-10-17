@@ -285,7 +285,6 @@ def test_evaluate_uses_canonical_strategy_candidate_not_caller_snapshot(monkeypa
             "market_snapshot": {"underlying_ltp": -1, "option_chain": [{"strike": 0, "ltp": 0}]},
         },
     )
-
     assert response.status_code == 200, response.text
     result = response.json()
     assert result["candidate_decision"] == "CALL BUY"
