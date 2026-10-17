@@ -236,6 +236,61 @@ class FiveLayerEngineTests(unittest.TestCase):
         self.assertIsNone(expired["stop_loss"])
         self.assertIsNone(expired["target"])
 
+    def test_strike_change_restarts_ten_minute_confirmation(self):
+        first = evaluate_five_layer_signal(self.snapshot, now=self.now)
+        state = first["confirmation_state"]
+        changed_now = self.now + timedelta(seconds=30)
+        changed_snapshot = dict(self.snapshot)
+        changed_snapshot["observed_at"] = changed_now.isoformat()
+        changed_snapshot["option_chain"] = [
+            dict(self.snapshot["option_chain"][0], strike=22050, timestamp=changed_now.isoformat())
+        ]
+        result = evaluate_five_layer_signal(
+            changed_snapshot, now=changed_now, confirmation_state=state
+        )
+        self.assertEqual(result["decision"], "WAIT")
+        self.assertEqual(result["confirmation"]["state"], "CONFIRMING")
+        self.assertNotEqual(
+            result["confirmation_state"]["candidate_key"],
+            state["candidate_key"],
+        )
+        self.assertEqual(result["confirmation_state"]["since_utc"], changed_now.isoformat())
+
+    def test_direction_change_restarts_ten_minute_confirmation(self):
+        first = evaluate_five_layer_signal(self.snapshot, now=self.now)
+        state = first["confirmation_state"]
+        changed_now = self.now + timedelta(seconds=30)
+        changed_snapshot = dict(self.snapshot)
+        changed_snapshot["observed_at"] = changed_now.isoformat()
+        changed_snapshot["sentiment_score"] = -0.55
+        changed_snapshot["indicators"] = {
+            "ema_fast_8": 22000, "ema_slow_21": 22010,
+            "rsi_14": 39, "macd_histogram": -2.5, "vwap": 22020,
+        }
+        changed_snapshot["timeframe_closes"] = {
+            "5m": [22010, 22000, 21995, 21985, 21970],
+            "15m": [22040, 22020, 22000, 21980, 21960],
+            "1h": [22100, 22080, 22050, 22020, 21970],
+        }
+        changed_snapshot["order_flow"] = {
+            "bid": 99.9, "ask": 100.1, "ltp": 100.0,
+            "buy_volume": 400, "sell_volume": 600,
+        }
+        changed_snapshot["option_chain"] = [
+            dict(self.snapshot["option_chain"][0], option_type="PUT", delta=-0.52,
+                 timestamp=changed_now.isoformat())
+        ]
+        result = evaluate_five_layer_signal(
+            changed_snapshot, now=changed_now, confirmation_state=state
+        )
+        self.assertEqual(result["decision"], "WAIT")
+        self.assertEqual(result["confirmation"]["state"], "CONFIRMING")
+        self.assertNotEqual(
+            result["confirmation_state"]["candidate_key"],
+            state["candidate_key"],
+        )
+        self.assertEqual(result["confirmation_state"]["since_utc"], changed_now.isoformat())
+
     def test_invalid_order_flow_blocks_signal(self):
         self.snapshot["order_flow"]["ask"] = 99.0
         result = evaluate_five_layer_signal(self.snapshot, now=self.now)
