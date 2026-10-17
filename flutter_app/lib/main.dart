@@ -1611,7 +1611,7 @@ class _SignalCalendarPageState extends State<SignalCalendarPage> {
                     context: context,
                     builder: (context) => AlertDialog(
                       title: Text(dayKey(DateTime(month.year, month.month, d))),
-                      content: Text('Opened: ${row['signals_opened'] ?? 0}\\nOpen: $open\\nTargets: $t\\nStop losses: $sl\\nAccuracy: ${row['accuracy_percent'] == null ? 'Not enough closed outcomes' : '${row['accuracy_percent']}%'}'),
+                      content: Text('Opened: ${row['signals_opened'] ?? 0}\nOpen: $open\nTargets: $t\nStop losses: $sl\nAccuracy: ${row['accuracy_percent'] == null ? 'Not enough closed outcomes' : '${row['accuracy_percent']}%'}'),
                       actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
                     ),
                   );
