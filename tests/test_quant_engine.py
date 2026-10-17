@@ -11,6 +11,10 @@ class FiveLayerEngineTests(unittest.TestCase):
             "observed_at": self.now.isoformat(),
             "underlying_ltp": 22010,
             "sentiment_score": 0.55,
+            "indicators": {
+                "ema_fast_8": 22010, "ema_slow_21": 22000,
+                "rsi_14": 61, "macd_histogram": 2.5, "vwap": 21980,
+            },
             "timeframe_closes": {
                 "5m": [21970, 21980, 21995, 22000, 22010],
                 "15m": [21930, 21945, 21960, 21980, 22000],
@@ -112,6 +116,24 @@ class FiveLayerEngineTests(unittest.TestCase):
         )
         self.assertEqual(result["decision"], "WAIT")
         self.assertEqual(result["confirmation"]["state"], "CONFIRMING")
+
+    def test_missing_indicator_evidence_blocks_layer_two(self):
+        snapshot = dict(self.snapshot)
+        snapshot.pop("indicators")
+        result = evaluate_five_layer_signal(snapshot, now=self.now)
+        self.assertEqual(result["decision"], "WAIT")
+        self.assertFalse(result["layers"]["trend_sentiment"]["pass"])
+        self.assertFalse(result["layers"]["trend_sentiment"]["indicators_complete"])
+        self.assertEqual(len(result["layers"]["trend_sentiment"]["missing_indicators"]), 5)
+        self.assertIsNone(result["entry"])
+
+    def test_partial_indicator_evidence_blocks_layer_two(self):
+        snapshot = dict(self.snapshot)
+        snapshot["indicators"] = {"ema_fast_8": 22010, "ema_slow_21": 22000}
+        result = evaluate_five_layer_signal(snapshot, now=self.now)
+        self.assertEqual(result["decision"], "WAIT")
+        self.assertFalse(result["layers"]["trend_sentiment"]["pass"])
+        self.assertFalse(result["layers"]["trend_sentiment"]["indicators_complete"])
 
     def test_conflicting_timeframes_block_signal(self):
         self.snapshot["timeframe_closes"]["15m"] = [22010, 22000, 21990, 21980, 21970]
