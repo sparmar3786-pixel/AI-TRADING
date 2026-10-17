@@ -53,7 +53,10 @@ jobs:
             exit 1
           fi
           grep -Fq "Strategies" flutter_app/lib/main.dart
-          echo "Repository-link, AI-removal, and strategy-tab source guards passed."
+          grep -Fq "final signalApi = FreshApi.signal();" flutter_app/lib/main.dart
+          grep -Fq "signalApi.signals(emaFast: emaFast, emaSlow: emaSlow)" flutter_app/lib/main.dart
+          grep -Fq "FreshApi.signal().angelStatus()" flutter_app/lib/main.dart
+          echo "Repository-link, AI-removal, strategy-tab and signal-backend routing guards passed."
       - name: Install Flutter dependencies
         run: flutter pub get
       - name: Analyze Dart
