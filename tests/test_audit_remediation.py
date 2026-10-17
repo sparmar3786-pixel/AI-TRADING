@@ -138,7 +138,7 @@ class AuditRemediationTests(unittest.TestCase):
             self.assertIsNone(rows[0]["exit_price"])
             self.assertEqual(rows[0]["pnl_status"], "UNRESOLVED_NO_SETTLEMENT_EVIDENCE")
             self.assertEqual(report["expired_unresolved_count"], 1)
-            self.assertEqual(report["metrics"]["closed_count"], 0) if "closed_count" in report["metrics"] else self.assertEqual(report["metrics"]["trade_count"], 0)
+            self.assertEqual(report["metrics"]["closed_count"], 0)
 
     def test_event_journal_records_quant_and_strategy_transitions_without_polling_duplicates(self):
         with tempfile.TemporaryDirectory() as folder:
