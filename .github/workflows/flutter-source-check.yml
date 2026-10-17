@@ -56,7 +56,9 @@ jobs:
           grep -Fq "final signalApi = FreshApi.signal();" flutter_app/lib/main.dart
           grep -Fq "signalApi.signals(emaFast: emaFast, emaSlow: emaSlow)" flutter_app/lib/main.dart
           grep -Fq "FreshApi.signal().angelStatus()" flutter_app/lib/main.dart
-          echo "Repository-link, AI-removal, strategy-tab and signal-backend routing guards passed."
+          grep -Fq "generalApiOnline = await _probeGeneralBackend(api);" flutter_app/lib/main.dart
+          grep -Fq "apiOnline = generalApiOnline || signalsEndpointOnline;" flutter_app/lib/main.dart
+          echo "Repository-link, AI-removal, strategy-tab, signal-backend routing and independent-health guards passed."
       - name: Install Flutter dependencies
         run: flutter pub get
       - name: Analyze Dart
