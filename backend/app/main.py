@@ -1319,6 +1319,30 @@ def _live_validation_contract(
         "order_placement_enabled": False,
     }
 
+def _clear_blocked_trade_levels(result: dict[str, Any]) -> dict[str, Any]:
+    """Keep a blocked candidate informational while removing all stale/executable levels."""
+    if str(result.get("decision") or "WAIT").upper() in ("CALL BUY", "PUT BUY"):
+        result["candidate_decision"] = result.get("decision")
+    result["decision"] = "WAIT"
+    fields = ("strike", "expiry", "option_side", "option_type", "entry", "stop_loss", "target")
+    for field in fields:
+        result[field] = None
+    for engine_key in ("five_layer_engine", "quant_engine"):
+        engine_payload = result.get(engine_key)
+        if isinstance(engine_payload, dict):
+            engine_payload["decision"] = "WAIT"
+            for field in fields:
+                engine_payload[field] = None
+    result["quant_engine"] = result.get("five_layer_engine") or result.get("quant_engine")
+    trade_plan = result.get("trade_plan")
+    if isinstance(trade_plan, dict):
+        trade_plan.update({
+            "selection_grade": "WAIT", "strike": None, "expiry": None,
+            "entry": None, "stop_loss": None, "target": None,
+        })
+    return result
+
+
 def _aggregate_hourly_chart_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Aggregate complete same-session 5-minute bars; never bridge overnight gaps."""
     buckets: dict[tuple[str, int], list[dict[str, Any]]] = {}
@@ -2223,25 +2247,8 @@ def _index_snapshot(
     ), None)
     live_validation = _live_validation_contract(result, engine_layers, option_age_seconds)
     if live_validation["verdict"] != "PASS":
-        if result.get("decision") in ("CALL BUY", "PUT BUY"):
-            result["candidate_decision"] = result.get("decision")
-        result["decision"] = "WAIT"
-        # A blocked final validator must clear every displayable trade level,
-        # not merely flip the decision text. Keep candidate_decision as research
-        # context only; it is never an executable signal.
-        for field in ("strike", "expiry", "option_side", "option_type", "entry", "stop_loss", "target"):
-            result[field] = None
-        for engine_key in ("five_layer_engine", "quant_engine"):
-            engine_payload = result.get(engine_key)
-            if isinstance(engine_payload, dict):
-                engine_payload["decision"] = "WAIT"
-                for field in ("strike", "expiry", "option_side", "option_type", "entry", "stop_loss", "target"):
-                    engine_payload[field] = None
-        result["quant_engine"] = result.get("five_layer_engine") or result.get("quant_engine")
-        result["trade_plan"].update({
-            "selection_grade": "WAIT", "strike": None, "expiry": None,
-            "entry": None, "stop_loss": None, "target": None,
-        })
+        # Candidate remains informational; every trade level is cleared.
+        _clear_blocked_trade_levels(result)
         existing_reasons = list(result.get("reasons") or [])
         existing_reasons.extend("VALIDATION_BLOCKED:" + item for item in live_validation["blocks"])
         result["reasons"] = list(dict.fromkeys(existing_reasons))
