@@ -148,6 +148,7 @@ void main() {
     expect(tabs, contains('Signals'));
     expect(tabs, contains('Strategies'));
     expect(tabs, contains('API'));
+    expect(tabs, isNot(contains('API & Railway')));
     expect(tabs, isNot(contains('AI Access')));
     expect(tabs, isNot(contains('AI Chat')));
     expect(tabs, isNot(contains('Quant Engine Lab')));
