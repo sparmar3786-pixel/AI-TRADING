@@ -1257,10 +1257,26 @@ def _wait_signal(index: str, reason: str) -> dict[str, Any]:
             "reason": "No complete live signal snapshot was produced.",
         },
     }
+    strategy_ids = (
+        "oi_price_action", "hero_zero", "failed_move_pdh_pdl",
+        "ema_crossover", "day_hl_liquidity_sweep", "orb", "vwap",
+    )
+    strategy_candidates = {
+        strategy_id: {
+            "strategy_id": strategy_id, "decision": "WAIT",
+            "candidate_decision": None, "actionable": False, "data_fresh": False,
+            "entry": None, "stop_loss": None, "target": None,
+            "strike": None, "expiry": None, "option_side": None,
+            "reasons": [reason],
+            "guards": ["NO_LIVE_MARKET_DATA", "STRATEGY_NOT_EVALUABLE"],
+        }
+        for strategy_id in strategy_ids
+    }
     return {
         "decision": "WAIT", "candidate_decision": "WAIT", "index": index,
         "entry": None, "stop_loss": None, "target": None, "strike": None,
         "expiry": None, "signal_only": True, "layers": {},
+        "strategy_candidates": strategy_candidates,
         "reasons": [reason], "signal_stability": {"state": "BLOCKED", "required_minutes": 10, "required_seconds": 600},
         "data_source": "angelone_smartapi", "data_fresh": False,
         "five_layer_engine": dict(engine),
@@ -1368,8 +1384,15 @@ def _live_validation_contract(
     stop = _number(result.get("stop_loss"))
     target = _number(result.get("target"))
     valid_levels = entry is not None and stop is not None and target is not None and 0 < stop < entry < target
-    five_layer_pass = len(engine_layers) >= 5 and all(
-        isinstance(layer, dict) and layer.get("pass") is True for layer in engine_layers.values()
+    required_layer_keys = (
+        "data_quality", "trend_sentiment", "order_flow",
+        "option_selection", "risk_levels",
+    )
+    # Never let five unrelated/extra layers satisfy the canonical Quant contract.
+    five_layer_pass = all(
+        isinstance(engine_layers.get(key), dict)
+        and engine_layers[key].get("pass") is True
+        for key in required_layer_keys
     )
     risk_pass = risk_layer.get("pass") is True
     ai_conflict = False
@@ -1910,10 +1933,17 @@ def _index_snapshot(
             detail = f"Eligible contracts={raw_layer.get('candidate_count', 0)}; selected strike={raw_layer.get('strike', 'none')}; spread={raw_layer.get('spread_pct', 'unknown')}"
         else:
             detail = str(raw_layer.get("method") or "Valid option ATR, positive stop and target required.")
+        layer_status = (
+            "PASS" if passed
+            else "UNAVAILABLE" if not raw_layer or raw_layer.get("pass") is None
+            or raw_layer.get("status") == "UNAVAILABLE"
+            else "FAIL"
+        )
         display_layers[layer_key] = {
             **raw_layer,
             "name": layer_labels[layer_key],
-            "status": "PASS" if passed else "FAIL",
+            "status": layer_status,
+            "pass": passed,
             "detail": detail,
             "score": None,
         }
