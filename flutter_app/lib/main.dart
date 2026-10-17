@@ -1603,8 +1603,37 @@ class _SignalCalendarPageState extends State<SignalCalendarPage> {
             final t = (row['targets'] as num?)?.toInt() ?? 0;
             final sl = (row['stop_losses'] as num?)?.toInt() ?? 0;
             final open = (row['open'] as num?)?.toInt() ?? 0;
+            final records = row['signals'] is List ? (row['signals'] as List).whereType<Map>().toList() : <Map>[];
+            final engines = row['by_engine'] is Map ? Map<String,dynamic>.from(row['by_engine'] as Map) : <String,dynamic>{};
+            String engineLine(String label, dynamic raw) {
+              final m = raw is Map ? raw : <dynamic,dynamic>{};
+              final et = (m['targets'] as num?)?.toInt() ?? 0;
+              final es = (m['stop_losses'] as num?)?.toInt() ?? 0;
+              final eo = (m['open'] as num?)?.toInt() ?? 0;
+              final ea = m['accuracy_percent'] == null ? '—' : '${m['accuracy_percent']}%';
+              return '$label: T$et / SL$es / Open $eo / Accuracy $ea';
+            }
             return Card(color: t + sl == 0 ? null : t >= sl ? const Color(0xFF12352D) : const Color(0xFF3B2025), child: InkWell(
-              onTap: () => showDialog<void>(context: context, builder: (context) => AlertDialog(title: Text(dayKey(DateTime(month.year, month.month, d))), content: Text('Opened: ${row['signals_opened'] ?? 0}\nOpen: $open\nTargets: $t\nStop losses: $sl\nAccuracy: ${row['accuracy_percent'] == null ? 'Not enough closed outcomes' : '${row['accuracy_percent']}%'}'), actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))]),
+              onTap: () => showDialog<void>(context: context, builder: (context) => AlertDialog(
+                title: Text('${dayKey(DateTime(month.year, month.month, d))} • Signal records'),
+                content: SizedBox(width: double.maxFinite, child: SingleChildScrollView(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                  Text('Opened: ${row['signals_opened'] ?? 0}  |  Open: $open\nTargets: $t  |  Stop losses: $sl\nOverall accuracy: ${row['accuracy_percent'] == null ? '—' : '${row['accuracy_percent']}%'}'),
+                  const SizedBox(height: 10),
+                  Text(engineLine('Quant Engine', engines['QUANT_ENGINE'])),
+                  Text(engineLine('Parmar Strategy', engines['PARMAR_STRATEGY'])),
+                  const Divider(),
+                  if (records.isEmpty) const Text('No signal records saved for this date.'),
+                  for (final signal in records) Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: Text(
+                    '${signal['source_engine'] ?? 'QUANT_ENGINE'} • ${signal['strategy_name'] ?? signal['strategy'] ?? signal['signal_type'] ?? 'Signal'}\n'
+                    'ID: ${signal['outcome_id'] ?? signal['signal_id'] ?? '—'}\n'
+                    'Decision: ${signal['decision'] ?? signal['signal'] ?? '—'} • Status: ${signal['status'] ?? '—'}\n'
+                    'Entry: ${signal['entry_price'] ?? signal['entry'] ?? '—'} • SL: ${signal['stop_loss'] ?? '—'} • Target: ${signal['target'] ?? '—'}\n'
+                    'Strike: ${signal['strike'] ?? '—'} • Expiry: ${signal['expiry'] ?? '—'}\n'
+                    'Opened: ${signal['opened_at'] ?? signal['timestamp'] ?? '—'} • Closed: ${signal['closed_at'] ?? '—'} • Result: ${signal['exit_reason'] ?? 'OPEN'}',
+                  )),
+                ]))),
+                actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+              )),
               child: Padding(padding: const EdgeInsets.all(3), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                 Text('$d', style: const TextStyle(fontWeight: FontWeight.w800)),
                 if (t + sl > 0) Text('T$t / S$sl', style: const TextStyle(fontSize: 9)),
