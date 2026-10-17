@@ -163,6 +163,13 @@ _request_metrics: dict[str, dict[str, Any]] = {}
 _ai_provider_test_cache: dict[str, dict[str, Any]] = {}
 _confirmation_states: dict[str, dict[str, Any]] = {}
 
+# Short-lived, bounded cache for identical historical-candle requests. This only
+# reduces duplicate broker calls; it is never used by the live signal pipeline.
+HISTORICAL_CANDLE_CACHE_TTL_SECONDS = 30.0
+HISTORICAL_CANDLE_CACHE_MAX_ENTRIES = 128
+_historical_candle_cache: dict[tuple[str, str, str, str, str], tuple[float, list[Any]]] = {}
+_historical_candle_cache_lock = threading.Lock()
+
 
 def _load_persistent_confirmation_state(key: str) -> dict[str, Any] | None:
     """Load gate state only from durable server storage; memory-only timing is not authoritative."""
@@ -5397,7 +5404,6 @@ def signals(ema_fast: int = Query(default=8, ge=2, le=50), ema_slow: int = Query
 
 @app.post("/v1/backtest/historical")
 def historical_backtest(body: BacktestRequest, _: str = Depends(_device)) -> dict[str, Any]:
-    adapter = _require_adapter()
     index = body.index.strip().upper()
     if body.symboltoken:
         exchange = (body.exchange or "NSE").strip().upper()
@@ -5413,6 +5419,7 @@ def historical_backtest(body: BacktestRequest, _: str = Depends(_device)) -> dic
     end_value = body.to_date or body.todate
     if not start_value or not end_value:
         raise HTTPException(status_code=422, detail="from_date and to_date are required.")
+
     def bound(value: str, end: bool) -> str:
         text = value.strip()
         if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
@@ -5424,6 +5431,7 @@ def historical_backtest(body: BacktestRequest, _: str = Depends(_device)) -> dic
             return parsed.strftime("%Y-%m-%d %H:%M")
         except ValueError:
             raise HTTPException(status_code=422, detail="Dates must use YYYY-MM-DD or YYYY-MM-DD HH:MM.")
+
     start_text, end_text = bound(start_value, False), bound(end_value, True)
     start_dt = datetime.strptime(start_text, "%Y-%m-%d %H:%M").replace(tzinfo=IST)
     end_dt = datetime.strptime(end_text, "%Y-%m-%d %H:%M").replace(tzinfo=IST)
@@ -5434,10 +5442,43 @@ def historical_backtest(body: BacktestRequest, _: str = Depends(_device)) -> dic
     if body.interval not in {"ONE_MINUTE", "FIVE_MINUTE", "FIFTEEN_MINUTE", "ONE_HOUR"}:
         raise HTTPException(status_code=422, detail="Unsupported candle interval.")
 
-    try:
-        candles = adapter.candles(exchange, token, body.interval, start_text, end_text).get("candles") or []
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail="Angel One historical candle request failed; no synthetic backtest data was used.") from exc
+    cache_key = (exchange, token, body.interval, start_text, end_text)
+    cache_hit = False
+    cache_age_seconds = 0.0
+    now_monotonic = time.monotonic()
+    with _historical_candle_cache_lock:
+        cached = _historical_candle_cache.get(cache_key)
+        if cached and now_monotonic - cached[0] <= HISTORICAL_CANDLE_CACHE_TTL_SECONDS:
+            cache_age_seconds = max(0.0, now_monotonic - cached[0])
+            candles = list(cached[1])
+            cache_hit = True
+        else:
+            if cached:
+                _historical_candle_cache.pop(cache_key, None)
+            candles = []
+
+    if not cache_hit:
+        adapter = _require_adapter()
+        try:
+            candles = adapter.candles(exchange, token, body.interval, start_text, end_text).get("candles") or []
+        except Exception as exc:
+            message = str(exc).lower()
+            if any(marker in message for marker in ("rate_limited", "rate limit", "exceeding access rate", "access denied because of exceeding rate")):
+                raise HTTPException(
+                    status_code=429,
+                    detail="Angel One historical candle API is rate-limited. Wait before retrying; no synthetic backtest data was used.",
+                    headers={"Retry-After": "30"},
+                ) from None
+            logging.warning("Angel One historical candle request failed (error_type=%s)", type(exc).__name__)
+            raise HTTPException(status_code=502, detail="Angel One historical candle request failed; no synthetic backtest data was used.") from None
+        if candles:
+            stored_at = time.monotonic()
+            with _historical_candle_cache_lock:
+                if len(_historical_candle_cache) >= HISTORICAL_CANDLE_CACHE_MAX_ENTRIES:
+                    oldest_key = min(_historical_candle_cache, key=lambda key: _historical_candle_cache[key][0])
+                    _historical_candle_cache.pop(oldest_key, None)
+                _historical_candle_cache[cache_key] = (stored_at, list(candles))
+            cache_age_seconds = 0.0
     valid_rows = [
         row for row in candles
         if isinstance(row, (list, tuple)) and len(row) >= 6
@@ -5568,7 +5609,7 @@ def historical_backtest(body: BacktestRequest, _: str = Depends(_device)) -> dic
             "Excludes taxes, brokerage-specific charges, latency, margin, partial fills and real order-book execution.",
         ],
     }
-    return {"status": "ok", "source": "angelone_smartapi_historical_candles", "index": index, "exchange": exchange, "symboltoken": token, "interval": body.interval, "report": report}
+    return {"status": "ok", "source": "angelone_smartapi_historical_candles", "index": index, "exchange": exchange, "symboltoken": token, "interval": body.interval, "candles_cache_hit": cache_hit, "candles_cache_age_seconds": round(cache_age_seconds, 3), "report": report}
 
 # Parmar strategy suite is isolated from existing signal-generation routes.
 # Its API remains fail-closed until each strategy has a verified adapter.

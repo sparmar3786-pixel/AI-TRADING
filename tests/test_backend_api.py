@@ -18,6 +18,8 @@ class BackendApiTests(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(api.app)
         self.device_headers = {"X-Device-Id": "A" * 43}
+        with api._historical_candle_cache_lock:
+            api._historical_candle_cache.clear()
 
     def test_provider_json_retries_one_transient_503(self):
         class FakeResponse:
@@ -372,11 +374,42 @@ class BackendApiTests(unittest.TestCase):
             stamp = (start + timedelta(minutes=5 * index)).isoformat()
             candles.append([stamp, close, close + 1, close - 1, close, 1000])
         class FakeAdapter:
+            def __init__(self):
+                self.call_count = 0
+                self.last_request = None
+
             def candles(self, exchange, token, interval, fromdate, todate):
+                self.call_count += 1
                 self.last_request = (exchange, token, interval, fromdate, todate)
                 return {"candles": candles}
 
-        with patch.object(api, "_require_adapter", return_value=FakeAdapter()):
+        adapter = FakeAdapter()
+        payload = {
+            "index": "NIFTY", "from_date": "2026-10-01", "to_date": "2026-10-02",
+            "interval": "FIVE_MINUTE", "fast_ema": 8, "slow_ema": 13,
+            "atr_period": 14, "stop_atr": 1.5, "target_r": 2.0,
+            "max_hold_bars": 30, "slippage_r": 0.02, "transaction_cost_r": 0.02,
+        }
+        with patch.object(api, "_require_adapter", return_value=adapter):
+            response = self.client.post("/v1/backtest/historical", headers=self.device_headers, json=payload)
+            repeated = self.client.post("/v1/backtest/historical", headers=self.device_headers, json=payload)
+        self.assertEqual(response.status_code, 200, response.text)
+        report = response.json()["report"]
+        self.assertEqual(report["candle_count"], 100)
+        self.assertIn("metrics", report)
+        self.assertIn("trades", report)
+        self.assertIn("n", report["metrics"])
+        self.assertTrue(report["assumptions"])
+        self.assertFalse(response.json()["candles_cache_hit"])
+        self.assertTrue(repeated.json()["candles_cache_hit"])
+        self.assertEqual(adapter.call_count, 1)
+
+    def test_historical_backtest_maps_angel_rate_limit_to_retryable_429(self):
+        class RateLimitedAdapter:
+            def candles(self, *_args):
+                raise RuntimeError("rate_limited: Angel One candles endpoint rejected the request")
+
+        with patch.object(api, "_require_adapter", return_value=RateLimitedAdapter()):
             response = self.client.post(
                 "/v1/backtest/historical",
                 headers=self.device_headers,
@@ -387,13 +420,10 @@ class BackendApiTests(unittest.TestCase):
                     "max_hold_bars": 30, "slippage_r": 0.02, "transaction_cost_r": 0.02,
                 },
             )
-        self.assertEqual(response.status_code, 200, response.text)
-        report = response.json()["report"]
-        self.assertEqual(report["candle_count"], 100)
-        self.assertIn("metrics", report)
-        self.assertIn("trades", report)
-        self.assertIn("n", report["metrics"])
-        self.assertTrue(report["assumptions"])
+        self.assertEqual(response.status_code, 429, response.text)
+        self.assertEqual(response.headers.get("retry-after"), "30")
+        self.assertIn("rate-limited", response.json()["detail"])
+        self.assertIn("no synthetic backtest data", response.json()["detail"])
 
     def test_book_parser_does_not_invent_quotes_or_depth(self):
         self.assertEqual(api._book({}), (None, None, 0, 0))
