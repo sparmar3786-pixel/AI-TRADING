@@ -118,3 +118,62 @@ def test_verify_wiring_rejects_unknown_strategy_and_invalid_device():
     assert unknown.status_code == 404
     unauthenticated = client.get("/v1/parmar/strategies")
     assert unauthenticated.status_code == 401
+
+
+def test_evaluate_uses_canonical_strategy_candidate_not_caller_snapshot(monkeypatch):
+    import app.main as main_module
+
+    canonical_layers = {
+        key: {"pass": True}
+        for key in ("data_quality", "trend_sentiment", "order_flow", "option_selection", "risk_levels")
+    }
+    monkeypatch.setattr(main_module, "_get_signals", lambda: {
+        "generated_at": "2026-10-17T10:00:00+05:30",
+        "signals": {
+            "NIFTY": {
+                "data_fresh": True,
+                "layers": canonical_layers,
+                "live_validation": {"checks": {"risk_checks": True}},
+                "signal_stability": {"state": "CONFIRMED"},
+                "strategy_candidates": {
+                    "ema_crossover": {
+                        "strategy_id": "ema_crossover",
+                        "decision": "WAIT",
+                        "candidate_decision": "CALL BUY",
+                        "entry": 25000.0,
+                        "stop_loss": 24950.0,
+                        "target": 25100.0,
+                        "entry_price_basis": "UNDERLYING_SPOT",
+                        "timestamp": "2026-10-17T10:00:00+05:30",
+                        "data_fresh": True,
+                        "reasons": ["EMA crossover candidate"],
+                        "guards": ["OPTION_CONTRACT_MAPPING_REQUIRED"],
+                    }
+                },
+            }
+        },
+    })
+    client = TestClient(app)
+    response = client.post(
+        "/v1/parmar/evaluate",
+        headers=DEVICE_HEADERS,
+        json={
+            "strategy_id": "ema_crossover",
+            "index": "NIFTY",
+            "market_snapshot": {"underlying_ltp": -1, "option_chain": [{"strike": 0, "ltp": 0}]},
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["candidate_decision"] == "CALL BUY"
+    assert result["candidate_snapshot"]["entry"] == 25000.0
+    assert result["candidate_snapshot"]["entry_price_basis"] == "UNDERLYING_SPOT"
+    assert result["decision"] == "WAIT"
+    assert result["entry"] is None
+    assert result["stop_loss"] is None
+    assert result["target"] is None
+    assert result["strike"] is None
+    assert result["order_placement_enabled"] is False
+    assert result["checks"]["five_layer_quant_pass"] is True
+    assert result["checks"]["ten_minute_confirmation"] is True
