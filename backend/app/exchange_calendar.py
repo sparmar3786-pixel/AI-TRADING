@@ -54,11 +54,11 @@ _SPECIAL_2026 = [{
 }]
 _SEGMENTS = {"NSE_EQ", "NSE_FO", "BSE_EQ", "BSE_FO", "MCX"}
 _DATA: dict[str, Any] = {
-    "NSE_EQ": {"holidays": _rows(_COMMON_2026 + _NSE_ONLY_2026), "source_status": "CHECKED_IN_OFFICIAL_SNAPSHOT"},
-    "NSE_FO": {"holidays": _rows(_COMMON_2026 + _NSE_ONLY_2026), "source_status": "CHECKED_IN_OFFICIAL_SNAPSHOT"},
-    "BSE_EQ": {"holidays": _rows(_COMMON_2026), "source_status": "CHECKED_IN_COMMON_EXCHANGE_SNAPSHOT"},
-    "BSE_FO": {"holidays": _rows(_COMMON_2026), "source_status": "CHECKED_IN_COMMON_EXCHANGE_SNAPSHOT"},
-    "MCX": {"holidays": [], "source_status": "UNVERIFIED_NO_OFFICIAL_SNAPSHOT"},
+    "NSE_EQ": {"holidays": _rows(_COMMON_2026 + _NSE_ONLY_2026), "source_status": "CHECKED_IN_OFFICIAL_SNAPSHOT", "source_year": 2026},
+    "NSE_FO": {"holidays": _rows(_COMMON_2026 + _NSE_ONLY_2026), "source_status": "CHECKED_IN_OFFICIAL_SNAPSHOT", "source_year": 2026},
+    "BSE_EQ": {"holidays": _rows(_COMMON_2026), "source_status": "CHECKED_IN_COMMON_EXCHANGE_SNAPSHOT", "source_year": 2026},
+    "BSE_FO": {"holidays": _rows(_COMMON_2026), "source_status": "CHECKED_IN_COMMON_EXCHANGE_SNAPSHOT", "source_year": 2026},
+    "MCX": {"holidays": [], "source_status": "UNVERIFIED_NO_OFFICIAL_SNAPSHOT", "source_year": None},
 }
 for _segment in ("NSE_EQ", "NSE_FO", "BSE_EQ", "BSE_FO"):
     _DATA[_segment]["special_sessions"] = [dict(item) for item in _SPECIAL_2026] if _segment.startswith(("NSE", "BSE")) else []
@@ -182,6 +182,7 @@ def refresh_nse_calendar(timeout_seconds: float = 8.0) -> dict[str, Any]:
                     **_DATA.get(segment, {}),
                     "holidays": rows,
                     "source_status": "LIVE_REFRESHED_OFFICIAL_NSE",
+                    "source_year": year,
                     "source_url": NSE_SOURCE_URL,
                     "source_updated_at": datetime.now(timezone.utc).isoformat(),
                 }
@@ -215,14 +216,16 @@ def holidays_for(segment: str, year: int) -> dict[str, Any]:
     holiday_rows = [dict(item) for item in entry.get("holidays", []) if str(item.get("date", "")).startswith(f"{year}-")]
     special_rows = [dict(item) for item in entry.get("special_sessions", []) if str(item.get("date", "")).startswith(f"{year}-")]
     covered = entry.get("source_status") != "UNVERIFIED_NO_OFFICIAL_SNAPSHOT"
+    source_year = entry.get("source_year")
+    verified = bool(covered and source_year == year and holiday_rows)
     return {
         "segment": key,
         "year": year,
         "timezone": _TIMEZONE,
         "source_url": entry.get("source_url", NSE_SOURCE_URL if key.startswith("NSE") else None),
-        "source_as_of": entry.get("source_updated_at", SOURCE_AS_OF if year == 2026 else None),
-        "source_status": entry.get("source_status", "UNVERIFIED_NO_OFFICIAL_SNAPSHOT") if year == 2026 else ("LIVE_REFRESHED_OFFICIAL_NSE" if entry.get("source_updated_at") else "UNVERIFIED_NO_OFFICIAL_SNAPSHOT"),
-        "verified": bool(covered and (year == 2026 or entry.get("source_updated_at"))),
+        "source_as_of": entry.get("source_updated_at", SOURCE_AS_OF if source_year == 2026 else None),
+        "source_status": entry.get("source_status", "UNVERIFIED_NO_OFFICIAL_SNAPSHOT") if source_year == year else "UNVERIFIED_NO_OFFICIAL_SNAPSHOT",
+        "verified": verified,
         "holidays": holiday_rows,
         "special_sessions": special_rows,
         "note": "Dates are a last-known-good official-source snapshot. MCX has no verified calendar in this module; never infer MCX holidays from NSE/BSE.",
