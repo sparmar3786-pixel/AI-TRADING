@@ -94,3 +94,8 @@ Set `REDIS_URL` to a Railway Redis connection string and set a strong random `MA
 **Order safety:** this backend remains read-only and has no broker order-placement route. Do not add order placement to the chart or candle worker. Any future order service must be separate, validate freshness and deterministic risk gates again at submission, require explicit user authorization, and use a durable idempotency key before calling the broker.
 
 **Still required before production cutover:** verify token mapping against the current Angel One instrument master; configure Railway Redis/Postgres and separate worker service; run Flutter analysis, Android build and physical-device reconnect/gap tests; add Android background decode/visible-candle rendering only if profiling shows it is needed; and compare measured tick-to-screen latency against a baseline. Do not route live orders through the chart service.
+
+
+## Flutter client authentication rollout
+
+The Flutter API tab includes a Backend API Access field that stores the owner-provided key in platform secure storage and sends `X-API-Access-Key` on API requests, including the Android background signal poller. This is a staged single-owner gate, not per-user identity; Firebase ID-token verification with a narrow `AUTH_ALLOWED_UIDS` allow-list is preferred where user isolation is required. Roll out the compatible APK before setting `API_AUTH_MODE=required`; health-check success alone does not certify authenticated signal routes.

@@ -161,4 +161,29 @@ void main() {
     expect(requestedUri!.toString(),
         'https://example.test/v1/signals?ema_fast=8&ema_slow=13');
   });
+  test('HTTP requests include a configured backend access key', () async {
+    http.Request? requested;
+    const secret = 'test-backend-access-key-with-32-characters';
+    final client = MockClient((request) async {
+      requested = request;
+      return http.Response(jsonEncode({'signals': <String, dynamic>{}}), 200);
+    });
+    addTearDown(client.close);
+
+    final api = FreshApi(
+      'https://example.test',
+      client,
+      'https://example.test',
+      () async => '  $secret  ',
+    );
+    await api.signals();
+
+    expect(requested, isNotNull);
+    final matching = requested!.headers.entries
+        .where((entry) => entry.key.toLowerCase() == 'x-api-access-key')
+        .toList();
+    expect(matching, hasLength(1));
+    expect(matching.single.value, secret);
+  });
+
 }

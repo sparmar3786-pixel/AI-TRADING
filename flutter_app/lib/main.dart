@@ -2246,15 +2246,78 @@ class ApiPage extends StatefulWidget {
 }
 class _ApiPageState extends State<ApiPage> {
   final angelKey=TextEditingController(), client=TextEditingController(), pin=TextEditingController(), totp=TextEditingController();
+  final backendAccessKey = TextEditingController();
   bool working=false;
   bool rememberCredentials=true;
+  bool backendAccessKeyStored=false;
+  bool savingBackendAccessKey=false;
   Map<String,dynamic> savedStatus=const {};
+  String backendAccessMessage='Only enter a key supplied by the backend administrator. It is stored in secure device storage.';
   String message='Connect once and choose Remember credentials. PIN and tokens are encrypted on the backend; TOTP is never saved.';
 
   @override
   void initState() {
     super.initState();
     loadSavedStatus();
+    loadBackendAccessKeyStatus();
+  }
+
+  Future<void> loadBackendAccessKeyStatus() async {
+    try {
+      final stored = await FreshApi(widget.signalBackendUrl.trim()).hasStoredBackendAccessKey();
+      if (mounted) setState(() => backendAccessKeyStored = stored);
+    } catch (_) {
+      if (mounted) setState(() => backendAccessMessage = 'Secure storage is unavailable on this device.');
+    }
+  }
+
+  Future<void> saveBackendAccessKey() async {
+    final value = backendAccessKey.text.trim();
+    if (value.length < 32) {
+      setState(() => backendAccessMessage = 'The access key must be at least 32 characters.');
+      return;
+    }
+    setState(() => savingBackendAccessKey = true);
+    try {
+      await FreshApi(widget.signalBackendUrl.trim()).saveBackendAccessKey(value);
+      backendAccessKey.clear();
+      await loadBackendAccessKeyStatus();
+      if (mounted) {
+        setState(() => backendAccessMessage =
+            'Backend key saved securely. Future API requests and background signal polling will send X-API-Access-Key.');
+      }
+    } catch (error) {
+      if (mounted) setState(() => backendAccessMessage =
+          'Could not save the backend key: ${error.toString().replaceFirst('Exception: ', '')}');
+    } finally {
+      if (mounted) setState(() => savingBackendAccessKey = false);
+    }
+  }
+
+  Future<void> clearBackendAccessKey() async {
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Clear backend access key?'),
+        content: const Text('If Railway requires API authentication, signal and settings requests will stop working until a valid key is saved again.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('CANCEL')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('CLEAR KEY')),
+        ],
+      ),
+    );
+    if (approved != true || !mounted) return;
+    setState(() => savingBackendAccessKey = true);
+    try {
+      await FreshApi(widget.signalBackendUrl.trim()).clearBackendAccessKey();
+      await loadBackendAccessKeyStatus();
+      if (mounted) setState(() => backendAccessMessage = 'Backend access key cleared from secure device storage.');
+    } catch (error) {
+      if (mounted) setState(() => backendAccessMessage =
+          'Could not clear the backend key: ${error.toString().replaceFirst('Exception: ', '')}');
+    } finally {
+      if (mounted) setState(() => savingBackendAccessKey = false);
+    }
   }
 
   Future<void> loadSavedStatus() async {
@@ -2304,6 +2367,48 @@ class _ApiPageState extends State<ApiPage> {
   }
 
   @override Widget build(BuildContext context)=>ListView(padding:const EdgeInsets.all(10),children:[
+    const Section('Backend API Access'),
+    Card(child: Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: Icon(backendAccessKeyStored ? Icons.lock : Icons.lock_outline,
+              color: backendAccessKeyStored ? Colors.greenAccent : Colors.orangeAccent),
+          title: Text(backendAccessKeyStored ? 'Backend access key saved' : 'Backend access key not set'),
+          subtitle: const Text('Used only when the backend has API_AUTH_MODE=required. Never put this key in source code or GitHub.'),
+        ),
+        TextField(
+          controller: backendAccessKey,
+          obscureText: true,
+          autocorrect: false,
+          enableSuggestions: false,
+          enabled: !savingBackendAccessKey,
+          decoration: const InputDecoration(
+            labelText: 'Backend API access key',
+            hintText: 'Paste the 32+ character key',
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(children: [
+          Expanded(child: FilledButton.icon(
+            onPressed: savingBackendAccessKey ? null : saveBackendAccessKey,
+            icon: const Icon(Icons.save_outlined),
+            label: Text(savingBackendAccessKey ? 'SAVING…' : 'SAVE KEY'),
+          )),
+          const SizedBox(width: 8),
+          OutlinedButton(
+            onPressed: savingBackendAccessKey || !backendAccessKeyStored ? null : clearBackendAccessKey,
+            child: const Text('CLEAR'),
+          ),
+        ]),
+        const SizedBox(height: 6),
+        Text(backendAccessMessage, style: const TextStyle(fontSize: 12)),
+        const SizedBox(height: 4),
+        const Text('This shared key is an interim single-owner access gate, not per-user identity authentication.',
+            style: TextStyle(fontSize: 11, color: Colors.orangeAccent)),
+      ]),
+    )),
     const Section('Angel One • SmartAPI'),
     ListTile(
       dense: true,
@@ -2349,7 +2454,7 @@ class _ApiPageState extends State<ApiPage> {
   ]);
 
   Widget field(TextEditingController c,String label,bool secret)=>Padding(padding:const EdgeInsets.only(bottom:8),child:TextField(controller:c,obscureText:secret,decoration:InputDecoration(labelText:label)));
-  @override void dispose(){for(final c in [angelKey,client,pin,totp]){c.dispose();}super.dispose();}
+  @override void dispose(){for(final c in [angelKey,client,pin,totp,backendAccessKey]){c.dispose();}super.dispose();}
 }
 
 class AiAccessPage extends StatefulWidget {
