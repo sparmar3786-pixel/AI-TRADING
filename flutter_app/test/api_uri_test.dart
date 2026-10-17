@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ai_trading_signal/api.dart';
+import 'package:ai_trading_signal/config.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -25,16 +26,17 @@ void main() {
     });
     addTearDown(client.close);
 
-    final api = FreshApi('https://example.test', client);
-    await api.signals(emaFast: 8, emaSlow: 13);
+    final api = FreshApi.signal(client);
+    await api.signals(emaFast: 8, emaSlow: 21);
 
     expect(requestedUri, isNotNull);
+    expect(requestedUri!.host, Uri.parse(AppConfig.signalBackendUrl).host);
     expect(requestedUri!.path, '/v1/signals');
     expect(requestedUri!.queryParameters, {
       'ema_fast': '8',
-      'ema_slow': '13',
+      'ema_slow': '21',
     });
     expect(requestedUri!.toString(),
-        'https://example.test/v1/signals?ema_fast=8&ema_slow=13');
+        '${AppConfig.signalBackendUrl}/v1/signals?ema_fast=8&ema_slow=21');
   });
 }

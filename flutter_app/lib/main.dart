@@ -72,7 +72,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
   int qualifiedCount = 0;
   String? lastFetch;
   int emaFast = 8;
-  int emaSlow = 13;
+  int emaSlow = 21;
   String status = 'Connect Angel One from Settings.';
   Timer? _refreshTimer;
 
@@ -206,6 +206,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     String? latestSystemDiagnosticsError;
     try {
       final api = FreshApi(backendUrl);
+      final signalApi = FreshApi.signal();
       await api.health();
       // Broker/session diagnostics must not prevent the independent signal
       // endpoint from being queried. A broken /v1/angel/status route used to
@@ -213,15 +214,15 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       Map<String,dynamic> a = const {};
       String? angelStatusError;
       try {
-        a = await api.angelStatus();
+        a = await signalApi.angelStatus();
       } catch (e) {
         angelStatusError = e.toString().replaceFirst('Exception: ', '');
       }
       Map<String,dynamic> liveStatus = const {};
-      try { liveStatus = await api.liveExecutionStatus(); } catch (_) {}
+      try { liveStatus = await signalApi.liveExecutionStatus(); } catch (_) {}
       Map<String,dynamic> s;
       try {
-        s = await api.signals(emaFast: emaFast, emaSlow: emaSlow);
+        s = await signalApi.signals(emaFast: emaFast, emaSlow: emaSlow);
         s = await _applyTenMinuteSignalGate(s);
         // API success is independent of local cache persistence. A full device,
         // oversized cached payload or SharedPreferences write error must not
@@ -238,7 +239,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         s = _makeCachedSignalsNonActionable(await _loadCachedSignals());
       }
       try {
-        latestSystemDiagnostics = await api.systemDiagnostics();
+        latestSystemDiagnostics = await signalApi.systemDiagnostics();
         latestSystemDiagnosticsError = null;
       } catch (e) {
         latestSystemDiagnostics = const {};
@@ -1290,7 +1291,7 @@ class _ApiPageState extends State<ApiPage> {
 
   Future<void> loadSavedStatus() async {
     try {
-      final result=await FreshApi(widget.backendUrl.trim()).angelStatus();
+      final result=await FreshApi.signal().angelStatus();
       if(!mounted)return;
       setState(()=>savedStatus=result);
       if(result['stored_session']==true) {
@@ -1310,7 +1311,7 @@ class _ApiPageState extends State<ApiPage> {
   Future<void> connect() async {
     setState(()=>working=true);
     try {
-      final api=FreshApi(widget.backendUrl.trim());
+      final api=FreshApi.signal();
       final result=await api.connectAngel(payload());
       if (result['authenticated'] != true ||
           result['has_jwt_token'] != true ||
