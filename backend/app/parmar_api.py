@@ -16,7 +16,7 @@ router = APIRouter(prefix="/v1/parmar", tags=["Parmar strategy engine"])
 
 STRATEGIES: tuple[dict[str, Any], ...] = (
     {"id": "oi_price_action", "name": "Price Action / OI Price Action", "source": "quant/oi_price_action_engine.py", "status": "SOURCE_PRESENT_ADAPTER_PENDING"},
-    {"id": "hero_zero", "name": "Hero Zero", "source": "quant/hero_zero.py", "status": "SOURCE_PRESENT_ADAPTER_PENDING"},
+    {"id": "hero_zero", "name": "Hero Zero", "source": "quant/hero_zero.py", "status": "CANDIDATE_PIPELINE_WIRED_WAIT_GATED"},
     {"id": "failed_move_pdh_pdl", "name": "Failed Move / PDH-PDL", "source": "quant/failed_move_fade.py", "status": "SOURCE_PRESENT_ADAPTER_PENDING"},
     {"id": "ema_crossover", "name": "EMA Crossover", "source": "quant/ema_quant_engine.py", "status": "SOURCE_PRESENT_ADAPTER_PENDING"},
     {"id": "day_hl_liquidity_sweep", "name": "Day HL Liquidity Sweep", "source": "quant/day_hl_liquidity.py", "status": "DETECTOR_ADAPTER_PENDING"},
@@ -43,7 +43,7 @@ class EvaluateRequest(BaseModel):
 
 _ENGINE_MODULES = {
     "oi_price_action": ("quant.oi_price_action_engine", "SOURCE_ONLY"),
-    "hero_zero": ("quant.hero_zero", "SOURCE_ONLY"),
+    "hero_zero": ("quant.hero_zero", "CANDIDATE_PIPELINE_WIRED_WAIT_GATED"),
     "failed_move_pdh_pdl": ("quant.failed_move_fade", "SOURCE_ONLY"),
     "ema_crossover": ("quant.ema_quant_engine", "SOURCE_ONLY"),
     "day_hl_liquidity_sweep": ("quant.day_hl_liquidity", "DETECTOR_ONLY"),
@@ -74,9 +74,9 @@ def list_parmar_strategies(x_device_id: str = Header(default="")) -> dict[str, A
         item["status"] = source_status if available else ("ENGINE_SOURCE_MISSING_IN_DEPLOYMENT" if module_name else "NOT_IMPLEMENTED")
         item["live_api_wiring"] = (
             "CANDIDATE_PIPELINE_WIRED; ACTIONABILITY_NOT_VERIFIED"
-            if item["id"] in {"orb", "vwap"} else "NOT_VERIFIED"
+            if item["id"] in {"orb", "vwap", "hero_zero"} else "NOT_VERIFIED"
         )
-        if item["id"] in {"orb", "vwap"}:
+        if item["id"] in {"orb", "vwap", "hero_zero"}:
             item["candidate_route"] = "/v1/signals.strategy_candidates"
         item["actionable"] = False
         strategies.append(item)
@@ -97,7 +97,7 @@ def verify_strategy_wiring(strategy_id: str, x_device_id: str = Header(default="
         raise HTTPException(status_code=404, detail="Unknown Parmar strategy id")
     module_name, _ = _ENGINE_MODULES[strategy_id]
     engine_loaded = _module_available(module_name)
-    candidate_pipeline_wired = strategy_id in {"orb", "vwap"} and engine_loaded
+    candidate_pipeline_wired = strategy_id in {"orb", "vwap", "hero_zero"} and engine_loaded
     checks = {
         "backend_route_registered": True,
         "candidate_pipeline_wired": candidate_pipeline_wired,
@@ -118,8 +118,8 @@ def verify_strategy_wiring(strategy_id: str, x_device_id: str = Header(default="
         "actionable": False,
         "checks": checks,
         "blockers": blockers,
-        "candidate_route": "/v1/signals.strategy_candidates" if strategy_id in {"orb", "vwap"} else None,
-        "reason": "ORB/VWAP candidates are emitted by the canonical /v1/signals pipeline but remain non-actionable until fresh option mapping, five-layer validation, risk checks and server confirmation are proven." if strategy_id in {"orb", "vwap"} else "Diagnostic route and module presence do not prove fresh live feed, risk mapping, or end-to-end wiring.",
+        "candidate_route": "/v1/signals.strategy_candidates" if strategy_id in {"orb", "vwap", "hero_zero"} else None,
+        "reason": "ORB/VWAP/Hero Zero candidates are emitted by the canonical /v1/signals pipeline but remain non-actionable until fresh option mapping, five-layer validation, risk checks and server confirmation are proven." if strategy_id in {"orb", "vwap", "hero_zero"} else "Diagnostic route and module presence do not prove fresh live feed, risk mapping, or end-to-end wiring.",
     }
 
 
