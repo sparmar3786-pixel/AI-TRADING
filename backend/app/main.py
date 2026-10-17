@@ -207,13 +207,13 @@ _RATE_WINDOW_SECONDS = 60.0
 def _rate_limit_policy(path: str, method: str) -> tuple[str, int]:
     normalized = path.rstrip("/") or "/"
     if normalized.startswith(("/v1/ai/", "/v1/providers/")) or normalized == "/v1/market-intelligence/refresh":
-        return "provider", 30
+        return f"provider:{normalized}", 30
     if method.upper() == "POST" and (
         normalized.startswith(("/v1/angel/connect", "/v1/instruments/sync", "/v1/stream/start",
                                "/v1/backtest/", "/v1/research/", "/v1/paper/trades"))
     ):
-        return "mutation", 30
-    return "general", 300
+        return f"mutation:{normalized}", 30
+    return "general", 600
 
 
 def _consume_rate_limit(identity: str, bucket: str, limit: int, now: float | None = None) -> tuple[bool, int]:
@@ -3184,7 +3184,7 @@ def diagnostics(_: str = Depends(_device)) -> dict[str, Any]:
                 and not (os.getenv("API_ACCESS_KEY") or os.getenv("BACKEND_ACCESS_KEY") or "").strip()
             ),
             "rate_limit_window_seconds": int(_RATE_WINDOW_SECONDS),
-            "rate_limits_per_minute": {"general": 300, "provider_and_ai": 30, "mutation": 30},
+            "rate_limits_per_minute": {"general": 600, "provider_and_ai_per_route": 30, "mutation_per_route": 30},
         },
         "signal_event_journal": dict(_signal_event_persistence),
         "exchange_calendar": {
