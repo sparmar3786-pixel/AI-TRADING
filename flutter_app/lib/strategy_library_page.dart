@@ -12,50 +12,50 @@ class StrategyLibraryPage extends StatelessWidget {
     _StrategyItem(
       name: 'OI Price Action',
       source: 'quant/oi_price_action_engine.py',
-      state: 'ENGINE SOURCE PRESENT',
-      live: 'Live API wiring not verified',
+      state: 'CANDIDATE PIPELINE WIRED • WAIT-GATED',
+      live: 'Canonical candidate; option mapping, risk and 600-second gate still required',
       detail: 'Uses option-chain OI/PCR, price structure and candle/ATR confluence. Missing/stale OI data must return WAIT.',
     ),
     _StrategyItem(
       name: 'Hero Zero',
       source: 'quant/hero_zero.py',
-      state: 'ENGINE SOURCE PRESENT',
-      live: 'Expiry-only candidate; live API wiring not verified',
+      state: 'CANDIDATE PIPELINE WIRED • WAIT-GATED',
+      live: 'Expiry and fresh option quotes required; candidate is not actionable',
       detail: 'High-risk expiry-day setup with time-window and premium guards. Candidate only; never an order approval.',
     ),
     _StrategyItem(
       name: 'Failed-Move / PDH-PDL',
       source: 'quant/failed_move_fade.py',
-      state: 'ENGINE SOURCE PRESENT',
-      live: 'Live API wiring not verified',
+      state: 'CANDIDATE PIPELINE WIRED • WAIT-GATED',
+      live: 'Canonical candidate; contract mapping, risk and stability still gated',
       detail: 'Detects acceptance beyond previous-day high/low. Stale candles or failed validation must result in WAIT.',
     ),
     _StrategyItem(
       name: 'EMA Crossover',
       source: 'quant/ema_quant_engine.py',
-      state: 'ENGINE SOURCE PRESENT',
-      live: 'Live API wiring not verified',
+      state: 'CANDIDATE PIPELINE WIRED • WAIT-GATED',
+      live: 'Canonical candidate; EMA setup does not bypass Quant or risk gates',
       detail: 'EMA trend candidate with RSI/ATR filters. Must be merged, connected to the backend and tested before live use.',
     ),
     _StrategyItem(
       name: 'DAY-HL Liquidity Sweep',
       source: 'quant/day_hl_liquidity.py',
-      state: 'DETECTOR SOURCE PRESENT',
-      live: 'Detector only; live API wiring not verified',
+      state: 'DETECTOR PIPELINE WIRED • WAIT-GATED',
+      live: 'Sweep evidence only; complete option/risk mapping is not implemented',
       detail: 'Day-high/day-low liquidity event detector. Needs confirmed entry, invalidation, exit and risk mapping.',
     ),
     _StrategyItem(
       name: 'Opening Range Breakout (ORB)',
       source: 'quant/orb_engine.py',
-      state: 'ENGINE SOURCE PRESENT',
-      live: 'Candidate engine added; live API wiring not verified',
+      state: 'CANDIDATE PIPELINE WIRED • WAIT-GATED',
+      live: 'Shared signal candidate; contract/risk/stability gates remain required',
       detail: '15-minute opening-range breakout with completed-candle and volume checks plus ATR risk levels. Candidate only until backend routing and live-data validation are proven.',
     ),
     _StrategyItem(
       name: 'VWAP Strategy',
       source: 'quant/vwap_strategy.py',
-      state: 'ENGINE SOURCE PRESENT',
-      live: 'Candidate engine added; live API wiring not verified',
+      state: 'CANDIDATE PIPELINE WIRED • WAIT-GATED',
+      live: 'Shared signal candidate; contract/risk/stability gates remain required',
       detail: 'Session-reset VWAP cross with volume confirmation and ATR-based stop/target. Candidate only until backend routing and live-data validation are proven.',
     ),
   ];
@@ -70,12 +70,17 @@ class StrategyLibraryPage extends StatelessWidget {
       const Text('STRATEGY LIBRARY', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
       const SizedBox(height: 6),
       const Text(
-        'Source presence is not live integration. ORB/VWAP candidates are read from the shared backend signal response; they remain WAIT until option-premium mapping, five-layer validation, risk checks and the 10-minute stability gate pass.',
+        'All seven candidates are read from the canonical backend /v1/signals strategy_candidates payload. A candidate is not an approved trade: option-contract mapping, five-layer Quant, risk checks and the server-owned 600-second stability gate must pass. DAY-HL is detector-only.',
         style: TextStyle(color: Colors.white70),
       ),
       const SizedBox(height: 12),
-      _CandidateCard(title: 'Opening Range Breakout (ORB)', candidate: Map<String, dynamic>.from(candidates['orb'] as Map? ?? const {})),
-      _CandidateCard(title: 'VWAP Strategy', candidate: Map<String, dynamic>.from(candidates['vwap'] as Map? ?? const {})),
+      _CandidateCard(key: const ValueKey('candidate-card-oi-price-action'), title: 'OI Price Action', candidate: Map<String, dynamic>.from(candidates['oi_price_action'] as Map? ?? const {})),
+      _CandidateCard(key: const ValueKey('candidate-card-hero-zero'), title: 'Hero Zero', candidate: Map<String, dynamic>.from(candidates['hero_zero'] as Map? ?? const {})),
+      _CandidateCard(key: const ValueKey('candidate-card-failed-move-pdh-pdl'), title: 'Failed-Move / PDH-PDL', candidate: Map<String, dynamic>.from(candidates['failed_move_pdh_pdl'] as Map? ?? const {})),
+      _CandidateCard(key: const ValueKey('candidate-card-ema-crossover'), title: 'EMA Crossover', candidate: Map<String, dynamic>.from(candidates['ema_crossover'] as Map? ?? const {})),
+      _CandidateCard(key: const ValueKey('candidate-card-day-hl-liquidity-sweep'), title: 'DAY-HL Liquidity Sweep', candidate: Map<String, dynamic>.from(candidates['day_hl_liquidity_sweep'] as Map? ?? const {})),
+      _CandidateCard(key: const ValueKey('candidate-card-orb'), title: 'Opening Range Breakout (ORB)', candidate: Map<String, dynamic>.from(candidates['orb'] as Map? ?? const {})),
+      _CandidateCard(key: const ValueKey('candidate-card-vwap'), title: 'VWAP Strategy', candidate: Map<String, dynamic>.from(candidates['vwap'] as Map? ?? const {})),
       const SizedBox(height: 4),
       for (final item in _items) _StrategyCard(item: item),
       const SizedBox(height: 8),
@@ -94,7 +99,7 @@ class StrategyLibraryPage extends StatelessWidget {
 }
 
 class _CandidateCard extends StatelessWidget {
-  const _CandidateCard({required this.title, required this.candidate});
+  const _CandidateCard({super.key, required this.title, required this.candidate});
   final String title;
   final Map<String, dynamic> candidate;
 
@@ -161,7 +166,7 @@ class _StrategyCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final sourcePresent = item.state == 'ENGINE SOURCE PRESENT' || item.state == 'DETECTOR SOURCE PRESENT';
+    final sourcePresent = item.state.contains('WIRED') || item.state.contains('SOURCE PRESENT');
     final color = sourcePresent ? Colors.orangeAccent : Colors.redAccent;
     return Card(
       margin: const EdgeInsets.only(bottom: 9),

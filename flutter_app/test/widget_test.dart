@@ -187,7 +187,87 @@ void main() {
               : find.text(label));
       expect(labelFinder, findsOneWidget, reason: '$label must be in the Strategies tab');
     }
-    expect(find.text('Expiry-only candidate; live API wiring not verified'), findsOneWidget);
+    expect(find.text('Expiry and fresh option quotes required; candidate is not actionable'), findsOneWidget);
+  });
+
+  testWidgets('Strategy Library renders all seven canonical backend candidates as WAIT-gated', (tester) async {
+    tester.view.physicalSize = const Size(1200, 5000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final candidate = (String decision, String reason) => <String, dynamic>{
+      'candidate_decision': decision,
+      'decision': 'WAIT',
+      'entry': 25000.0,
+      'stop_loss': 24900.0,
+      'target': 25200.0,
+      'data_fresh': true,
+      'reasons': <String>[reason],
+      'guards': <String>['OPTION_CONTRACT_MAPPING_REQUIRED'],
+      'live_validation': <String, dynamic>{
+        'verdict': 'PENDING',
+        'decision': 'WAIT',
+        'blocks': <String>['Five-layer Quant and risk validation required'],
+      },
+    };
+
+    await tester.pumpWidget(MaterialApp(
+      home: StrategyLibraryPage(
+        selectedIndex: 'NIFTY',
+        signals: {
+          'NIFTY': {
+            'strategy_candidates': {
+              'oi_price_action': candidate('PUT BUY', 'OI pressure candidate'),
+              'hero_zero': candidate('CALL BUY', 'Expiry contract candidate'),
+              'failed_move_pdh_pdl': candidate('PUT BUY', 'Failed move candidate'),
+              'ema_crossover': candidate('CALL BUY', 'EMA cross candidate'),
+              'day_hl_liquidity_sweep': {
+                'decision': 'WAIT',
+                'candidate_decision': null,
+                'data_fresh': true,
+                'entry': null,
+                'stop_loss': null,
+                'target': null,
+                'reasons': <String>['Sweep detected; detector-only'],
+                'guards': <String>['DETECTOR_ONLY'],
+              },
+              'orb': candidate('CALL BUY', 'ORB candidate'),
+              'vwap': candidate('PUT BUY', 'VWAP candidate'),
+            },
+          },
+        },
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    for (final key in <String>[
+      'candidate-card-oi-price-action',
+      'candidate-card-hero-zero',
+      'candidate-card-failed-move-pdh-pdl',
+      'candidate-card-ema-crossover',
+      'candidate-card-day-hl-liquidity-sweep',
+      'candidate-card-orb',
+      'candidate-card-vwap',
+    ]) {
+      await tester.scrollUntilVisible(find.byKey(ValueKey(key)), 300,
+          scrollable: find.descendant(
+            of: find.byType(StrategyLibraryPage),
+            matching: find.byType(Scrollable),
+          ).first);
+      expect(find.byKey(ValueKey(key)), findsOneWidget, reason: '$key must render from canonical strategy_candidates');
+    }
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('candidate-card-day-hl-liquidity-sweep')),
+      300,
+      scrollable: find.descendant(
+        of: find.byType(StrategyLibraryPage),
+        matching: find.byType(Scrollable),
+      ).first,
+    );
+    expect(find.textContaining('Approved decision: WAIT'), findsWidgets);
+    expect(find.textContaining('Underlying spot levels only—not option-premium prices'), findsWidgets);
+    expect(find.textContaining('Sweep detected; detector-only'), findsOneWidget);
   });
 
   testWidgets('Strategy Library shows ORB/VWAP backend candidates but keeps them non-actionable', (tester) async {
