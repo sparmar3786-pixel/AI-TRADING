@@ -5423,16 +5423,53 @@ def quant_engine_signal(ema_fast: int = Query(default=8, ge=2, le=50), ema_slow:
 
 @app.get("/v1/signals/strategies")
 def strategy_engine_signals(_: str = Depends(_device)) -> dict[str, Any]:
-    """Strategy candidates only; never promotes a candidate into a final trade."""
+    """Return strategy candidates from the current shared signal snapshot.
+
+    The shared snapshot stores per-index signal rows, while older snapshots may
+    expose a top-level candidate list. Normalize both shapes without promoting
+    candidates into final trade decisions.
+    """
     payload = _get_signals()
-    candidates = payload.get("strategy_candidates", [])
-    if not isinstance(candidates, list):
-        candidates = []
+    candidates: list[dict[str, Any]] = []
+    top_level = payload.get("strategy_candidates")
+    if isinstance(top_level, list):
+        candidates.extend(dict(row) for row in top_level if isinstance(row, dict))
+    elif isinstance(top_level, dict):
+        for strategy_id, row in top_level.items():
+            if isinstance(row, dict):
+                candidates.append({"strategy_id": str(strategy_id), **row})
+    signal_rows = payload.get("signals")
+    if isinstance(signal_rows, dict):
+        for index, signal in signal_rows.items():
+            if not isinstance(signal, dict):
+                continue
+            per_signal = signal.get("strategy_candidates")
+            if isinstance(per_signal, dict):
+                for strategy_id, candidate in per_signal.items():
+                    if isinstance(candidate, dict):
+                        candidates.append({
+                            "index": str(candidate.get("index") or index).upper(),
+                            "strategy_id": str(candidate.get("strategy_id") or strategy_id),
+                            **candidate,
+                        })
+            elif isinstance(per_signal, list):
+                for candidate in per_signal:
+                    if isinstance(candidate, dict):
+                        candidates.append({
+                            "index": str(candidate.get("index") or index).upper(),
+                            **candidate,
+                        })
+    # Stable de-duplication protects clients if both payload shapes are present.
+    normalized: dict[tuple[str, str], dict[str, Any]] = {}
+    for candidate in candidates:
+        strategy_id = str(candidate.get("strategy_id") or candidate.get("strategy") or "unknown")
+        index = str(candidate.get("index") or "UNKNOWN").upper()
+        normalized[(index, strategy_id)] = candidate
     return {
         "status": payload.get("status", "WAIT"),
         "source": "parmar_strategy_engine",
         "decision_owner": "strategy_candidate_engine",
-        "strategy_candidates": candidates,
+        "strategy_candidates": list(normalized.values()),
         "market": payload.get("market", {}),
         "generated_at": payload.get("generated_at"),
         "refreshing": payload.get("refreshing", False),
@@ -5476,7 +5513,7 @@ def signal_outcome_calendar(start_date: str, end_date: str, _: str = Depends(_de
         targets = sum(1 for row in closed if row.get("exit_reason") == "TARGET")
         stops = sum(1 for row in closed if row.get("exit_reason") == "STOP_LOSS")
         def engine_summary(engine: str) -> dict[str, Any]:
-            engine_rows = [row for row in day_rows if str(row.get("source_engine") or "QUANT_ENGINE").upper() == engine]
+            engine_rows = [row for row in day_rows if str(row.get("source_engine") or "UNKNOWN").upper() == engine]
             engine_closed = [row for row in engine_rows if row.get("status") == "CLOSED" and row.get("exit_reason") in {"TARGET", "STOP_LOSS"}]
             engine_targets = sum(1 for row in engine_closed if row.get("exit_reason") == "TARGET")
             engine_stops = sum(1 for row in engine_closed if row.get("exit_reason") == "STOP_LOSS")
