@@ -4962,6 +4962,7 @@ def _update_signal_outcomes(
         quantity, lot_size = _number(plan.get("quantity") or signal.get("quantity")), _number(plan.get("lot_size") or signal.get("lot_size"))
         rows.append({
             "outcome_id": f"sig-{uuid.uuid4().hex}", "signature": signature,
+            "source_engine": "QUANT_ENGINE",
             "signal_type": "INDEX_OPTION", "index": str(index).upper(), "decision": decision,
             "option_type": "CALL" if decision == "CALL BUY" else "PUT",
             "strike": strike, "expiry": expiry, "entry_price": entry,
@@ -5012,6 +5013,7 @@ def _update_signal_outcomes(
         quantity = _number(os.getenv("PAPER_MCX_QUANTITY_LOTS"))
         rows.append({
             "outcome_id": f"mcx-{uuid.uuid4().hex}", "signature": signature,
+            "source_engine": "QUANT_ENGINE",
             "signal_type": "MCX_FUTURE", "index": name, "decision": decision,
             "contract": contract, "expiry": expiry, "entry_price": entry,
             "stop_loss": stop, "target": target, "quantity": quantity, "lot_size": lot_size,
@@ -5464,6 +5466,20 @@ def signal_outcome_calendar(start_date: str, end_date: str, _: str = Depends(_de
         closed = [row for row in day_rows if row.get("status") == "CLOSED" and row.get("exit_reason") in {"TARGET", "STOP_LOSS"}]
         targets = sum(1 for row in closed if row.get("exit_reason") == "TARGET")
         stops = sum(1 for row in closed if row.get("exit_reason") == "STOP_LOSS")
+        def engine_summary(engine: str) -> dict[str, Any]:
+            engine_rows = [row for row in day_rows if str(row.get("source_engine") or "QUANT_ENGINE").upper() == engine]
+            engine_closed = [row for row in engine_rows if row.get("status") == "CLOSED" and row.get("exit_reason") in {"TARGET", "STOP_LOSS"}]
+            engine_targets = sum(1 for row in engine_closed if row.get("exit_reason") == "TARGET")
+            engine_stops = sum(1 for row in engine_closed if row.get("exit_reason") == "STOP_LOSS")
+            return {
+                "signals_opened": len(engine_rows),
+                "open": sum(1 for row in engine_rows if row.get("status") == "OPEN"),
+                "closed": len(engine_closed),
+                "targets": engine_targets,
+                "stop_losses": engine_stops,
+                "accuracy_percent": round(100 * engine_targets / len(engine_closed), 2) if engine_closed else None,
+                "accuracy_status": "OBSERVED" if engine_closed else "NO_CLOSED_OUTCOMES",
+            }
         days[key] = {
             "signals_opened": len(day_rows),
             "open": sum(1 for row in day_rows if row.get("status") == "OPEN"),
@@ -5472,6 +5488,10 @@ def signal_outcome_calendar(start_date: str, end_date: str, _: str = Depends(_de
             "stop_losses": stops,
             "accuracy_percent": round(100 * targets / len(closed), 2) if closed else None,
             "accuracy_status": "OBSERVED" if closed else "NO_CLOSED_OUTCOMES",
+            "by_engine": {
+                "QUANT_ENGINE": engine_summary("QUANT_ENGINE"),
+                "PARMAR_STRATEGY": engine_summary("PARMAR_STRATEGY"),
+            },
             "signals": day_rows,
         }
         cursor += timedelta(days=1)
