@@ -39,9 +39,9 @@ class StrategyLibraryPage extends StatelessWidget {
       key: 'strategy-card-ema-crossover',
       name: 'EMA Crossover',
       source: 'quant/ema_quant_engine.py',
-      state: 'SOURCE BUNDLED',
-      live: 'Live API wiring not verified',
-      detail: 'EMA trend candidate with RSI/ATR filters. Must be merged, connected to the backend and tested before live use.',
+      state: 'CANDIDATE PIPELINE WIRED • WAIT-GATED',
+      live: 'Canonical candidate; option mapping, risk and stability remain unverified',
+      detail: 'EMA trend candidate with RSI/ATR filters. Candidate remains WAIT until contract and risk gates pass.',
     ),
     _StrategyItem(
       id: 'day_hl_liquidity_sweep',
@@ -99,7 +99,7 @@ class StrategyLibraryPage extends StatelessWidget {
           final count = data['count'] ?? 0;
           return Card(child: Padding(
             padding: const EdgeInsets.all(10),
-            child: Text('Parmar backend connected • ${count.toString()} strategies listed. Evaluation remains WAIT until verified adapters and live-data validation are wired.',
+            child: Text('Parmar backend connected • ${count.toString()} strategies listed. Candidate calculations are displayed separately; executable signals remain WAIT until every live gate passes.',
                 style: const TextStyle(color: Colors.lightGreenAccent)),
           ));
         },
@@ -115,7 +115,7 @@ class StrategyLibraryPage extends StatelessWidget {
         child: Padding(
           padding: EdgeInsets.all(12),
           child: Text(
-            'Safety: this page lists the Parmar engine suite. The registry never upgrades WAIT to BUY/SELL; unregistered adapters and missing/stale data remain WAIT. ORB and VWAP remain NOT IMPLEMENTED until their own tested engines are added. No win rate or profitability is implied.',
+            'Safety: candidate calculations are informational, not executable signals. Missing/stale data, unmapped option contracts, incomplete Quant/risk evidence, or an unconfirmed 600-second gate must remain WAIT. DAY-HL is detector-only; no win rate or profitability is implied.',
             style: TextStyle(fontWeight: FontWeight.w700),
           ),
         ),
