@@ -184,6 +184,14 @@ void main() {
       expect(find.text(entry.value), findsOneWidget,
           reason: entry.key + ' inventory entry must be in the Strategies tab');
     }
+    // Each strategy title must render exactly once; candidate data belongs in
+    // the same card, not in a second parallel candidate list.
+    for (final title in sourceByLabel.keys) {
+      expect(find.text(title), findsOneWidget,
+          reason: '$title must not be duplicated or overlap another card');
+    }
+    expect(find.byType(Card), findsNWidgets(8),
+        reason: 'Seven strategy cards plus one safety card are expected.');
     expect(find.text('Expiry and fresh option quotes required; candidate is not actionable'), findsOneWidget);
   });
 
