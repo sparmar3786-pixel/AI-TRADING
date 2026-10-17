@@ -385,7 +385,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           status: _currentIndexStatus,
           onIndexSelected: (value) => setState(() => selectedIndex = value),
         ),
-        const StrategyLibraryPage(),
+        StrategyLibraryPage(index: selectedIndex),
       ]),
     ),
   );
