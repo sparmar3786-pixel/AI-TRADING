@@ -53,6 +53,11 @@ _SPECIAL_2026 = [{
     "source_url": NSE_SOURCE_URL,
 }]
 _SEGMENTS = {"NSE_EQ", "NSE_FO", "BSE_EQ", "BSE_FO", "MCX"}
+
+
+def _rows(items: list[tuple[str, str]]) -> list[dict[str, str]]:
+    return [{"date": day, "name": name, "kind": "HOLIDAY"} for day, name in items]
+
 _DATA: dict[str, Any] = {
     "NSE_EQ": {"holidays": _rows(_COMMON_2026 + _NSE_ONLY_2026), "source_status": "CHECKED_IN_OFFICIAL_SNAPSHOT", "source_year": 2026},
     "NSE_FO": {"holidays": _rows(_COMMON_2026 + _NSE_ONLY_2026), "source_status": "CHECKED_IN_OFFICIAL_SNAPSHOT", "source_year": 2026},
