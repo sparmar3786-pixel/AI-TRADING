@@ -267,6 +267,11 @@ jobs:
           sha256sum "$ARM64" > "$ARM64.sha256"
           printf '%s\n' "$GITHUB_SHA" > "$(dirname "$UNIVERSAL")/BUILD_COMMIT_SHA.txt"
           printf 'workflow_run_id=%s\nworkflow_run_number=%s\ncommit_sha=%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_NUMBER" "$GITHUB_SHA" > "$(dirname "$UNIVERSAL")/BUILD_INFO.txt"
+          # Verify both generated checksum manifests before any artifact/release upload.
+          sha256sum -c "$UNIVERSAL.sha256"
+          sha256sum -c "$ARM64.sha256"
+          test "$(cat "$(dirname "$UNIVERSAL")/BUILD_COMMIT_SHA.txt")" = "$GITHUB_SHA"
+          grep -F "commit_sha=$GITHUB_SHA" "$(dirname "$UNIVERSAL")/BUILD_INFO.txt"
           cat "$UNIVERSAL.sha256" "$ARM64.sha256"
           ls -lh "$UNIVERSAL" "$ARM64" "$UNIVERSAL.sha256" "$ARM64.sha256" "$(dirname "$UNIVERSAL")/BUILD_COMMIT_SHA.txt" "$(dirname "$UNIVERSAL")/BUILD_INFO.txt"
       - name: Upload APK artifacts
