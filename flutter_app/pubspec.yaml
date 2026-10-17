@@ -10,7 +10,13 @@ dependencies:
     sdk: flutter
   flutter_secure_storage: ^9.2.4
   http: ^1.2.2
-  shared_preferences: ^2.5.3
+  shared_preferences: 2.5.3
+
+dependency_overrides:
+  # Pin the Android Pigeon implementation to the API generation tested with
+  # shared_preferences 2.5.3. A runtime registrar signature mismatch can crash
+  # before any backend HTTP request is sent.
+  shared_preferences_android: 2.4.23
   url_launcher: ^6.3.2
 
 dev_dependencies:
