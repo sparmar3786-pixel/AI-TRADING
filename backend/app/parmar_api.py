@@ -112,7 +112,7 @@ def verify_strategy_wiring(strategy_id: str, x_device_id: str = Header(default="
         raise HTTPException(status_code=404, detail="Unknown Parmar strategy id")
     module_name, _ = _ENGINE_MODULES[strategy_id]
     engine_loaded = _module_available(module_name)
-    candidate_ids = {"oi_price_action", "failed_move_pdh_pdl", "ema_crossover", "orb", "vwap"}
+    candidate_ids = {"oi_price_action", "hero_zero", "failed_move_pdh_pdl", "ema_crossover", "orb", "vwap"}
     detector_ids = {"day_hl_liquidity_sweep"}
     candidate_pipeline_wired = strategy_id in candidate_ids and engine_loaded
     detector_pipeline_wired = strategy_id in detector_ids and engine_loaded
