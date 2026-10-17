@@ -10,8 +10,12 @@ dependencies:
     sdk: flutter
   flutter_secure_storage: ^9.2.4
   http: ^1.2.2
-  shared_preferences: ^2.5.3
+  shared_preferences: 2.5.3
   url_launcher: ^6.3.2
+
+dependency_overrides:
+  # Keep Dart and Android implementations on a known matching Pigeon API.
+  shared_preferences_android: 2.4.23
 
 dev_dependencies:
   flutter_test:
