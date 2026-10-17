@@ -1176,6 +1176,38 @@ def _complete_strategy_candidate_inventory(
     return completed
 
 
+def _quant_layer_display_status(
+    layer_key: str,
+    raw_layer: dict[str, Any],
+    *,
+    normalized_option_count: int,
+    selected: dict[str, Any] | None,
+    option_atr: float | None,
+) -> str:
+    """Distinguish absent evidence from a measured validation failure."""
+    if raw_layer.get("pass") is True:
+        return "PASS"
+    if layer_key == "data_quality":
+        return "UNAVAILABLE" if raw_layer.get("reason_code") == "MISSING_OR_INVALID_TIMESTAMP" else "FAIL"
+    if layer_key == "trend_sentiment":
+        if (
+            raw_layer.get("trend") in (None, "UNKNOWN")
+            or raw_layer.get("indicators_complete") is not True
+            or raw_layer.get("sentiment_score") is None
+        ):
+            return "UNAVAILABLE"
+    elif layer_key == "order_flow":
+        if raw_layer.get("spread_pct") is None or raw_layer.get("direction") in (None, "UNKNOWN"):
+            return "UNAVAILABLE"
+    elif layer_key == "option_selection":
+        if normalized_option_count <= 0:
+            return "UNAVAILABLE"
+    elif layer_key == "risk_levels":
+        if selected is None or option_atr is None or option_atr <= 0:
+            return "UNAVAILABLE"
+    return "FAIL"
+
+
 def _gate_strategy_candidate_payload(payload: dict[str, Any], *, source_fresh: bool, strategy_id: str) -> dict[str, Any]:
     """Keep research candidates non-actionable and clear every invalid/stale level.
 
@@ -1840,6 +1872,7 @@ def _index_snapshot(
     selectable = [item for item in normalized_options if item["option_type"] == preferred_type and item["delta"] is not None and item["bid"] is not None and item["ask"] is not None and item["ltp"] is not None]
     selected = min(selectable, key=lambda item: abs((item["strike"] or spot) - spot)) if selectable else None
     option_atr = None
+    option_atr_timestamp = None
     if selected:
         option_candles = adapter.candles(exchange, selected["token"], "FIVE_MINUTE", start, end).get("candles") or []
         # Option premium ATR feeds the stop/target gate too: apply the same
@@ -1848,6 +1881,8 @@ def _index_snapshot(
             option_candles, timeframe_minutes=5
         )
         option_atr = _atr_from_candles(completed_option_candles)
+        if completed_option_candles:
+            option_atr_timestamp = _iso(completed_option_candles[-1][0])
         selected["option_atr"] = option_atr
     # Do not pass a server fetch time off as exchange time; source timestamps are mandatory.
     observed = _iso(spot_ts)
@@ -1910,11 +1945,34 @@ def _index_snapshot(
             detail = f"Eligible contracts={raw_layer.get('candidate_count', 0)}; selected strike={raw_layer.get('strike', 'none')}; spread={raw_layer.get('spread_pct', 'unknown')}"
         else:
             detail = str(raw_layer.get("method") or "Valid option ATR, positive stop and target required.")
+        display_status = _quant_layer_display_status(
+            layer_key,
+            raw_layer,
+            normalized_option_count=len(normalized_options),
+            selected=selected,
+            option_atr=option_atr,
+        )
+        if layer_key == "trend_sentiment":
+            evidence_timestamp = _iso(candle_rows[-1][0]) if candle_rows else None
+            evidence_source = "angelone_completed_intraday_candle"
+        elif layer_key == "option_selection":
+            evidence_timestamp = _iso((selected or {}).get("source_timestamp") or (selected or {}).get("timestamp"))
+            evidence_source = "angelone_option_quote"
+        elif layer_key == "risk_levels":
+            evidence_timestamp = option_atr_timestamp
+            evidence_source = "angelone_completed_option_candle_atr"
+        else:
+            evidence_timestamp = observed
+            evidence_source = "angelone_spot_quote"
         display_layers[layer_key] = {
             **raw_layer,
             "name": layer_labels[layer_key],
-            "status": "PASS" if passed else "FAIL",
+            "status": display_status,
             "detail": detail,
+            "evidence_timestamp": evidence_timestamp,
+            "timestamp": evidence_timestamp,
+            "evidence_source": evidence_source,
+            "blocker_reason": None if passed else detail,
             "score": None,
         }
     passed_layers = sum(1 for key in five_layer_keys if (engine_layers.get(key) or {}).get("pass") is True)
