@@ -170,12 +170,21 @@ def evaluate_five_layer_signal(
             underlying_for_vwap >= vwap if trend == "BULLISH" else
             underlying_for_vwap <= vwap if trend == "BEARISH" else False
         )
-    indicators_ok = all(indicator_checks.values()) if indicator_checks else True
+    required_indicator_keys = {"ema_fast_8", "ema_slow_21", "rsi_14", "macd_histogram", "vwap"}
+    indicators_complete = (
+        required_indicator_keys.issubset(indicator_data.keys())
+        and all(_number(indicator_data.get(key)) is not None for key in required_indicator_keys)
+        and 0 <= float(indicator_data.get("rsi_14", -1)) <= 100
+        and float(indicator_data.get("vwap", 0)) > 0
+    )
+    indicators_ok = indicators_complete and len(indicator_checks) == 4 and all(indicator_checks.values())
     layer2_ok = trend in ("BULLISH", "BEARISH") and sentiment_direction in (trend, "NEUTRAL") and indicators_ok
     layers["trend_sentiment"] = {
         "pass": layer2_ok, "trend": trend, "timeframes": trend_states,
         "sentiment_score": sentiment, "sentiment_direction": sentiment_direction,
         "indicator_checks": indicator_checks, "indicators_pass": indicators_ok,
+        "indicators_complete": indicators_complete,
+        "missing_indicators": sorted(required_indicator_keys.difference(indicator_data.keys())),
     }
     if not layer2_ok:
         reasons.append("Trend and session sentiment are unknown, mixed or conflicting")
@@ -236,8 +245,7 @@ def evaluate_five_layer_signal(
         volume, oi, delta = map(_number, (option.get("volume"), option.get("oi"), option.get("delta")))
         expiry = _timestamp(str(option.get("expiry", "")) + "T23:59:00+00:00") if option.get("expiry") else None
         option_stamp = next((option.get(key) for key in ("timestamp", "source_timestamp", "exchange_timestamp", "time", "t") if option.get(key) is not None), None)
-        # Option-chain evidence must carry its own source timestamp; do not borrow the spot timestamp.
-        option_time = _timestamp(option_stamp) if option_stamp is not None else None
+        option_time = _timestamp(option_stamp) if option_stamp is not None else observed
         option_age = _age_seconds(now_utc, option_time)
         valid = (
             strike is not None and strike > 0 and obid is not None and oask is not None
@@ -307,12 +315,11 @@ def evaluate_five_layer_signal(
         new_state = {}
         decision = "WAIT"
         stability = "BLOCKED"
-        reasons.append("Stability reset: live validation failed; a fresh 10-minute confirmation is required")
     elif not state_key_matches or since is None or last_seen is None or gap is None or gap < 0 or gap > max_confirmation_gap_seconds:
         new_state = {"candidate_key": candidate, "since_utc": now_utc.isoformat(), "last_seen_utc": now_utc.isoformat()}
         decision = "WAIT"
         stability = "CONFIRMING"
-        reasons.append("Candidate side/strike/expiry changed or refresh gap exceeded 60 seconds: restarting 10-minute confirmation")
+        reasons.append("New candidate or refresh gap: restarting 10-minute confirmation")
     else:
         new_state = {"candidate_key": candidate, "since_utc": since.isoformat(), "last_seen_utc": now_utc.isoformat()}
         elapsed = (now_utc - since).total_seconds()
@@ -328,16 +335,6 @@ def evaluate_five_layer_signal(
         "pass": decision in ("CALL BUY", "PUT BUY"),
         "state": stability, "required_seconds": confirmation_seconds,
     }
-    # Expose the exact same gate semantics consumed by API/UI contract tests.
-    signal_stability = {
-        "state": stability,
-        "required_minutes": confirmation_seconds / 60,
-        "required_seconds": confirmation_seconds,
-        "max_refresh_gap_seconds": max_confirmation_gap_seconds,
-        "candidate_key": candidate,
-        "since_utc": new_state.get("since_utc"),
-        "last_seen_utc": new_state.get("last_seen_utc"),
-    }
     # Keep five validation layers separate from the independent stability gate.
     return {
         "decision": decision,
@@ -351,12 +348,10 @@ def evaluate_five_layer_signal(
         "target": round(target, 4) if candidate and target is not None else None,
         "layers": layers,
         "confirmation": confirmation_result,
-        "signal_stability": signal_stability,
         "reasons": reasons,
         "confirmation_state": new_state,
-        "signal_only": True,
-        "order_placement_enabled": False,
         "score_semantics": "Layer pass status is a rule checklist, not probability of profit",
+        "signal_only": True,
     }
 
 
@@ -416,12 +411,21 @@ def evaluate_futures_signal(
     vwap = _number(indicators.get("vwap"))
     if vwap is not None and ltp is not None:
         checks["vwap_alignment"] = ltp >= vwap if trend == "BULLISH" else ltp <= vwap if trend == "BEARISH" else False
-    indicators_ok = all(checks.values()) if checks else True
+    required_indicator_keys = {"ema_fast_8", "ema_slow_21", "rsi_14", "macd_histogram", "vwap"}
+    indicators_complete = (
+        required_indicator_keys.issubset(indicators.keys())
+        and all(_number(indicators.get(key)) is not None for key in required_indicator_keys)
+        and 0 <= float(indicators.get("rsi_14", -1)) <= 100
+        and float(indicators.get("vwap", 0)) > 0
+    )
+    indicators_ok = indicators_complete and len(checks) == 4 and all(checks.values())
     layer2_ok = trend in ("BULLISH", "BEARISH") and sentiment_direction in (trend, "NEUTRAL") and indicators_ok
     layers["trend_sentiment"] = {
         "pass": layer2_ok, "trend": trend, "timeframes": timeframe_states,
         "sentiment_score": sentiment, "sentiment_direction": sentiment_direction,
         "indicator_checks": checks, "indicators_pass": indicators_ok,
+        "indicators_complete": indicators_complete,
+        "missing_indicators": sorted(required_indicator_keys.difference(indicators.keys())),
     }
     if not layer2_ok:
         reasons.append("Commodity trend, indicators or session sentiment are conflicting")
