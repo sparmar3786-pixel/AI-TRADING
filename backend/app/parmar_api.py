@@ -71,7 +71,7 @@ def list_parmar_strategies(x_device_id: str = Header(default="")) -> dict[str, A
         available = _module_available(module_name)
         item["engine_module"] = module_name
         item["engine_loaded"] = available
-        candidate_ids = {"oi_price_action", "failed_move_pdh_pdl", "ema_crossover", "orb", "vwap"}
+        candidate_ids = {"oi_price_action", "hero_zero", "failed_move_pdh_pdl", "ema_crossover", "orb", "vwap"}
         detector_ids = {"day_hl_liquidity_sweep"}
         candidate_wired = item["id"] in candidate_ids
         detector_wired = item["id"] in detector_ids
