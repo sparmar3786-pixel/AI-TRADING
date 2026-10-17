@@ -1134,6 +1134,50 @@ def _session_range() -> tuple[str, str]:
     return start.strftime("%Y-%m-%d %H:%M"), end.strftime("%Y-%m-%d %H:%M")
 
 
+def _gate_strategy_candidate_payload(payload: dict[str, Any], *, source_fresh: bool, strategy_id: str) -> dict[str, Any]:
+    """Keep research candidates non-actionable and clear every invalid/stale level.
+
+    Strategy-engine levels are underlying-price candidates, not option premiums.
+    The canonical Quant, option mapping, risk and stability gates remain separate.
+    """
+    result = dict(payload)
+    candidate = str(result.get("candidate_decision") or "").upper()
+    candidate_valid = candidate in ("CALL BUY", "PUT BUY")
+    guards = list(result.get("guards") or [])
+    effective_fresh = source_fresh and result.get("data_fresh", True) is True
+    entry = _number(result.get("entry"))
+    stop = _number(result.get("stop_loss"))
+    target = _number(result.get("target"))
+    levels_valid = (
+        entry is not None and stop is not None and target is not None
+        and entry > 0 and stop > 0 and target > 0
+        and ((stop < entry < target) if candidate == "CALL BUY"
+             else (target < entry < stop) if candidate == "PUT BUY" else False)
+    )
+    if not effective_fresh:
+        candidate_valid = False
+        guards.append("STALE_OR_INCOMPLETE_SOURCE_DATA")
+    elif candidate_valid and not levels_valid:
+        candidate_valid = False
+        guards.append("INVALID_CANDIDATE_LEVELS")
+    elif not candidate_valid:
+        guards.append("NO_VALID_STRATEGY_CANDIDATE")
+
+    result.update({
+        "strategy_id": strategy_id,
+        "decision": "WAIT",
+        "actionable": False,
+        "data_fresh": bool(effective_fresh),
+        "candidate_decision": candidate if candidate_valid else None,
+        "entry_price_basis": result.get("entry_price_basis") or "UNDERLYING_SPOT",
+        "guards": list(dict.fromkeys(guards)),
+    })
+    if not candidate_valid:
+        for key in ("strike", "expiry", "option_side", "entry", "stop_loss", "target", "risk_reward", "contract_symbol"):
+            result[key] = None
+    return result
+
+
 def _wait_signal(index: str, reason: str) -> dict[str, Any]:
     """Return a complete, explicitly unavailable five-layer contract on collection failure.
 
@@ -1993,29 +2037,16 @@ def _index_snapshot(
             daily_frame = daily_frame.dropna(subset=["timestamp"]).set_index("timestamp").sort_index()
 
         def _keep_wait(payload: dict[str, Any], strategy_id: str) -> dict[str, Any]:
-            candidate = str(payload.get("candidate_decision") or "").upper()
-            guards = list(payload.get("guards") or [])
-            effective_fresh = source_fresh and payload.get("data_fresh", True) is True
-            if candidate in ("CALL BUY", "PUT BUY"):
-                guards = list(dict.fromkeys(guards + [
+            gated = _gate_strategy_candidate_payload(
+                payload, source_fresh=source_fresh, strategy_id=strategy_id,
+            )
+            if gated.get("candidate_decision") in ("CALL BUY", "PUT BUY"):
+                gated["guards"] = list(dict.fromkeys(list(gated.get("guards") or []) + [
                     "OPTION_CONTRACT_MAPPING_REQUIRED",
                     "FIVE_LAYER_QUANT_GATE_REQUIRED",
                     "SERVER_600_SECOND_CONFIRMATION_REQUIRED",
                 ]))
-            payload.update({
-                "strategy_id": strategy_id, "decision": "WAIT", "actionable": False,
-                "data_fresh": bool(effective_fresh),
-                "entry_price_basis": payload.get("entry_price_basis") or "UNDERLYING_SPOT",
-                "guards": guards,
-            })
-            if not effective_fresh:
-                payload["candidate_decision"] = None
-                payload["strike"] = None
-                payload["entry"] = None
-                payload["stop_loss"] = None
-                payload["target"] = None
-                payload["guards"] = list(dict.fromkeys(guards + ["STALE_OR_INCOMPLETE_SOURCE_DATA"]))
-            return payload
+            return gated
 
         try:
             ema_q = EMAQuantEngine().generate(strategy_frame, spot, strike_step=strike_step, current_time=current_time)

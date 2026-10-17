@@ -237,10 +237,31 @@ def evaluate_five_layer_signal(
     chain = chain if isinstance(chain, list) else []
     option_type = "CALL" if trend == "BULLISH" else "PUT" if trend == "BEARISH" else None
     valid_options: list[tuple[float, dict[str, Any]]] = []
+    # Duplicate option contracts make the source ambiguous. Reject every copy of
+    # a duplicated (side, strike, expiry) identity instead of picking whichever
+    # duplicate happens to appear first in the broker payload.
+    contract_counts: dict[tuple[str, float, str], int] = {}
     for option in chain:
-        if not isinstance(option, dict) or option.get("option_type", "").upper() != option_type:
+        if not isinstance(option, dict):
+            continue
+        side = str(option.get("option_type") or "").upper()
+        strike_value = _number(option.get("strike"))
+        expiry_text = str(option.get("expiry") or "")
+        expiry_value = _timestamp(expiry_text + "T23:59:00+00:00") if expiry_text else None
+        if side in ("CALL", "PUT") and strike_value is not None and expiry_value is not None:
+            identity = (side, strike_value, expiry_value.date().isoformat())
+            contract_counts[identity] = contract_counts.get(identity, 0) + 1
+    duplicate_contracts = sum(1 for count in contract_counts.values() if count > 1)
+    for option in chain:
+        if not isinstance(option, dict) or str(option.get("option_type") or "").upper() != option_type:
             continue
         strike = _number(option.get("strike"))
+        expiry_text = str(option.get("expiry") or "")
+        expiry_identity = _timestamp(expiry_text + "T23:59:00+00:00") if expiry_text else None
+        if strike is not None and expiry_identity is not None:
+            identity = (option_type or "", strike, expiry_identity.date().isoformat())
+            if contract_counts.get(identity, 0) != 1:
+                continue
         obid, oask, ltp = map(_number, (option.get("bid"), option.get("ask"), option.get("ltp")))
         volume, oi, delta = map(_number, (option.get("volume"), option.get("oi"), option.get("delta")))
         expiry = _timestamp(str(option.get("expiry", "")) + "T23:59:00+00:00") if option.get("expiry") else None
@@ -271,6 +292,7 @@ def evaluate_five_layer_signal(
     layers["option_selection"] = {
         "pass": layer4_ok, "option_type": option_type,
         "candidate_count": len(valid_options),
+        "duplicate_contract_groups_rejected": duplicate_contracts,
         "strike": selected.get("strike") if selected else None,
         "expiry": selected.get("expiry") if selected else None,
         "spread_pct": round((float(selected["ask"]) - float(selected["bid"])) /
@@ -278,7 +300,7 @@ def evaluate_five_layer_signal(
                        if selected else None,
     }
     if not layer4_ok:
-        reasons.append("No fresh, liquid, non-expired option contract passes spread/delta checks")
+        reasons.append("No fresh, liquid, non-expired, unambiguous option contract passes spread/delta checks")
 
     # Layer 5: risk levels + ten-minute stable-candidate gate.
     entry = _number(selected.get("ask")) if selected else None

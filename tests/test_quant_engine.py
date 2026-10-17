@@ -221,3 +221,18 @@ class FiveLayerEngineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    def test_duplicate_option_contracts_are_rejected_instead_of_selected(self):
+        duplicate = dict(self.snapshot["option_chain"][0])
+        self.snapshot["option_chain"] = [duplicate, dict(duplicate)]
+        result = evaluate_five_layer_signal(self.snapshot, now=self.now)
+        layer = result["layers"]["option_selection"]
+        self.assertFalse(layer["pass"])
+        self.assertEqual(layer["candidate_count"], 0)
+        self.assertEqual(layer["duplicate_contract_groups_rejected"], 1)
+        self.assertEqual(result["decision"], "WAIT")
+        self.assertIsNone(result["strike"])
+        self.assertIsNone(result["entry"])
+        self.assertIsNone(result["stop_loss"])
+        self.assertIsNone(result["target"])
