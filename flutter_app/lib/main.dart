@@ -8,7 +8,7 @@ import 'api.dart';
 import 'config.dart';
 import 'broker_home_prototype_page.dart';
 import 'strategy_library_page.dart';
-import 'quant_engine_page.dart';
+import 'quant_engine_lab_page.dart';
 
 const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Backtesting','API','Data Health','Broker Home','Strategies','Quant Engine','Quant Signal','Strategy Signal','Signal Calendar'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
@@ -455,7 +455,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           lastFetch: lastFetch,
           onRefresh: refresh,
         ),
-        BrokerHomePrototypePage(
+        BrokerHomePage(
           backendUrl: backendUrl,
           market: market,
           signals: signals,
@@ -464,12 +464,12 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           onIndexSelected: (value) => setState(() => selectedIndex = value),
         ),
         StrategyLibraryPage(signals: signals, selectedIndex: selectedIndex),
-        QuantEnginePage(
-          selectedIndex: selectedIndex,
-          signals: signals,
+        QuantEngineLabPage(
+          backendUrl: backendUrl,
+          index: selectedIndex,
           market: market,
-          marketOpen: _marketOpenNow,
-          onIndexChanged: (value) => setState(() => selectedIndex = value),
+          lastFetch: lastFetch,
+          onOpenBacktest: () => setState(() => selectedTab = tabs.indexOf('Backtesting')),
         ),
         const IsolatedSignalPage(endpoint: '/v1/signals/quant', title: 'Quant Engine Signal', description: 'Quant owns the final validated decision and its evidence. Missing/stale evidence remains WAIT/BLOCK.'),
         const IsolatedSignalPage(endpoint: '/v1/signals/strategies', title: 'Parmar Engine Strategy Signals', description: 'Strategy candidates are separate from Quant decisions and cannot override safety gates.'),
@@ -1492,7 +1492,7 @@ class _IsolatedSignalPageState extends State<IsolatedSignalPage> {
     if (loading) return;
     setState(() { loading = true; error = null; });
     try {
-      final result = await FreshApi.signal().getJson(widget.endpoint, timeout: const Duration(seconds: 20));
+      final result = await FreshApi(AppConfig.backendUrl, null, AppConfig.signalBackendUrl).getJson(widget.endpoint, timeout: const Duration(seconds: 20));
       if (!mounted) return;
       setState(() { payload = result; loading = false; });
     } catch (e) {
