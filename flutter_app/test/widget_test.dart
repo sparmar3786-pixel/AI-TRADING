@@ -171,21 +171,18 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('STRATEGY LIBRARY'), findsOneWidget);
-    for (final label in <String>[
-      'OI Price Action',
-      'Hero Zero',
-      'Failed-Move / PDH-PDL',
-      'EMA Crossover',
-      'DAY-HL Liquidity Sweep',
-      'Opening Range Breakout (ORB)',
-      'VWAP Strategy',
-    ]) {
-      final labelFinder = label == 'Opening Range Breakout (ORB)'
-          ? find.text('Source: quant/orb_engine.py')
-          : (label == 'VWAP Strategy'
-              ? find.text('Source: quant/vwap_strategy.py')
-              : find.text(label));
-      expect(labelFinder, findsOneWidget, reason: '$label must be in the Strategies tab');
+    const sourceByLabel = <String, String>{
+      'OI Price Action': 'Source: quant/oi_price_action_engine.py',
+      'Hero Zero': 'Source: quant/hero_zero.py',
+      'Failed-Move / PDH-PDL': 'Source: quant/failed_move_fade.py',
+      'EMA Crossover': 'Source: quant/ema_quant_engine.py',
+      'DAY-HL Liquidity Sweep': 'Source: quant/day_hl_liquidity.py',
+      'Opening Range Breakout (ORB)': 'Source: quant/orb_engine.py',
+      'VWAP Strategy': 'Source: quant/vwap_strategy.py',
+    };
+    for (final entry in sourceByLabel.entries) {
+      expect(find.text(entry.value), findsOneWidget,
+          reason: entry.key + ' inventory entry must be in the Strategies tab');
     }
     expect(find.text('Expiry and fresh option quotes required; candidate is not actionable'), findsOneWidget);
   });
@@ -308,20 +305,20 @@ void main() {
       of: find.byType(StrategyLibraryPage),
       matching: find.byType(Scrollable),
     ).first;
-    await tester.scrollUntilVisible(
-      find.text('Candidate: CALL BUY • Approved decision: WAIT'),
-      250,
-      scrollable: strategyScroll,
+    final orbDecision = find.descendant(
+      of: find.byKey(const ValueKey('candidate-card-orb')),
+      matching: find.text('Candidate: CALL BUY • Approved decision: WAIT'),
     );
-    expect(find.text('Candidate: CALL BUY • Approved decision: WAIT'), findsOneWidget);
+    await tester.scrollUntilVisible(orbDecision, 250, scrollable: strategyScroll);
+    expect(orbDecision, findsOneWidget);
     expect(find.textContaining('Underlying entry: 25000.0 • SL: 24900.0 • Target: 25200.0'), findsOneWidget);
     expect(find.textContaining('Five-layer quant validation required'), findsOneWidget);
-    await tester.scrollUntilVisible(
-      find.text('Candidate: WAIT • Approved decision: WAIT'),
-      250,
-      scrollable: strategyScroll,
+    final vwapDecision = find.descendant(
+      of: find.byKey(const ValueKey('candidate-card-vwap')),
+      matching: find.text('Candidate: WAIT • Approved decision: WAIT'),
     );
-    expect(find.text('Candidate: WAIT • Approved decision: WAIT'), findsOneWidget);
+    await tester.scrollUntilVisible(vwapDecision, 250, scrollable: strategyScroll);
+    expect(vwapDecision, findsOneWidget);
     expect(find.textContaining('Underlying spot levels only—not option-premium prices'), findsWidgets);
   });
 
