@@ -3171,6 +3171,27 @@ def diagnostics(_: str = Depends(_device)) -> dict[str, Any]:
     fresh_count = sum(1 for row in (_signal_cache or {}).get("market", {}).values() if row.get("live") is True)
     return {
         "service": "ai-trading-readonly-api",
+        "security": {
+            "auth_mode": os.getenv("API_AUTH_MODE", "legacy").strip().lower(),
+            "api_access_key_configured": bool((os.getenv("API_ACCESS_KEY") or os.getenv("BACKEND_ACCESS_KEY") or "").strip()),
+            "firebase_verification_configured": bool((os.getenv("FIREBASE_PROJECT_ID") or os.getenv("GOOGLE_CLOUD_PROJECT") or "").strip()),
+            "firebase_allowlist_configured": bool(os.getenv("AUTH_ALLOWED_UIDS", "").strip()),
+            "legacy_device_id_only_auth_active": (
+                os.getenv("API_AUTH_MODE", "legacy").strip().lower() == "legacy"
+                and not (os.getenv("API_ACCESS_KEY") or os.getenv("BACKEND_ACCESS_KEY") or "").strip()
+            ),
+            "rate_limit_window_seconds": int(_RATE_WINDOW_SECONDS),
+            "rate_limits_per_minute": {"general": 300, "provider_and_ai": 30, "mutation": 30},
+        },
+        "signal_event_journal": dict(_signal_event_persistence),
+        "exchange_calendar": {
+            segment: {
+                "source_status": exchange_holidays_for(segment, datetime.now(IST).year).get("source_status"),
+                "verified": exchange_holidays_for(segment, datetime.now(IST).year).get("verified"),
+                "source_as_of": exchange_holidays_for(segment, datetime.now(IST).year).get("source_as_of"),
+            }
+            for segment in ("NSE_FO", "BSE_FO", "MCX")
+        },
         "signal_build": dict(_signal_build_metrics),
         "api_performance": {
             path: {key: value for key, value in metric.items() if key != "total_ms"}
