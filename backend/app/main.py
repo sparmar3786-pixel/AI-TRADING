@@ -5384,6 +5384,108 @@ def signal_performance(_: str = Depends(_device)) -> dict[str, Any]:
     return _signal_outcome_report(rows, dict(_signal_outcome_persistence))
 
 
+@app.get("/v1/signals/quant")
+def quant_engine_signal(ema_fast: int = Query(default=8, ge=2, le=50), ema_slow: int = Query(default=13, ge=3, le=100), _: str = Depends(_device)) -> dict[str, Any]:
+    """Quant-owned decision/evidence projection; shares the single collector/cache."""
+    if ema_fast >= ema_slow:
+        raise HTTPException(status_code=400, detail="ema_fast must be less than ema_slow")
+    payload = _get_signals()
+    rows = payload.get("signals") if isinstance(payload.get("signals"), dict) else {}
+    return {
+        "status": payload.get("status", "WAIT"),
+        "source": "quant_engine",
+        "decision_owner": "five_layer_quant_engine",
+        "data_source": payload.get("market", {}),
+        "signals": {
+            str(index): {
+                "decision": signal.get("decision", "WAIT"),
+                "entry": signal.get("entry"),
+                "stop_loss": signal.get("stop_loss"),
+                "target": signal.get("target"),
+                "strike": signal.get("strike"),
+                "expiry": signal.get("expiry"),
+                "quant_engine": signal.get("quant_engine", signal.get("five_layer_engine", {})),
+                "five_layer_engine": signal.get("five_layer_engine", signal.get("quant_engine", {})),
+                "live_validation": signal.get("live_validation", {}),
+                "signal_stability": signal.get("signal_stability", {}),
+                "blockers": signal.get("blockers", []),
+                "data_fresh": signal.get("data_fresh", False),
+            }
+            for index, signal in rows.items() if isinstance(signal, dict)
+        },
+        "performance": payload.get("performance", {}),
+        "refreshing": payload.get("refreshing", False),
+        "order_placement_enabled": False,
+    }
+
+
+@app.get("/v1/signals/strategies")
+def strategy_engine_signals(_: str = Depends(_device)) -> dict[str, Any]:
+    """Strategy candidates only; never promotes a candidate into a final trade."""
+    payload = _get_signals()
+    candidates = payload.get("strategy_candidates", [])
+    if not isinstance(candidates, list):
+        candidates = []
+    return {
+        "status": payload.get("status", "WAIT"),
+        "source": "parmar_strategy_engine",
+        "decision_owner": "strategy_candidate_engine",
+        "strategy_candidates": candidates,
+        "market": payload.get("market", {}),
+        "generated_at": payload.get("generated_at"),
+        "refreshing": payload.get("refreshing", False),
+        "note": "Candidates are informational only. Quant, option mapping, risk and 600-second confirmation remain independent mandatory gates.",
+        "order_placement_enabled": False,
+    }
+
+
+@app.get("/v1/signals/calendar")
+def signal_outcome_calendar(start_date: str, end_date: str, _: str = Depends(_device)) -> dict[str, Any]:
+    """Daily outcome calendar based only on persisted signal records and observed quote exits."""
+    try:
+        start = date.fromisoformat(start_date)
+        end = date.fromisoformat(end_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Dates must use YYYY-MM-DD") from exc
+    if end < start or (end - start).days > 366:
+        raise HTTPException(status_code=400, detail="Date range must be ordered and no longer than 367 days")
+    rows = _load_signal_outcomes()
+    daily: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        opened = str(row.get("opened_at") or "")[:10]
+        if not opened or opened < start_date or opened > end_date:
+            continue
+        daily.setdefault(opened, []).append(row)
+    days: dict[str, Any] = {}
+    cursor = start
+    while cursor <= end:
+        key = cursor.isoformat()
+        day_rows = daily.get(key, [])
+        closed = [row for row in day_rows if row.get("status") == "CLOSED" and row.get("exit_reason") in {"TARGET", "STOP_LOSS"}]
+        targets = sum(1 for row in closed if row.get("exit_reason") == "TARGET")
+        stops = sum(1 for row in closed if row.get("exit_reason") == "STOP_LOSS")
+        days[key] = {
+            "signals_opened": len(day_rows),
+            "open": sum(1 for row in day_rows if row.get("status") == "OPEN"),
+            "closed": len(closed),
+            "targets": targets,
+            "stop_losses": stops,
+            "accuracy_percent": round(100 * targets / len(closed), 2) if closed else None,
+            "accuracy_status": "OBSERVED" if closed else "NO_CLOSED_OUTCOMES",
+            "signals": day_rows,
+        }
+        cursor += timedelta(days=1)
+    return {
+        "status": "ok",
+        "source": "persisted_shadow_signal_outcomes",
+        "timezone": "Asia/Kolkata",
+        "days": days,
+        "persistence": dict(_signal_outcome_persistence),
+        "note": "Observed quote outcomes only, not broker fills. Accuracy is target hits divided by target/stop-loss closed outcomes; open signals are excluded.",
+        "order_placement_enabled": False,
+    }
+
+
 @app.get("/v1/signals")
 def signals(ema_fast: int = Query(default=8, ge=2, le=50), ema_slow: int = Query(default=13, ge=3, le=100), _: str = Depends(_device)) -> dict[str, Any]:
     if ema_fast >= ema_slow:
