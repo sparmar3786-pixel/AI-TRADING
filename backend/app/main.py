@@ -1971,6 +1971,7 @@ def _index_snapshot(
         def _keep_wait(payload: dict[str, Any], strategy_id: str) -> dict[str, Any]:
             candidate = str(payload.get("candidate_decision") or "").upper()
             guards = list(payload.get("guards") or [])
+            effective_fresh = source_fresh and payload.get("data_fresh", True) is True
             if candidate in ("CALL BUY", "PUT BUY"):
                 guards = list(dict.fromkeys(guards + [
                     "OPTION_CONTRACT_MAPPING_REQUIRED",
@@ -1979,11 +1980,11 @@ def _index_snapshot(
                 ]))
             payload.update({
                 "strategy_id": strategy_id, "decision": "WAIT", "actionable": False,
-                "data_fresh": bool(source_fresh),
+                "data_fresh": bool(effective_fresh),
                 "entry_price_basis": payload.get("entry_price_basis") or "UNDERLYING_SPOT",
                 "guards": guards,
             })
-            if not source_fresh:
+            if not effective_fresh:
                 payload["candidate_decision"] = None
                 payload["strike"] = None
                 payload["entry"] = None
