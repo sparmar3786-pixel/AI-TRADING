@@ -94,7 +94,7 @@ class AuditRemediationTests(unittest.TestCase):
         self.assertNotEqual(owner_a, owner_b)
         self.assertEqual(
             owner_a,
-            hashlib.sha256(f"firebase:owner-a\\0{device_id}".encode("utf-8")).hexdigest(),
+            hashlib.sha256(f"firebase:owner-a\0{device_id}".encode("utf-8")).hexdigest(),
         )
 
     def test_secondary_routers_reject_device_id_without_server_auth(self):
