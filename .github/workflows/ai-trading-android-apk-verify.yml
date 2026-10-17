@@ -36,6 +36,8 @@ jobs:
           flutter --version
           dart --version
           java -version
+      - name: Generate missing Android platform scaffold
+        run: flutter create --platforms=android --project-name ai_trading_signal .
       - name: Resolve dependencies
         run: flutter pub get
       - name: Analyze Dart code
