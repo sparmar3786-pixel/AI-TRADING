@@ -5059,7 +5059,7 @@ def _record_signal_events(
             )
             serialized = json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":"), default=str)
             fingerprint = hashlib.sha256(serialized.encode()).hexdigest()
-            transition_key = f"{index}|{spec['engine_id']}|{spec['strategy_id']}"
+            transition_key = f"{trade_date}|{index}|{spec['engine_id']}|{spec['strategy_id']}"
             if latest_fingerprint.get(transition_key) == fingerprint:
                 continue
             signal_identity = {
