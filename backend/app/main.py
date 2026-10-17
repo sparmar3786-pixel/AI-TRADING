@@ -29,7 +29,7 @@ from zoneinfo import ZoneInfo
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 try:
@@ -57,6 +57,12 @@ from strategies.technical import atr as technical_atr, ema as technical_ema, rsi
 from strategies.advanced import bollinger_bands, macd as advanced_macd, donchian_channels
 from strategies.suite import evaluate_strategy_suite
 try:
+    from app.api_auth import AuthenticationError, AuthConfigurationError, authenticate_request
+    from app.exchange_calendar import day_status as exchange_day_status, holidays_for as exchange_holidays_for, segment_for_symbol, start_refresh_scheduler
+except ModuleNotFoundError:
+    from backend.app.api_auth import AuthenticationError, AuthConfigurationError, authenticate_request
+    from backend.app.exchange_calendar import day_status as exchange_day_status, holidays_for as exchange_holidays_for, segment_for_symbol, start_refresh_scheduler
+try:
     # Docker image runs the service as app.main with backend/app copied to /app/app.
     from app.smc_api import router as smc_router
 except ModuleNotFoundError:
@@ -83,7 +89,7 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Accept", "Content-Type", "X-Device-Id", "Authorization"],
+    allow_headers=["Accept", "Content-Type", "X-Device-Id", "X-API-Access-Key", "Authorization"],
     max_age=600,
 )
 app.include_router(smc_router)
@@ -270,8 +276,23 @@ class BacktestRequest(BaseModel):
     initial_capital: float = Field(default=100000.0, gt=0, le=1000000000)
 
 
-def _device(x_device_id: str = Header(default="")) -> str:
-    # This is a device-scope identifier, not a substitute for account auth.
+def _device(
+    x_device_id: str = Header(default=""),
+    x_api_access_key: str = Header(default="", alias="X-API-Access-Key"),
+    authorization: str = Header(default=""),
+) -> str:
+    """Validate a device label only after server-side authentication succeeds.
+
+    Legacy mode is retained for a staged client rollout. Production must set
+    API_AUTH_MODE=required and configure API_ACCESS_KEY or allow-listed Firebase
+    ID tokens before claiming authenticated access.
+    """
+    try:
+        authenticate_request(authorization=authorization, access_key=x_api_access_key)
+    except AuthConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except AuthenticationError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
     if not DEVICE_ID_RE.fullmatch(x_device_id or ""):
         raise HTTPException(status_code=401, detail="Missing or invalid X-Device-Id")
     return x_device_id
@@ -281,12 +302,16 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 def _is_market_session_open(symbol: str, now: datetime | None = None) -> bool:
-    """Conservative weekday session clock; quote freshness remains an independent required gate."""
+    """Session clock plus verified exchange closures; quote freshness remains mandatory."""
     local = (now or datetime.now(IST)).astimezone(IST)
     if local.weekday() >= 5:
         return False
-    clock = local.time().replace(tzinfo=None)
     key = symbol.strip().upper()
+    calendar_status = exchange_day_status(local.date(), segment_for_symbol(key))
+    if calendar_status.get("market_status") in {"EXCHANGE_HOLIDAY", "SPECIAL_SESSION"}:
+        # Special-session timings are not inferred from normal weekday hours.
+        return False
+    clock = local.time().replace(tzinfo=None)
     if key in COMMODITY_NAMES:
         return dt_time(9, 0) <= clock <= dt_time(23, 30)
     return dt_time(9, 15) <= clock <= dt_time(15, 30)
