@@ -211,10 +211,10 @@ class _StrategyCard extends StatelessWidget {
                     children: [
                       const Text('Backend decision: WAIT • Actionable: NO',
                           style: TextStyle(fontWeight: FontWeight.w900, color: Colors.orangeAccent)),
-                      Text('Candidate: $candidateDecision • \${checks['fresh_live_market_data'] == true ? 'market data fresh' : 'market freshness not verified'}',
+                      Text('Candidate: $candidateDecision • ${checks['fresh_live_market_data'] == true ? 'market data fresh' : 'market freshness not verified'}',
                           style: const TextStyle(fontSize: 12)),
                       if (entry != null || stop != null || target != null)
-                        Text('Underlying spot levels only — Entry: \${entry ?? '—'} • SL: \${stop ?? '—'} • Target: \${target ?? '—'}',
+                        Text('Underlying spot levels only — Entry: ${entry ?? '—'} • SL: ${stop ?? '—'} • Target: ${target ?? '—'}',
                             style: const TextStyle(fontSize: 11, color: Colors.white70)),
                       if (reasons.isNotEmpty)
                         Text(reasons, style: const TextStyle(fontSize: 11, color: Colors.white70)),
