@@ -6,14 +6,15 @@ import { Layers, CheckCircle2, AlertTriangle, ShieldCheck, Activity, Award } fro
 export const QuantEngineLabPage: React.FC = () => {
   const { selectedIndex, market, signals } = useTrading();
   const currentSignal = signals[selectedIndex];
-  const layers = apiService.getQuantLayers();
+  const layers = apiService.getQuantLayers(currentSignal);
+  const reportedLayers = layers.filter(layer => layer.status !== 'UNAVAILABLE').length;
+  const passedLayers = layers.filter(layer => layer.status === 'PASS').length;
+  const failedLayers = layers.filter(layer => layer.status === 'FAIL').length;
+  const allLayersReported = reportedLayers === 5;
+  const hasLayerEvidence = reportedLayers > 0;
+  const serverConfirmed = currentSignal?.signal_stability?.state === 'CONFIRMED' &&
+    currentSignal?.signal_stability?.server_confirmed === true;
 
-  const quantAvailable = layers.length > 0 && layers.every(layer =>
-    layer.status !== 'UNAVAILABLE' && layer.score !== null
-  );
-  const totalScore = quantAvailable
-    ? Math.round(layers.reduce((acc, layer) => acc + ((layer.score ?? 0) * layer.weight) / 100, 0))
-    : null;
 
   return (
     <div className="p-3 pb-8 space-y-4 select-none max-w-2xl mx-auto">
@@ -31,10 +32,10 @@ export const QuantEngineLabPage: React.FC = () => {
 
           <div className="text-right">
             <div className="text-2xl font-black text-emerald-400 font-mono">
-              {totalScore === null ? 'N/A' : `${totalScore}%`}
+              {!hasLayerEvidence ? 'N/A' : `${passedLayers}/${reportedLayers}`}
             </div>
             <div className="text-[10px] text-slate-400 font-mono">
-              {quantAvailable ? 'Confluence Score' : 'Live score unavailable'}
+              {hasLayerEvidence ? 'Backend gates passing / reported' : 'Backend evidence unavailable'}
             </div>
           </div>
         </div>
@@ -42,13 +43,13 @@ export const QuantEngineLabPage: React.FC = () => {
         {/* Confluence Rating Bar */}
         <div className="mt-3 pt-3 border-t border-[#1C2740]">
           <div className="flex justify-between text-[10px] text-slate-400 font-mono mb-1">
-            <span>Minimum Gate: 80%</span>
-            <span className={quantAvailable ? 'text-emerald-400 font-bold' : 'text-rose-300 font-bold'}>{quantAvailable ? `Passed Threshold: ${totalScore}%` : 'Threshold not evaluated'}</span>
+            <span>Five mandatory backend rule gates</span>
+            <span className={allLayersReported && passedLayers === 5 ? 'text-emerald-400 font-bold' : 'text-amber-300 font-bold'}>{!hasLayerEvidence ? 'No backend result' : `${reportedLayers}/5 reported • ${passedLayers} PASS • ${failedLayers} FAIL`}</span>
           </div>
           <div className="w-full h-2 bg-[#070B12] rounded-full overflow-hidden">
             <div
               className="h-full bg-gradient-to-r from-cyan-500 to-emerald-400 rounded-full transition-all duration-500"
-              style={{ width: `${totalScore ?? 0}%` }}
+              style={{ width: `${hasLayerEvidence ? Math.round((passedLayers / 5) * 100) : 0}%` }}
             ></div>
           </div>
         </div>
@@ -77,7 +78,7 @@ export const QuantEngineLabPage: React.FC = () => {
 
               <div className="flex items-center space-x-2">
                 <span className={`text-xs font-mono font-bold ${layer.status === 'PASS' ? 'text-emerald-400' : layer.status === 'UNAVAILABLE' ? 'text-rose-300' : 'text-amber-300'}`}>
-                  {layer.score === null ? 'N/A' : `${layer.score}/100`}
+                  {layer.score === null ? 'Rule gate' : `${layer.score}/100`}
                 </span>
                 <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold font-mono ${layer.status === 'PASS' ? 'bg-emerald-500/20 text-emerald-400' : layer.status === 'UNAVAILABLE' ? 'bg-rose-500/15 text-rose-300' : 'bg-amber-500/20 text-amber-300'}`}>
                   {layer.status}
@@ -90,7 +91,7 @@ export const QuantEngineLabPage: React.FC = () => {
             </p>
 
             <div className="pl-7 text-[10px] text-slate-500 font-mono">
-              Engine weight: {layer.weight}%
+              Backend evidence only • not a profit probability
             </div>
           </div>
         ))}
@@ -103,11 +104,13 @@ export const QuantEngineLabPage: React.FC = () => {
           <span>ALGO CONFLUENCE SUMMARY</span>
         </div>
         <p className="text-xs text-slate-300 leading-relaxed">
-          {!quantAvailable
-            ? 'Quant confluence is unavailable because verified backend layer calculations are not available. Do not treat this panel as a validated signal.'
-            : currentSignal?.candidate_decision && currentSignal.candidate_decision !== 'WAIT'
-              ? `A ${currentSignal.candidate_decision} candidate is present for ${selectedIndex}. This display does not prove profitability or server-side 10-minute confirmation; verify backend validation and fresh data before treating it as actionable.`
-              : `All 5 quantitative layers are actively monitoring ${selectedIndex}. Signal generation is held in WAIT until minimum 80% weighted confluence is achieved.`}
+          {!allLayersReported
+            ? `Verified backend evidence is incomplete for ${selectedIndex}: ${reportedLayers}/5 layer results are present. Missing layers remain UNAVAILABLE; no local scores are fabricated.`
+            : failedLayers > 0
+              ? `${passedLayers}/5 backend rule gates passed and ${failedLayers} failed. The five-layer result is a validation checklist, not a probability of profit.`
+              : serverConfirmed
+                ? `All five backend rule gates passed and the server reports a confirmed stability state for ${selectedIndex}. This remains informational only; it is not a broker fill or profitability guarantee.`
+                : `All five backend rule checks passed, but the final signal is not server-confirmed. Keep the decision in WAIT until the server-owned validation and 600-second gate are verified.`}
         </p>
       </div>
     </div>

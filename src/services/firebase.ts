@@ -68,6 +68,24 @@ async function getAuthenticatedUid(): Promise<string | null> {
 }
 
 /**
+ * Return a Firebase ID token for APIs that perform server-side UID allow-list checks.
+ * The token is short-lived and is sent only in the Authorization header; it is
+ * never persisted by this module. Anonymous auth is accepted only if the backend
+ * explicitly allow-lists that verified UID.
+ */
+export async function getBackendIdToken(): Promise<string | null> {
+  if (!firebaseApp) return null;
+  try {
+    const auth = getAuth(firebaseApp);
+    const user = auth.currentUser ?? (await signInAnonymously(auth)).user;
+    return await user.getIdToken();
+  } catch (error) {
+    console.warn('Backend Firebase authentication unavailable.', error);
+    return null;
+  }
+}
+
+/**
  * Sync a paper trade only under the authenticated Firebase UID expected by
  * firestore.rules. Cloud failures never interrupt local paper trading.
  */
