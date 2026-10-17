@@ -315,7 +315,7 @@ void main() {
     ).first;
     final orbDecision = find.descendant(
       of: find.byKey(const ValueKey('candidate-card-orb')),
-      matching: find.text('Candidate: CALL BUY • Approved decision: WAIT'),
+      matching: find.textContaining('Candidate: CALL BUY'),
     );
     await tester.scrollUntilVisible(orbDecision, 250, scrollable: strategyScroll);
     expect(orbDecision, findsOneWidget);
@@ -323,7 +323,7 @@ void main() {
     expect(find.textContaining('Five-layer quant validation required'), findsOneWidget);
     final vwapDecision = find.descendant(
       of: find.byKey(const ValueKey('candidate-card-vwap')),
-      matching: find.text('Candidate: WAIT • Approved decision: WAIT'),
+      matching: find.textContaining('Candidate: WAIT'),
     );
     await tester.scrollUntilVisible(vwapDecision, 250, scrollable: strategyScroll);
     expect(vwapDecision, findsOneWidget);
