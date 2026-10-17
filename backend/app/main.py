@@ -3894,6 +3894,7 @@ def _get_signals_uncached(force: bool = False) -> dict[str, Any]:
             "order_placement_enabled": False,
         }
         result["signal_performance"] = _update_signal_outcomes(signals, market, commodities)
+        result["signal_event_journal"] = _record_signal_events(signals, market)
         with _lock:
             _signal_cache = result
             _signal_cache_at = time.monotonic()
@@ -4843,6 +4844,242 @@ def _save_signal_outcomes(rows: list[dict[str, Any]]) -> bool:
             "records": len(bounded),
         })
         return db_saved or file_saved
+
+SIGNAL_EVENTS_MAX_ROWS = 25000
+_signal_events_memory: list[dict[str, Any]] = []
+_signal_event_persistence: dict[str, Any] = {
+    "status": "NOT_INITIALIZED", "path": "/data/signal_events.json", "records": 0,
+}
+
+
+def _signal_event_path() -> Path:
+    return Path(os.getenv("SIGNAL_EVENTS_FILE", "/data/signal_events.json"))
+
+
+def _load_signal_events() -> list[dict[str, Any]]:
+    with _lock:
+        db_ok, db_value = get_state("signal_event_journal")
+        path = _signal_event_path()
+        volume_rows: list[dict[str, Any]] = []
+        try:
+            if path.is_file():
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(raw, list):
+                    volume_rows = [dict(item) for item in raw if isinstance(item, dict) and item.get("event_id")]
+        except (OSError, ValueError, TypeError):
+            volume_rows = []
+        if db_ok and isinstance(db_value, list):
+            merged: dict[str, dict[str, Any]] = {str(item["event_id"]): item for item in volume_rows}
+            for item in db_value:
+                if isinstance(item, dict) and item.get("event_id"):
+                    merged[str(item["event_id"])] = dict(item)
+            rows = sorted(merged.values(), key=lambda item: str(item.get("occurred_at") or ""))[-SIGNAL_EVENTS_MAX_ROWS:]
+            if len(rows) > len(db_value):
+                put_state("signal_event_journal", rows)
+            status = "POSTGRES_OK_MERGED_VOLUME" if len(rows) > len(db_value) else "POSTGRES_OK"
+            location = "postgresql:ai_trading_state/signal_event_journal"
+        elif volume_rows:
+            rows = sorted(volume_rows, key=lambda item: str(item.get("occurred_at") or ""))[-SIGNAL_EVENTS_MAX_ROWS:]
+            migrated = put_state("signal_event_journal", rows)
+            status = "VOLUME_OK_POSTGRES_MIGRATED" if migrated else "VOLUME_FALLBACK"
+            location = str(path)
+        else:
+            rows = list(_signal_events_memory[-SIGNAL_EVENTS_MAX_ROWS:])
+            status = "MEMORY_ONLY_OR_EMPTY"
+            location = str(path)
+        _signal_events_memory.clear()
+        _signal_events_memory.extend(dict(item) for item in rows)
+        _signal_event_persistence.update({"status": status, "path": location, "records": len(rows)})
+        return [dict(item) for item in rows]
+
+
+def _save_signal_events(rows: list[dict[str, Any]]) -> bool:
+    bounded = sorted(rows, key=lambda item: str(item.get("occurred_at") or ""))[-SIGNAL_EVENTS_MAX_ROWS:]
+    with _lock:
+        db_saved = put_state("signal_event_journal", bounded)
+        file_saved = False
+        path = _signal_event_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_suffix(path.suffix + ".tmp")
+            temporary.write_text(json.dumps(bounded, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+            temporary.replace(path)
+            file_saved = True
+        except OSError:
+            pass
+        _signal_events_memory.clear()
+        _signal_events_memory.extend(dict(item) for item in bounded)
+        if db_saved:
+            status, error = ("POSTGRES_OK_VOLUME_BACKUP_OK" if file_saved else "POSTGRES_OK"), None
+        elif file_saved:
+            status, error = "VOLUME_FALLBACK_POSTGRES_UNAVAILABLE", "PostgreSQLWriteFailed"
+        else:
+            status, error = "ERROR", "NoDurableStoreAvailable"
+        _signal_event_persistence.update({
+            "status": status, "last_error": error,
+            "path": "postgresql+volume" if db_saved and file_saved else str(path),
+            "records": len(bounded),
+        })
+        return db_saved or file_saved
+
+
+def _event_fingerprint_payload(
+    *, index: str, engine_id: str, strategy_id: str, decision: str,
+    state: str, validation: str, data_fresh: bool, strike: Any, expiry: Any,
+    entry: Any, stop_loss: Any, target: Any, reasons: list[str], layer_statuses: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "index": index, "engine_id": engine_id, "strategy_id": strategy_id,
+        "decision": decision, "state": state, "validation": validation,
+        "data_fresh": data_fresh, "strike": strike, "expiry": expiry,
+        "entry": entry, "stop_loss": stop_loss, "target": target,
+        "reasons": reasons[:2], "layer_statuses": layer_statuses,
+    }
+
+
+def _record_signal_events(
+    signals: dict[str, Any], market: dict[str, Any]
+) -> dict[str, Any]:
+    """Persist each changed Quant/Strategy state, including WAIT and blocked states."""
+    rows = _load_signal_events()
+    latest_fingerprint: dict[str, str] = {}
+    for row in rows:
+        key = str(row.get("transition_key") or "")
+        if key:
+            latest_fingerprint[key] = str(row.get("fingerprint") or "")
+    now = _utc_now()
+    trade_date = now.astimezone(IST).date().isoformat()
+    appended = 0
+
+    for raw_index, raw_signal in signals.items():
+        if not isinstance(raw_signal, dict):
+            continue
+        index = str(raw_index).strip().upper()
+        signal = raw_signal
+        validation = signal.get("live_validation") if isinstance(signal.get("live_validation"), dict) else {}
+        stability = signal.get("signal_stability") if isinstance(signal.get("signal_stability"), dict) else {}
+        quant_engine = signal.get("quant_engine") if isinstance(signal.get("quant_engine"), dict) else (
+            signal.get("five_layer_engine") if isinstance(signal.get("five_layer_engine"), dict) else {}
+        )
+        layer_source = quant_engine.get("layers") if isinstance(quant_engine.get("layers"), dict) else (
+            signal.get("layers") if isinstance(signal.get("layers"), dict) else {}
+        )
+        layer_statuses = {
+            str(name): bool(value.get("pass") is True) if isinstance(value, dict) else None
+            for name, value in layer_source.items()
+        }
+        reasons_raw = signal.get("reasons") or signal.get("reason") or []
+        if isinstance(reasons_raw, str):
+            reasons = [reasons_raw[:240]]
+        elif isinstance(reasons_raw, list):
+            reasons = [str(item)[:240] for item in reasons_raw[:4]]
+        else:
+            reasons = []
+        data_row = market.get(index) if isinstance(market.get(index), dict) else {}
+        source_timestamp = data_row.get("source_timestamp") or data_row.get("timestamp") or signal.get("source_timestamp")
+        final_decision = str(signal.get("decision") or "WAIT").upper()
+        final_state = str(stability.get("state") or validation.get("verdict") or ("BLOCKED" if final_decision == "WAIT" else "CANDIDATE")).upper()
+        engine_specs: list[dict[str, Any]] = [{
+            "engine_id": "quant_five_layer",
+            "strategy_id": str(signal.get("strategy_id") or signal.get("selected_strategy_id")
+                               or (signal.get("strategy_filter") or {}).get("strategy_id")
+                               or "quant_five_layer"),
+            "decision": final_decision,
+            "state": final_state,
+            "validation": str(validation.get("verdict") or "UNAVAILABLE").upper(),
+            "data_fresh": signal.get("data_fresh") is True,
+            "strike": signal.get("strike"), "expiry": signal.get("expiry"),
+            "entry": signal.get("entry"), "stop_loss": signal.get("stop_loss"),
+            "target": signal.get("target"), "reasons": reasons,
+            "layer_statuses": layer_statuses,
+        }]
+        candidates = signal.get("strategy_candidates")
+        if isinstance(candidates, list):
+            for position, candidate in enumerate(candidates):
+                if not isinstance(candidate, dict):
+                    continue
+                strategy_id = str(candidate.get("strategy_id") or candidate.get("strategy_key")
+                                  or candidate.get("strategy_name") or candidate.get("name")
+                                  or f"strategy_{position + 1}")[:128]
+                candidate_decision = str(candidate.get("decision") or candidate.get("candidate_decision") or "WAIT").upper()
+                candidate_validation = candidate.get("live_validation") if isinstance(candidate.get("live_validation"), dict) else {}
+                candidate_reasons = candidate.get("reasons") or candidate.get("reason") or []
+                if isinstance(candidate_reasons, str):
+                    candidate_reasons = [candidate_reasons]
+                if not isinstance(candidate_reasons, list):
+                    candidate_reasons = []
+                candidate_state = str(candidate.get("state") or candidate.get("status") or (
+                    "BLOCKED" if candidate_decision == "WAIT" else "CANDIDATE"
+                )).upper()
+                engine_specs.append({
+                    "engine_id": "strategy_candidate",
+                    "strategy_id": strategy_id,
+                    "decision": candidate_decision,
+                    "state": candidate_state,
+                    "validation": str(candidate_validation.get("verdict") or "UNAVAILABLE").upper(),
+                    "data_fresh": candidate.get("data_fresh") is True,
+                    "strike": candidate.get("strike"), "expiry": candidate.get("expiry"),
+                    "entry": candidate.get("entry"), "stop_loss": candidate.get("stop_loss"),
+                    "target": candidate.get("target"),
+                    "reasons": [str(item)[:240] for item in candidate_reasons[:4]],
+                    "layer_statuses": {},
+                })
+
+        for spec in engine_specs:
+            fingerprint_payload = _event_fingerprint_payload(
+                index=index, engine_id=spec["engine_id"], strategy_id=spec["strategy_id"],
+                decision=spec["decision"], state=spec["state"], validation=spec["validation"],
+                data_fresh=spec["data_fresh"], strike=spec["strike"], expiry=spec["expiry"],
+                entry=spec["entry"], stop_loss=spec["stop_loss"], target=spec["target"],
+                reasons=spec["reasons"], layer_statuses=spec["layer_statuses"],
+            )
+            serialized = json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":"), default=str)
+            fingerprint = hashlib.sha256(serialized.encode()).hexdigest()
+            transition_key = f"{index}|{spec['engine_id']}|{spec['strategy_id']}"
+            if latest_fingerprint.get(transition_key) == fingerprint:
+                continue
+            signal_identity = {
+                "index": index, "engine_id": spec["engine_id"], "strategy_id": spec["strategy_id"],
+                "decision": spec["decision"], "strike": spec["strike"], "expiry": spec["expiry"],
+                "entry": spec["entry"], "stop_loss": spec["stop_loss"], "target": spec["target"],
+            }
+            signal_id = hashlib.sha256(json.dumps(signal_identity, sort_keys=True, default=str).encode()).hexdigest()
+            event = {
+                "event_id": f"evt-{uuid.uuid4().hex}",
+                "signal_id": signal_id,
+                "transition_key": transition_key,
+                "fingerprint": fingerprint,
+                "event_type": "STATE_TRANSITION",
+                "occurred_at": now.isoformat(),
+                "trade_date": trade_date,
+                "index": index,
+                "engine_id": spec["engine_id"],
+                "strategy_id": spec["strategy_id"],
+                "decision": spec["decision"],
+                "state": spec["state"],
+                "validation": spec["validation"],
+                "data_fresh": spec["data_fresh"],
+                "source_timestamp": source_timestamp,
+                "strike": spec["strike"], "expiry": spec["expiry"],
+                "entry": spec["entry"], "stop_loss": spec["stop_loss"], "target": spec["target"],
+                "reasons": spec["reasons"],
+                "layer_statuses": spec["layer_statuses"],
+                "paper_only": True, "order_placement_enabled": False,
+            }
+            rows.append(event)
+            latest_fingerprint[transition_key] = fingerprint
+            appended += 1
+
+    if appended:
+        _save_signal_events(rows)
+    return {
+        "status": _signal_event_persistence.get("status", "MEMORY_ONLY_OR_EMPTY"),
+        "record_count": len(_signal_events_memory),
+        "new_events": appended,
+        "max_records": SIGNAL_EVENTS_MAX_ROWS,
+        "latest_event_at": _signal_events_memory[-1].get("occurred_at") if _signal_events_memory else None,
+    }
+
 
 def _signal_option_quote(index: str, signal: dict[str, Any], market: dict[str, Any]) -> dict[str, Any] | None:
     market_row = market.get(index)
