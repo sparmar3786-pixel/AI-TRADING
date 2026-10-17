@@ -6,26 +6,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'api.dart';
 import 'config.dart';
-import 'trade_engine_page.dart';
 import 'broker_home_prototype_page.dart';
-import 'quant_engine_lab_page.dart';
 import 'strategy_library_page.dart';
-import 'flow_monitor_page.dart';
-import 'risk_calculator_page.dart';
-import 'nvidia_signal_review.dart';
-import 'background_monitor.dart';
-import 'daily_ai_memory.dart';
-import 'daily_ai_memory_page.dart';
-import 'market_intelligence_page.dart';
-import 'performance_page.dart';
+import 'quant_engine_page.dart';
 
-const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Backtesting','API','AI Access','Data Health','API & Railway','Market Diagnostics','Trading Setup','Research Engines','5-Layer Quant Signal Engine','Broker Home','Market Intelligence','Quant Engine Lab','Strategy Library','Flow Monitor','AI Memory','Performance'];
+const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Backtesting','API','Data Health','Broker Home','Strategies','Quant Engine','Quant Signal','Strategy Signal','Signal Calendar'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
-const commodityOptionUnderlyings = ['CRUDEOIL','CRUDEOILM','NATURALGAS','NATGASMINI','GOLD','GOLDM','SILVER','SILVERM','COPPER','ZINC','ALUMINIUM','LEAD','NICKEL'];
-const optionUnderlyings = [...indexes, ...commodityOptionUnderlyings];
 
-Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+void main() {
   // Capture Dart/Flutter errors in logcat so a phone-side crash can be
   // diagnosed without silently swallowing the framework's default handling.
   FlutterError.onError = (details) {
@@ -38,7 +26,6 @@ Future<void> main() async {
     debugPrintStack(stackTrace: stack);
     return false; // Leave unhandled errors visible to Flutter's runtime.
   };
-  await initializeBackgroundMonitor();
   runApp(const FreshApp());
 }
 
@@ -47,7 +34,7 @@ class FreshApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) => MaterialApp(
     debugShowCheckedModeBanner: false,
-    title: 'AI Trading Signals',
+    title: 'Trading Signals',
     theme: ThemeData(
       useMaterial3: true,
       brightness: Brightness.dark,
@@ -68,35 +55,24 @@ class FreshHome extends StatefulWidget {
 
 class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
   String backendUrl = AppConfig.backendUrl;
-  String signalBackendUrl = AppConfig.signalBackendUrl;
   String selectedIndex = 'NIFTY';
   bool apiOnline = false;
   bool signalsEndpointOnline = false;
   String? signalsFetchError;
   bool angelOnline = false;
   Map<String,dynamic> liveTrading = const {};
-  Map<String,dynamic> ai = const {};
-  Map<String,dynamic> aiProviderStatus = const {};
   Map<String,dynamic> feed = const {};
   Map<String,dynamic> storeDiagnostics = const {};
   Map<String,dynamic> systemDiagnostics = const {};
   String? systemDiagnosticsError;
   Map<String,dynamic> signals = const {};
-  Map<String,dynamic> signalPerformance = const {};
-  List<dynamic> commodities = const [];
   bool _refreshing = false;
   Map<String,dynamic> market = const {};
-  // Shared, per-index option-chain cache lets Option Chain and OI Lab consume
-  // the same timestamped broker quotes even when signal qualification fails.
-  final Map<String, List<dynamic>> optionChainsByIndex = <String, List<dynamic>>{};
-  DateTime? _lastOptionChainFetchAt;
-  String? _lastOptionChainIndex;
-  String? optionChainError;
   List<dynamic> tradePlans = const [];
   int qualifiedCount = 0;
   String? lastFetch;
   int emaFast = 8;
-  int emaSlow = 13;
+  int emaSlow = 21;
   String status = 'Connect Angel One from Settings.';
   Timer? _refreshTimer;
 
@@ -134,20 +110,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           row['strike'] != null && row['option_side'] != null &&
           row['entry'] != null && row['stop_loss'] != null && row['target'] != null &&
           validation['verdict'] == 'PASS' && guards.isEmpty;
-      final serverStability = Map<String, dynamic>.from(row['signal_stability'] as Map? ?? const {});
-      if (isCandidate && row['data_fresh'] == true && serverStability['state'] == 'CONFIRMED') {
-        // The server already enforced 600 seconds of continuous market evidence;
-        // don't accidentally impose a second ten-minute wait on the same signal.
-        stableIndices.add(index);
-        row['signal_stability'] = <String, dynamic>{
-          ...serverStability,
-          'required_minutes': 10,
-          'server_confirmed': true,
-        };
-        rawSignals[entry.key] = row;
-        continue;
-      }
-      final storageKey = 'ai_trading_signal_gate_$index';
+      final storageKey = 'trading_signal_gate_$index';
       if (!isCandidate) {
         await prefs.remove(storageKey);
         row['signal_stability'] = <String, dynamic>{'state': 'NOT_ACTIONABLE', 'required_minutes': 10};
@@ -209,151 +172,58 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     return result;
   }
 
-  /// Cached market snapshots are display-only. No cached trade levels may remain actionable.
+  /// Cached quotes are display-only; cached BUY/SELL recommendations are never actionable.
   Map<String, dynamic> _makeCachedSignalsNonActionable(Map<String, dynamic> cached) {
-    const actionableKeys = <String>{
-      'strike', 'expiry', 'entry', 'entry_price', 'entry_price_ltp',
-      'stop_loss', 'stop_loss_price', 'sl', 'target', 'target_price',
-      'take_profit', 'trigger_price', 'limit_price', 'order_type',
-      'quantity', 'qty', 'lots', 'lot_size', 'contract_token',
-    };
-    const activeDecisions = <String>{
-      'CALL BUY', 'PUT BUY', 'BUY', 'SELL', 'CE BUY', 'PE BUY',
-      'BUY CE', 'BUY PE', 'BUY CALL', 'BUY PUT', 'LONG', 'SHORT',
-    };
-
-    dynamic sanitize(dynamic value, {bool forceWait = false}) {
-      if (value is List) {
-        return value.map((item) => sanitize(item, forceWait: forceWait)).toList();
-      }
-      if (value is! Map) return value;
-      final row = Map<String, dynamic>.from(value);
-      for (final key in row.keys.toList()) {
-        final normalizedKey = key.toString().toLowerCase();
-        if (actionableKeys.contains(normalizedKey)) {
-          row[key] = null;
-          continue;
-        }
-        final child = row[key];
-        if (child is Map || child is List) {
-          row[key] = sanitize(child, forceWait: forceWait);
-        }
-      }
-      final decision = (row['decision'] ?? '').toString().trim().toUpperCase();
-      if (forceWait || activeDecisions.contains(decision)) {
-        if (decision.isNotEmpty && decision != 'WAIT' && decision != 'HOLD' &&
-            decision != 'NEUTRAL' && decision != 'NO TRADE') {
-          row['candidate_decision'] = row['candidate_decision'] ?? decision;
-        }
-        row['decision'] = 'WAIT';
-      }
-      if (row.containsKey('live_validation') && row['live_validation'] is Map) {
-        final validation = Map<String, dynamic>.from(row['live_validation'] as Map);
-        validation['decision'] = 'WAIT';
-        validation['verdict'] = 'WARN';
-        final blocks = List<dynamic>.from(validation['blocks'] as List? ?? const []);
-        if (!blocks.any((item) => item.toString().contains('cached snapshot is not actionable'))) {
-          blocks.add('Backend offline: cached snapshot is not actionable');
-        }
-        validation['blocks'] = blocks;
-        row['live_validation'] = validation;
-      }
-      if (row.containsKey('five_layer_engine') && row['five_layer_engine'] is Map) {
-        final engine = Map<String, dynamic>.from(row['five_layer_engine'] as Map);
-        engine['decision'] = 'WAIT';
-        row['five_layer_engine'] = engine;
-      }
-      if (row.containsKey('quant_engine') && row['quant_engine'] is Map) {
-        final engine = Map<String, dynamic>.from(row['quant_engine'] as Map);
-        engine['decision'] = 'WAIT';
-        row['quant_engine'] = engine;
-      }
-      return row;
-    }
-
     final result = Map<String, dynamic>.from(cached);
     final rawSignals = Map<String, dynamic>.from(result['signals'] as Map? ?? const {});
     for (final entry in rawSignals.entries) {
-      final row = Map<String, dynamic>.from(sanitize(entry.value, forceWait: true) as Map);
-      row['signal_stability'] = <String, dynamic>{
-        'state': 'STALE_OFFLINE',
-        'required_minutes': 10,
-      };
-      rawSignals[entry.key] = row;
+      final row = Map<String, dynamic>.from(entry.value as Map? ?? const {});
+      final decision = (row['decision'] ?? '').toString().toUpperCase();
+      if (decision == 'CALL BUY' || decision == 'PUT BUY') {
+        row['candidate_decision'] = decision;
+        row['decision'] = 'WAIT';
+        final validation = Map<String, dynamic>.from(row['live_validation'] as Map? ?? const {});
+        validation['decision'] = 'WAIT';
+        validation['verdict'] = 'WARN';
+        final blocks = List<dynamic>.from(validation['blocks'] as List? ?? const []);
+        blocks.add('Backend offline: cached signal is not actionable');
+        validation['blocks'] = blocks;
+        row['live_validation'] = validation;
+        row['signal_stability'] = <String, dynamic>{'state': 'STALE_OFFLINE', 'required_minutes': 10};
+        rawSignals[entry.key] = row;
+      }
     }
     result['signals'] = rawSignals;
-
-    final cachedMarket = Map<String, dynamic>.from(result['market'] as Map? ?? const {});
-    for (final entry in cachedMarket.entries) {
-      final row = Map<String, dynamic>.from(sanitize(entry.value) as Map);
-      row['live'] = false;
-      row['feed_mode'] = 'CACHED_OFFLINE';
-      row['cached'] = true;
-      final chain = (row['option_chain'] as List?) ?? const <dynamic>[];
-      row['option_chain'] = chain.whereType<Map>().map((raw) {
-        final option = Map<String, dynamic>.from(raw);
-        option['live'] = false;
-        option['cached'] = true;
-        option['freshness'] = 'STALE_OFFLINE';
-        return option;
-      }).toList();
-      cachedMarket[entry.key] = row;
-    }
-    result['market'] = cachedMarket;
-
-    final cachedCommodities = (result['commodities'] as List?) ?? const <dynamic>[];
-    result['commodities'] = cachedCommodities.whereType<Map>().map((raw) {
-      final row = Map<String, dynamic>.from(sanitize(raw, forceWait: true) as Map);
-      row['live'] = false;
-      row['cached'] = true;
-      row['feed_mode'] = 'CACHED_OFFLINE';
-      row['signal_stability'] = <String, dynamic>{'state': 'STALE_OFFLINE'};
-      return row;
-    }).toList();
-
-    result['live'] = false;
-    result['feed'] = <String, dynamic>{
-      ...(result['feed'] as Map? ?? const {}),
-      'connected': false,
-      'mode': 'CACHED_OFFLINE',
-    };
     result['trade_plans'] = <dynamic>[];
     result['qualified_trade_count'] = 0;
     return result;
   }
 
-  void _saveAiMemory() {
-    unawaited(DailyAiMemory.saveSnapshot(
-      market: Map<String, dynamic>.from(market),
-      signals: Map<String, dynamic>.from(signals),
-      commodities: List<dynamic>.from(commodities),
-      optionChains: optionChainsByIndex.map((key, value) => MapEntry(key, List<dynamic>.from(value))),
-      aiProviders: Map<String, dynamic>.from(aiProviderStatus),
-      aiResults: Map<String, dynamic>.from(ai),
-    ));
+  Future<bool> _probeGeneralBackend(FreshApi api) async {
+    try {
+      await api.health();
+      return true;
+    } catch (e) {
+      // The general backend is separate from AI-TRADING's signal service.
+      // A health failure here must never prevent a signal-backend request.
+      debugPrint('GENERAL_BACKEND_HEALTH_FAILED: $e');
+      return false;
+    }
   }
 
   Future<void> refresh() async {
     if (_refreshing) return;
     _refreshing = true;
+    bool generalApiOnline = false;
     Map<String, dynamic> latestSystemDiagnostics = const {};
     String? latestSystemDiagnosticsError;
-    // Track the signal backend health independently from the optional legacy
-    // chat backend. Do not mark the app online if this check fails.
-    var signalBackendHealthy = false;
     try {
-      // Keep a lightweight health check for the legacy BACKEND_URL separate.
-      // All AI provider/chat, market, Angel One, account and paper-ledger routes
-      // are dispatched to AI-TRADING through FreshApi's route map.
       final api = FreshApi(backendUrl);
-      final signalApi = FreshApi(signalBackendUrl);
-      // The AI/chat backend is optional and independent of the Angel One
-      // market API. Its health failure must never mark market data offline.
-      try {
-        await api.health();
-      } catch (chatHealthError) {
-        debugPrint('AI_CHAT_BACKEND_HEALTH_FAILED: $chatHealthError');
-      }
+      final signalApi = FreshApi.signal();
+      generalApiOnline = await _probeGeneralBackend(api);
+      // Broker/session diagnostics must not prevent the independent signal
+      // endpoint from being queried. A broken /v1/angel/status route used to
+      // abort refresh here and incorrectly mask signal/API diagnostics.
       Map<String,dynamic> a = const {};
       String? angelStatusError;
       try {
@@ -363,37 +233,8 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       }
       Map<String,dynamic> liveStatus = const {};
       try { liveStatus = await signalApi.liveExecutionStatus(); } catch (_) {}
-      Map<String,dynamic> providerStatus = const {};
-      try {
-        // AI provider status and market feed status are both served by the
-        // AI-TRADING backend; the legacy host is checked only for compatibility.
-        providerStatus = await signalApi.aiStatus();
-        if (providerStatus['providers'] is! Map && providerStatus['provider_health'] is List) {
-          final normalized = <String, dynamic>{};
-          for (final item in (providerStatus['provider_health'] as List).whereType<Map>()) {
-            final name = (item['name'] ?? '').toString().toLowerCase();
-            if (!['nvidia', 'openrouter'].contains(name)) continue;
-            normalized[name] = <String, dynamic>{
-              'configured': true,
-              'ok': false,
-              'status': item['status'] == 'COOLDOWN' ? 'cooldown' : 'configured_not_tested',
-              'model': item['model'] ?? item['model_name'] ?? 'not reported',
-            };
-          }
-          for (final name in ['nvidia', 'openrouter']) {
-            normalized.putIfAbsent(name, () => <String, dynamic>{
-              'configured': false, 'ok': false, 'status': 'not_configured', 'model': '—',
-            });
-          }
-          providerStatus['providers'] = normalized;
-        }
-      } catch (providerError) {
-        debugPrint('AI_PROVIDER_STATUS_FAILED: $providerError');
-      }
       Map<String,dynamic> s;
       try {
-        await signalApi.health();
-        signalBackendHealthy = true;
         s = await signalApi.signals(emaFast: emaFast, emaSlow: emaSlow);
         s = await _applyTenMinuteSignalGate(s);
         // API success is independent of local cache persistence. A full device,
@@ -410,49 +251,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         if (mounted) setState(() { signalsEndpointOnline = false; signalsFetchError = e.toString().replaceFirst('Exception: ', ''); });
         s = _makeCachedSignalsNonActionable(await _loadCachedSignals());
       }
-      // Always refresh the selected index's option chain independently of the
-      // signal snapshot. A non-empty embedded chain can itself be cached/stale,
-      // so it must never suppress a live broker quote refresh.
-      final responseMarket = Map<String, dynamic>.from(s['market'] as Map? ?? const {});
-      final selectedMarket = Map<String, dynamic>.from(responseMarket[selectedIndex] as Map? ?? const {});
-      final embeddedChain = (selectedMarket['option_chain'] as List?) ?? const <dynamic>[];
-      final now = DateTime.now();
-      final shouldFetchChain = _lastOptionChainIndex != selectedIndex ||
-          _lastOptionChainFetchAt == null ||
-          now.difference(_lastOptionChainFetchAt!) >= const Duration(seconds: 5);
-      if (shouldFetchChain) {
-        _lastOptionChainIndex = selectedIndex;
-        _lastOptionChainFetchAt = now;
-        try {
-          final chainResponse = await signalApi.getJson(
-            '/v1/option-chain?index=${Uri.encodeQueryComponent(selectedIndex)}',
-            timeout: const Duration(seconds: 12),
-          );
-          final chainRows = (chainResponse['option_chain'] as List?) ?? const <dynamic>[];
-          if (chainRows.isNotEmpty) {
-            final chainIsStale = chainResponse['stale'] == true ||
-                (chainResponse['status'] == 'WAIT' && chainResponse['live'] == false);
-            optionChainsByIndex[selectedIndex] = _markOptionRowsFresh(
-              chainRows,
-              forceStale: chainIsStale,
-            );
-            optionChainError = null;
-          } else {
-            optionChainError = (chainResponse['reason'] ?? 'Broker returned no option-chain quotes yet.').toString();
-            // Preserve an embedded snapshot only as an explicitly stale fallback.
-            if (optionChainsByIndex[selectedIndex] == null && embeddedChain.isNotEmpty) {
-              optionChainsByIndex[selectedIndex] = _markOptionRowsFresh(embeddedChain, forceStale: true);
-            }
-          }
-        } catch (e) {
-          optionChainError = e.toString().replaceFirst('Exception: ', '');
-          // Keep the last good rows visible for inspection, but never label them
-          // live after the independent refresh fails.
-          if (optionChainsByIndex[selectedIndex] == null && embeddedChain.isNotEmpty) {
-            optionChainsByIndex[selectedIndex] = _markOptionRowsFresh(embeddedChain, forceStale: true);
-          }
-        }
-      }
       try {
         latestSystemDiagnostics = await signalApi.systemDiagnostics();
         latestSystemDiagnosticsError = null;
@@ -462,30 +260,15 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       }
       if (!mounted) return;
       setState(() {
-        apiOnline = signalBackendHealthy;
+        apiOnline = generalApiOnline || signalsEndpointOnline;
         systemDiagnostics = latestSystemDiagnostics;
         systemDiagnosticsError = latestSystemDiagnosticsError;
         angelOnline = a['authenticated'] == true;
         liveTrading = liveStatus;
-        aiProviderStatus = providerStatus;
-        ai = (s['ai'] as Map?)?.cast<String,dynamic>() ?? {};
         feed = (s['feed'] as Map?)?.cast<String,dynamic>() ?? {};
         storeDiagnostics = (s['store'] as Map?)?.cast<String,dynamic>() ?? {};
         signals = (s['signals'] as Map?)?.cast<String,dynamic>() ?? {};
-        signalPerformance = Map<String, dynamic>.from(s['signal_performance'] as Map? ?? const {});
-        market = responseMarket.map((key, value) {
-          final row = Map<String, dynamic>.from(value as Map? ?? const {});
-          final cachedChain = optionChainsByIndex[key];
-          final currentChain = (row['option_chain'] as List?) ?? const <dynamic>[];
-          if (currentChain.isEmpty && cachedChain != null) {
-            row['option_chain'] = _markOptionRowsFresh(cachedChain, forceStale: row['cached'] == true || optionChainError != null);
-            row['option_chain_source'] = 'independent_timestamped_broker_quote';
-          } else if (currentChain.isNotEmpty) {
-            row['option_chain'] = _markOptionRowsFresh(currentChain, forceStale: row['cached'] == true || optionChainError != null);
-          }
-          return MapEntry(key, row);
-        });
-        commodities = (s['commodities'] as List?) ?? [];
+        market = (s['market'] as Map?)?.cast<String,dynamic>() ?? {};
         tradePlans = ((s['trade_plans'] as List?) ?? const []).whereType<Map>().map((plan) => Map<String, dynamic>.from(plan)).toList();
         qualifiedCount = (s['qualified_trade_count'] as num?)?.toInt() ?? tradePlans.length;
         lastFetch = s['last_fetch']?.toString();
@@ -497,29 +280,28 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
                     ? 'Signal API responded, but Angel One status check failed: $angelStatusError'
                     : (lastFetch != null ? 'LIVE unavailable — showing last fetched market data.' : 'Backend online — waiting for Angel One market data. Check broker credentials and connection status.')));
       });
-      _saveAiMemory();
     } catch (e) {
-      if (mounted) setState(() { apiOnline = false; signalsEndpointOnline = false; signalsFetchError = e.toString().replaceFirst('Exception: ', ''); systemDiagnostics = const {}; systemDiagnosticsError = e.toString().replaceFirst('Exception: ', ''); });
+      if (mounted) setState(() { apiOnline = generalApiOnline; signalsEndpointOnline = false; signalsFetchError = e.toString().replaceFirst('Exception: ', ''); systemDiagnostics = const {}; systemDiagnosticsError = e.toString().replaceFirst('Exception: ', ''); });
       final s = _makeCachedSignalsNonActionable(await _loadCachedSignals());
       if (!mounted) return;
       setState(() {
-        apiOnline = false;
+        apiOnline = generalApiOnline;
         signalsEndpointOnline = false;
         systemDiagnostics = const {};
         systemDiagnosticsError = e.toString().replaceFirst('Exception: ', '');
-        ai = (s['ai'] as Map?)?.cast<String,dynamic>() ?? {};
-        feed = (s['feed'] as Map?)?.cast<String,dynamic>() ?? {};
+          feed = (s['feed'] as Map?)?.cast<String,dynamic>() ?? {};
         storeDiagnostics = (s['store'] as Map?)?.cast<String,dynamic>() ?? {};
         signals = (s['signals'] as Map?)?.cast<String,dynamic>() ?? {};
-        signalPerformance = Map<String, dynamic>.from(s['signal_performance'] as Map? ?? const {});
         market = (s['market'] as Map?)?.cast<String,dynamic>() ?? {};
-        commodities = (s['commodities'] as List?) ?? [];
         tradePlans = ((s['trade_plans'] as List?) ?? const []).whereType<Map>().map((plan) => Map<String, dynamic>.from(plan)).toList();
         qualifiedCount = (s['qualified_trade_count'] as num?)?.toInt() ?? tradePlans.length;
         lastFetch = s['last_fetch']?.toString();
-        status = lastFetch != null ? 'Backend unavailable — showing last fetched market data. Error: ${signalsFetchError ?? 'request failed'}' : 'Backend offline or unreachable: ${signalsFetchError ?? 'health check failed'}';
+        status = generalApiOnline
+            ? 'Signal backend unavailable; generic backend remains online. Error: ${signalsFetchError ?? 'request failed'}'
+            : (lastFetch != null
+                ? 'Backend unavailable — showing last fetched market data. Error: ${signalsFetchError ?? 'request failed'}'
+                : 'Signal and generic backends are unavailable: ${signalsFetchError ?? 'health check failed'}');
       });
-      _saveAiMemory();
     } finally {
       _refreshing = false;
     }
@@ -529,90 +311,22 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     final ist = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
     if (ist.weekday == DateTime.saturday || ist.weekday == DateTime.sunday) return false;
     final minutes = ist.hour * 60 + ist.minute;
-    if (commodityOptionUnderlyings.contains(selectedIndex)) {
-      // MCX closes at 23:30 IST in standard US time and 23:55 IST during US DST.
-      final marchFirst = DateTime(ist.year, 3, 1);
-      final marchFirstSunday = marchFirst.add(Duration(days: (7 - marchFirst.weekday) % 7));
-      final dstStart = marchFirstSunday.add(const Duration(days: 7));
-      final novemberFirst = DateTime(ist.year, 11, 1);
-      final dstEnd = novemberFirst.add(Duration(days: (7 - novemberFirst.weekday) % 7));
-      final usDst = !ist.isBefore(dstStart) && ist.isBefore(dstEnd);
-      final closeMinute = usDst ? 23 * 60 + 55 : 23 * 60 + 30;
-      return minutes >= 9 * 60 && minutes <= closeMinute;
-    }
     return minutes >= (9 * 60 + 15) && minutes <= (15 * 60 + 30);
-  }
-
-  bool get _selectedCommodityLive {
-    if (!commodityOptionUnderlyings.contains(selectedIndex)) return false;
-    final rows = optionChainsByIndex[selectedIndex] ?? const <dynamic>[];
-    final now = DateTime.now();
-    for (final value in rows) {
-      if (value is! Map) continue;
-      final stamp = value['source_timestamp'] ?? value['timestamp'];
-      final parsed = DateTime.tryParse(stamp?.toString() ?? '');
-      if (parsed == null) continue;
-      final age = now.difference(parsed.toLocal()).inSeconds;
-      if (age >= -5 && age <= 60) return true;
-    }
-    return false;
   }
 
   String get _appBarStatus {
     if (!apiOnline) return "API OFFLINE";
-    if (commodityOptionUnderlyings.contains(selectedIndex)) {
-      if (!_marketOpenNow) return "API UP • MCX CLOSED";
-      if (_selectedCommodityLive) return "API LIVE • MCX";
-      if (optionChainError != null) return "API UP • MCX DATA ERROR";
-      return "API UP • WAITING MCX DATA";
-    }
-    if (!signalsEndpointOnline) {
-      final error = (signalsFetchError ?? '').toLowerCase();
-      if (error.contains('socketexception') ||
-          error.contains('failed host lookup') ||
-          error.contains('connection refused') ||
-          error.contains('connection reset') ||
-          error.contains('handshakeexception') ||
-          error.contains('network is unreachable')) {
-        return "API DISCONNECTED";
-      }
-      if (error.contains('timeoutexception') || error.contains('timed out') || error.contains('timeout')) {
-        return "SIGNALS API TIMEOUT";
-      }
-      return "SIGNALS API ERROR";
-    }
+    if (!signalsEndpointOnline) return "API UP • DATA ERROR";
     if (!_marketOpenNow) return "API UP • MARKET CLOSED";
-    if (signals['live'] == false) return "API UP • INVALID MARKET DATA";
     if (status == "LIVE market feed connected.") return "API LIVE";
     if (status.startsWith("Backend online")) return "API UP • WAITING DATA";
-    if (status.startsWith("LIVE unavailable") || status.startsWith("Signal API responded")) return "API UP • REFRESHING DATA";
-    return "API UP • INVALID MARKET DATA";
-  }
-
-  String get _dataDiagnosticMessage {
-    final parts = <String>[];
-    if (signalsFetchError != null && signalsFetchError!.trim().isNotEmpty) {
-      parts.add(signalsFetchError!.trim());
-    }
-    final marketRows = Map<String, dynamic>.from(signals['market'] as Map? ?? const {});
-    final marketRow = Map<String, dynamic>.from(marketRows[selectedIndex] as Map? ?? const {});
-    final signalRows = Map<String, dynamic>.from(signals['signals'] as Map? ?? const {});
-    final signalRow = Map<String, dynamic>.from(signalRows[selectedIndex] as Map? ?? const {});
-    final reasons = (signalRow['reasons'] as List?) ?? const <dynamic>[];
-    if (parts.isEmpty && reasons.isNotEmpty) parts.add(reasons.first.toString());
-    final stamp = marketRow['source_timestamp'] ?? marketRow['timestamp'] ?? marketRow['last_updated'];
-    parts.add('Last source tick: ${stamp ?? 'not received'}');
-    final age = marketRow['age_seconds'];
-    if (age != null) parts.add('Tick age: $age seconds');
-    return parts.join(' • ');
+    return "API UP • DATA ERROR";
   }
 
   Color get _appBarStatusColor {
-    if (_appBarStatus.startsWith("API LIVE")) return Colors.greenAccent;
-    if (_appBarStatus == "API OFFLINE" || _appBarStatus == "API DISCONNECTED" ||
-        _appBarStatus == "SIGNALS API ERROR") return Colors.redAccent;
-    if (_appBarStatus.contains("CLOSED")) return const Color(0xFF94A3B8);
-    if (_appBarStatus.contains("INVALID MARKET DATA") || _appBarStatus.contains("TIMEOUT")) return Colors.orangeAccent;
+    if (_appBarStatus == "API LIVE") return Colors.greenAccent;
+    if (_appBarStatus == "API OFFLINE") return Colors.redAccent;
+    if (_appBarStatus == "API UP • MARKET CLOSED") return const Color(0xFF94A3B8);
     return Colors.orangeAccent;
   }
 
@@ -655,48 +369,8 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  List<dynamic> _markOptionRowsFresh(List<dynamic> rows, {bool forceStale = false}) {
-    final now = DateTime.now().toUtc();
-    return rows.whereType<Map>().map((raw) {
-      final option = Map<String, dynamic>.from(raw);
-      final stamp = DateTime.tryParse((option['source_timestamp'] ?? option['timestamp'] ?? '').toString())?.toUtc();
-      final age = stamp == null ? null : now.difference(stamp).inMilliseconds / 1000.0;
-      option['age_seconds'] = age;
-      final explicitlyStale = option['stale'] == true || option['freshness'] == 'STALE';
-      final freshTimestamp = age != null && age >= 0 && age <= 60;
-      option['stale'] = forceStale || explicitlyStale || !freshTimestamp;
-      option['freshness'] = option['stale'] == true ? 'STALE' : 'FRESH';
-      option['live'] = !forceStale && !explicitlyStale && freshTimestamp;
-      if (option['stale'] == true) option['actionable'] = false;
-      return option;
-    }).toList();
-  }
-
-  Map<String, dynamic> _signal(String i) {
-    final row = Map<String, dynamic>.from(signals[i] as Map? ?? const {});
-    final marketRow = _market(i);
-    // A blocked strategy must still allow the pages to display independently
-    // verified spot indicators/depth; missing signal fields remain WAIT.
-    if (row['indicators'] is! Map && marketRow['indicators'] is Map) {
-      row['indicators'] = marketRow['indicators'];
-    }
-    if (row['order_flow'] is! Map && marketRow['order_flow'] is Map) {
-      row['order_flow'] = marketRow['order_flow'];
-    }
-    return row;
-  }
-  Map<String, dynamic> _market(String i) {
-    final row = Map<String, dynamic>.from(market[i] as Map? ?? const {});
-    final cachedChain = optionChainsByIndex[i];
-    final chain = (row['option_chain'] as List?) ?? const <dynamic>[];
-    if (chain.isEmpty && cachedChain != null) {
-      row['option_chain'] = _markOptionRowsFresh(cachedChain, forceStale: row['cached'] == true);
-      row['option_chain_source'] = 'independent_timestamped_broker_quote';
-    } else if (chain.isNotEmpty) {
-      row['option_chain'] = _markOptionRowsFresh(chain, forceStale: row['cached'] == true);
-    }
-    return row;
-  }
+  Map<String,dynamic> _signal(String i) => Map<String,dynamic>.from(signals[i] as Map? ?? const {});
+  Map<String,dynamic> _market(String i) => Map<String,dynamic>.from(market[i] as Map? ?? const {});
 
   @override
   Widget build(BuildContext context) => DefaultTabController(
@@ -708,7 +382,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
             children: [
               const ListTile(
                 leading: Icon(Icons.auto_graph, color: Color(0xFF12D6FF), size: 32),
-                title: Text('AI TRADING SIGNALS', style: TextStyle(fontWeight: FontWeight.w900)),
+                title: Text('TRADING SIGNALS', style: TextStyle(fontWeight: FontWeight.w900)),
                 subtitle: Text('Trading workspace • Navigation'),
               ),
               const Divider(),
@@ -755,27 +429,22 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         ]),
         actions: [Padding(padding: const EdgeInsets.only(right:12), child: Row(children: [
           Icon(Icons.circle, size:10, color: _appBarStatusColor), SizedBox(width:5),
-          Tooltip(
-            message: _dataDiagnosticMessage,
-            child: Text(_appBarStatus, style: TextStyle(fontSize:11, color: _appBarStatusColor)),
-          ),
+          Text(_appBarStatus, style: TextStyle(fontSize:11, color: _appBarStatusColor)),
         ]))],
         bottom: TabBar(isScrollable: true, tabAlignment: TabAlignment.start, tabs: tabs.map((t)=>Tab(text:t)).toList()),
       ),
       body: TabBarView(children: [
-        DashboardPage(index:selectedIndex, connected:status == 'LIVE market feed connected.', status:status, signals:signals, market:market, aiProviders:aiProviderStatus, tradePlans:tradePlans, qualifiedCount:qualifiedCount, lastFetch:lastFetch, onSelected:(v)=>setState(()=>selectedIndex=v)),
+        DashboardPage(index:selectedIndex, connected:status == 'LIVE market feed connected.', status:status, signals:signals, market:market, tradePlans:tradePlans, qualifiedCount:qualifiedCount, lastFetch:lastFetch, onSelected:(v)=>setState(()=>selectedIndex=v)),
         MarketPage(selected:selectedIndex,onChanged:(v)=>setState(()=>selectedIndex=v), signal:_signal(selectedIndex), market:_market(selectedIndex)),
-        ChainPage(selected:selectedIndex,onChanged:(v){setState(()=>selectedIndex=v);refresh();}, market:_market(selectedIndex), error:optionChainError),
-        OIPage(signals:signals, market:market, commodities:commodities, optionChains:optionChainsByIndex),
+        ChainPage(selected:selectedIndex,onChanged:(v)=>setState(()=>selectedIndex=v), market:_market(selectedIndex)),
+        OIPage(signals:signals),
         IndicatorsPage(selected:selectedIndex,signal:_signal(selectedIndex),fast:emaFast,slow:emaSlow,onChanged:(f,s){setState((){emaFast=f;emaSlow=s;});refresh();},onIndex:(v)=>setState(()=>selectedIndex=v)),
-        SignalPage(backendUrl:backendUrl,liveStatus:liveTrading,index:selectedIndex,signals:signals,signalPerformance:signalPerformance,ai:ai,aiProviders:aiProviderStatus,tradePlans:tradePlans,market:market,onChanged:(v)=>setState(()=>selectedIndex=v)),
-        RiskPage(index:selectedIndex,signal:_signal(selectedIndex),plans:tradePlans,market:market,commodities:commodities),
-        BacktestingPage(backendUrl: backendUrl),
-        ApiPage(backendUrl:backendUrl,signalBackendUrl:signalBackendUrl,feed:feed,storeDiagnostics:storeDiagnostics,market:market,onSaved:(url){setState(()=>backendUrl=url);refresh();}),
-        AiAccessPage(backendUrl:backendUrl),
+        SignalPage(index:selectedIndex,signals:signals,tradePlans:tradePlans,market:market,onChanged:(v)=>setState(()=>selectedIndex=v)),
+        RiskPage(index:selectedIndex,signal:_signal(selectedIndex),plans:tradePlans),
+        BacktestingPage(backendUrl: AppConfig.signalBackendUrl),
+        ApiPage(backendUrl:backendUrl,feed:feed,storeDiagnostics:storeDiagnostics,market:market,onSaved:(url){setState(()=>backendUrl=url);refresh();}),
         DataHealthPage(
           backendUrl: backendUrl,
-          signalBackendUrl: signalBackendUrl,
           apiOnline: apiOnline,
           signalsOnline: signalsEndpointOnline,
           angelOnline: angelOnline,
@@ -786,23 +455,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           lastFetch: lastFetch,
           onRefresh: refresh,
         ),
-        const ApiRailwayPage(),
-        MarketDiagnosticsPage(market: market, signals: signals, feed: feed, diagnostics: storeDiagnostics, lastFetch: lastFetch),
-        TradingSetupPage(backendUrl: backendUrl, selectedIndex: selectedIndex, aiProviders: aiProviderStatus, apiOnline: apiOnline, signalsOnline: signalsEndpointOnline, angelOnline: angelOnline, market: market, signals: signals, ai: ai, liveStatus: liveTrading, lastFetch: lastFetch),
-        ResearchEnginesPage(market: market, signals: signals, ai: ai, commodities: commodities, optionChains: optionChainsByIndex, lastFetch: lastFetch, selectedIndex: selectedIndex, onIndexChanged: (value) => setState(() => selectedIndex = value)),
-        TradeEnginePage(
-          backendUrl: backendUrl,
-          selectedIndex: selectedIndex,
-          market: market,
-          signals: signals,
-          ai: ai,
-          tradePlans: tradePlans,
-          feed: feed,
-          liveStatus: liveTrading,
-          lastFetch: lastFetch,
-          onIndexChanged: (value) => setState(() => selectedIndex = value),
-        ),
-        BrokerHomePage(
+        BrokerHomePrototypePage(
           backendUrl: backendUrl,
           market: market,
           signals: signals,
@@ -810,20 +463,17 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           status: status,
           onIndexSelected: (value) => setState(() => selectedIndex = value),
         ),
-        MarketIntelligencePage(backendUrl: backendUrl, signalBackendUrl: signalBackendUrl),
-        Builder(
-          builder: (tabContext) => QuantEngineLabPage(
-            backendUrl: backendUrl,
-            index: selectedIndex,
-            market: market,
-            lastFetch: lastFetch,
-            onOpenBacktest: () => DefaultTabController.of(tabContext).animateTo(tabs.indexOf('Backtesting')),
-          ),
+        StrategyLibraryPage(signals: signals, selectedIndex: selectedIndex),
+        QuantEnginePage(
+          selectedIndex: selectedIndex,
+          signals: signals,
+          market: market,
+          marketOpen: _marketOpenNow,
+          onIndexChanged: (value) => setState(() => selectedIndex = value),
         ),
-        StrategyLibraryPage(market: market, signals: signals, selectedIndex: selectedIndex),
-        FlowMonitorPage(signalBackendUrl: signalBackendUrl),
-        const DailyAiMemoryPage(),
-        PerformancePage(backendUrl: backendUrl, signalBackendUrl: signalBackendUrl),
+        const IsolatedSignalPage(endpoint: '/v1/signals/quant', title: 'Quant Engine Signal', description: 'Quant owns the final validated decision and its evidence. Missing/stale evidence remains WAIT/BLOCK.'),
+        const IsolatedSignalPage(endpoint: '/v1/signals/strategies', title: 'Parmar Engine Strategy Signals', description: 'Strategy candidates are separate from Quant decisions and cannot override safety gates.'),
+        const SignalCalendarPage(),
       ]),
     ),
   );
@@ -837,29 +487,18 @@ IconData _tabIcon(int index) => switch (index) {
   4 => Icons.tune,
   5 => Icons.bolt,
   6 => Icons.shield_outlined,
-  7 => Icons.query_stats,
+  7 => Icons.science_outlined,
   8 => Icons.settings_ethernet,
-  9 => Icons.psychology_alt_outlined,
-  10 => Icons.monitor_heart_outlined,
-  11 => Icons.cloud_outlined,
-  12 => Icons.menu_book_outlined,
-  13 => Icons.account_tree_outlined,
-  14 => Icons.auto_awesome_outlined,
-  15 => Icons.layers_outlined,
-  16 => Icons.account_balance_wallet_outlined,
-  17 => Icons.newspaper_outlined,
-  18 => Icons.show_chart,
-  19 => Icons.library_books_outlined,
-  20 => Icons.layers_outlined,
-  21 => Icons.speed,
-  22 => Icons.layers_outlined,
+  9 => Icons.monitor_heart_outlined,
+  10 => Icons.account_balance_wallet_outlined,
+  11 => Icons.library_books_outlined,
+  12 => Icons.layers_outlined,
   _ => Icons.layers_outlined,
 };
 
 class DataHealthPage extends StatelessWidget {
   const DataHealthPage({
     required this.backendUrl,
-    required this.signalBackendUrl,
     required this.apiOnline,
     required this.signalsOnline,
     required this.angelOnline,
@@ -872,7 +511,6 @@ class DataHealthPage extends StatelessWidget {
     super.key,
   });
   final String backendUrl;
-  final String signalBackendUrl;
   final bool apiOnline, signalsOnline, angelOnline;
   final String status;
   final Map<String, dynamic> diagnostics;
@@ -891,8 +529,7 @@ class DataHealthPage extends StatelessWidget {
         _healthRow('Backend / Railway API', apiOnline),
         _healthRow('Signals API response', signalsOnline),
         _healthRow('Angel One authenticated session', angelOnline),
-        ListTile(leading: const Icon(Icons.link), title: const Text('AI market intelligence backend'), subtitle: SelectableText(backendUrl)),
-        ListTile(leading: const Icon(Icons.show_chart), title: const Text('Live signals backend'), subtitle: SelectableText(signalBackendUrl)),
+        ListTile(leading: const Icon(Icons.link), title: const Text('Configured backend'), subtitle: SelectableText(backendUrl)),
         ListTile(leading: const Icon(Icons.info_outline), title: const Text('Current service status'), subtitle: Text(status)),
         ListTile(leading: const Icon(Icons.history), title: const Text('Last market snapshot'), subtitle: Text(lastFetch ?? 'No successful market fetch recorded')),
       ])),
@@ -913,22 +550,10 @@ class DataHealthPage extends StatelessWidget {
           title: const Text('Market data'),
           subtitle: Text('Instrument master rows: ${_diagValue(diagnostics, 'instrument_master', 'row_count')} • Snapshots: ${_diagValue(diagnostics, 'market_data', 'snapshot_count')} • Fresh: ${_diagValue(diagnostics, 'market_data', 'fresh_snapshot_count')} • Live: ${_diagValue(diagnostics, 'market_data', 'live_snapshot_count')}'),
         ),
-        ListTile(
-          leading: const Icon(Icons.psychology_outlined),
-          title: const Text('AI provider'),
-          subtitle: Text('Configured: ${_diagValue(diagnostics, 'ai', 'configured')} • Model: ${_diagValue(diagnostics, 'ai', 'model')} • Error indexes: ${_diagValue(diagnostics, 'ai', 'error_indexes', fallback: 'none')}'),
-        ),
         if (_diagValue(diagnostics, 'angel_one', 'last_error', fallback: '') != '')
           ListTile(leading: const Icon(Icons.warning_amber), title: const Text('Angel One error'), subtitle: Text(_diagValue(diagnostics, 'angel_one', 'last_error', fallback: ''))),
         if (_diagValue(diagnostics, 'angel_one', 'stream_error', fallback: '') != '')
           ListTile(leading: const Icon(Icons.warning_amber), title: const Text('WebSocket error'), subtitle: Text(_diagValue(diagnostics, 'angel_one', 'stream_error', fallback: ''))),
-        if (_diagValue(diagnostics, 'ai', 'last_error', fallback: '') != '')
-          ListTile(leading: const Icon(Icons.warning_amber), title: const Text('AI request error'), subtitle: Text(_diagValue(diagnostics, 'ai', 'last_error', fallback: ''))),
-        ListTile(
-          leading: const Icon(Icons.speed),
-          title: const Text('Signal engine build timing'),
-          subtitle: Text('Last build: ${_diagValue(diagnostics, 'signal_build', 'last_duration_ms')} ms • Builds: ${_diagValue(diagnostics, 'signal_build', 'build_count')} • In flight: ${_diagValue(diagnostics, 'signal_build', 'in_flight')}'),
-        ),
         ListTile(
           leading: Icon(diagnostics.isNotEmpty ? Icons.check_circle_outline : Icons.info_outline),
           title: const Text('Diagnostics endpoint'),
@@ -946,10 +571,7 @@ class DataHealthPage extends StatelessWidget {
           return Card(child: ListTile(
             leading: Icon(fresh ? Icons.check_circle : Icons.error_outline, color: fresh ? Colors.greenAccent : Colors.orangeAccent),
             title: Text(index),
-            subtitle: Text(
-              'Price: ${_val(row['ltp'])} • Age: ${row['age_seconds'] == null ? 'unknown' : '${_val(row['age_seconds'])} sec'} • ${row['feed_mode'] ?? 'NO DATA'}'
-              '${(row['signal_error'] ?? row['error']) == null ? '' : '\nSignal pipeline: ${row['signal_error'] ?? row['error']}'}',
-            ),
+            subtitle: Text('Price: ${_val(row['ltp'])} • Age: ${row['age_seconds'] == null ? 'unknown' : '${_val(row['age_seconds'])} sec'} • ${row['feed_mode'] ?? 'NO DATA'}'),
             trailing: Text(fresh ? 'LIVE' : hasPrice ? 'STALE' : 'NO DATA', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 11, color: fresh ? Colors.greenAccent : Colors.orangeAccent)),
           ));
         }),
@@ -978,41 +600,6 @@ String _diagValue(
     if (fieldValue != null) return fieldValue.toString();
   }
   return fallback;
-}
-
-class ApiRailwayPage extends StatelessWidget {
-  const ApiRailwayPage({super.key});
-
-  static const links = <(String, String, String)>[];
-
-  @override
-  Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.all(12),
-    children: [
-      const Text('ADVANCED API + RAILWAY CONNECTION', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
-      const SizedBox(height: 8),
-      const Text('Use the backend service as the secure bridge between this Android app, Angel One SmartAPI and AI providers. Keep broker and AI secrets on the server, not inside the APK.', style: TextStyle(color: Colors.white70)),
-      const SizedBox(height: 10),
-      Card(child: Column(children: [
-        const ListTile(leading: Icon(Icons.security), title: Text('Recommended production flow'), subtitle: Text('Android app → HTTPS Railway API → Angel One REST/WebSocket + AI providers → normalized market store → signal engine')),
-        const Divider(height: 1),
-        const ListTile(leading: Icon(Icons.health_and_safety), title: Text('Health checks'), subtitle: Text('Expose /health and verify it before debugging market data. Check deployment logs, environment variables, public HTTPS domain, CORS only if browser clients need it, and request timeouts.')),
-        const Divider(height: 1),
-        const ListTile(leading: Icon(Icons.vpn_key_outlined), title: Text('Secret handling'), subtitle: Text('Store credentials as Railway variables or encrypted server-side settings. Never commit .env files, API keys, Angel password, PIN, or TOTP seed.')),
-      ])),
-      for (final item in links)
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.open_in_new, color: Color(0xFF12D6FF)),
-            title: Text(item.$1),
-            subtitle: Text(item.$3),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => _openExternal(context, item.$2),
-          ),
-        ),
-      const Text('Use runtime diagnostics above to verify the actual backend, broker session and data freshness.', style: TextStyle(fontSize: 12, color: Colors.white70)),
-    ],
-  );
 }
 
 class BacktestingPage extends StatefulWidget {
@@ -1186,12 +773,12 @@ class _BacktestingPageState extends State<BacktestingPage> {
               if (_error!.contains('HTTP 404')) ...[
                 const SizedBox(height: 8),
                 const Text(
-                  'The APK requested /v1/backtest/historical, but the server returned 404 (route not found). This route exists in the Fresh-Apk backend source. The deployed service may be running an older image or a different app/root directory. Redeploy the backend from this repository, then confirm /openapi.json lists POST /v1/backtest/historical. This is a server deployment mismatch, not a strategy result.',
+                  'The configured AI-TRADING signal backend returned HTTP 404 for /v1/backtest/historical. Check the deployed service routes and ensure this APK is paired with the matching AI-TRADING backend version. No backtest result was produced.',
                   style: TextStyle(fontSize: 12, color: Colors.white70),
                 ),
                 const SizedBox(height: 6),
                 TextButton.icon(
-                  onPressed: () => launchUrl(Uri.parse('https://nse-algo-backend-final-production.up.railway.app/openapi.json'), mode: LaunchMode.externalApplication),
+                  onPressed: () => launchUrl(Uri.parse('${AppConfig.signalBackendUrl}/openapi.json'), mode: LaunchMode.externalApplication),
                   icon: const Icon(Icons.open_in_new),
                   label: const Text('Check deployed API routes'),
                 ),
@@ -1235,425 +822,32 @@ class _BacktestingPageState extends State<BacktestingPage> {
   }
 }
 
-class MarketDiagnosticsPage extends StatelessWidget {
-  const MarketDiagnosticsPage({
-    required this.market,
-    required this.signals,
-    required this.feed,
-    required this.diagnostics,
-    required this.lastFetch,
-    super.key,
-  });
-
-  final Map<String, dynamic> market, signals, feed, diagnostics;
-  final String? lastFetch;
-
-  static const links = <(String, String, String)>[];
-
-  @override
-  Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.all(12),
-    children: [
-      const Text('MARKET DATA DIAGNOSTICS • CURRENT BACKEND SNAPSHOT', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
-      const SizedBox(height: 8),
-      Card(child: Column(children: [
-        InfoRow('Latest fetch', lastFetch ?? 'No successful fetch recorded'),
-        InfoRow('WebSocket stream', feed['stream_open'] == true ? 'OPEN' : 'NOT CONFIRMED OPEN'),
-        InfoRow('Ticks received', (feed['tick_count'] ?? 0).toString()),
-        InfoRow('Unique tokens seen', (feed['unique_tokens_seen'] ?? diagnostics['unique_tokens'] ?? 0).toString()),
-        InfoRow('Store updates', (diagnostics['update_count'] ?? 0).toString()),
-        InfoRow('Last feed error', (feed['last_error'] ?? 'None reported').toString()),
-      ])),
-      const Text('Index data and signal outputs', style: TextStyle(fontWeight: FontWeight.w900)),
-      const SizedBox(height: 6),
-      for (final index in indexes)
-        Builder(builder: (context) {
-          final m = Map<String, dynamic>.from(market[index] as Map? ?? const {});
-          final sig = Map<String, dynamic>.from(signals[index] as Map? ?? const {});
-          final hasPrice = m['ltp'] != null;
-          return Card(child: ExpansionTile(
-            leading: Icon(hasPrice ? Icons.show_chart : Icons.hourglass_empty, color: hasPrice ? Colors.greenAccent : Colors.orangeAccent),
-            title: Text(index),
-            subtitle: Text('LTP: ${_val(m['ltp'])} • OI: ${_val(m['oi'])} • Feed: ${(m['feed_mode'] ?? m['last_fetch_label'] ?? 'NO DATA')}'),
-            children: [
-              InfoRow('Signal decision', (sig['decision'] ?? sig['signal'] ?? 'WAIT / NO DATA').toString()),
-              InfoRow('Confidence', sig['confidence'] == null ? '—' : '${sig['confidence']}%'),
-              InfoRow('PCR', _val(sig['pcr'] ?? m['pcr'])),
-              InfoRow('RSI', _val((sig['indicators'] as Map?)?['rsi'])),
-              InfoRow('EMA fast / slow', '${_val((sig['indicators'] as Map?)?['ema_fast'])} / ${_val((sig['indicators'] as Map?)?['ema_slow'])}'),
-              InfoRow('Data age', m['age_seconds'] == null ? 'Unknown' : '${_val(m['age_seconds'])} sec'),
-              if (sig['reason'] is List)
-                Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 12), child: Text((sig['reason'] as List).map((e) => '• $e').join('\\n'))),
-            ],
-          ));
-        }),
-      const Text('ENGINE MODULES STATUS', style: TextStyle(fontWeight: FontWeight.w900)),
-      const SizedBox(height: 6),
-      const Text('Operational modules: Angel One SmartAPI/WebSocket, normalized market store, trend/technical indicators, OI classification, strategy ensemble/conflict checks, signal-quality gates, historical backtesting, risk gates and AI/search evidence integration. Status is based on runtime diagnostics, not file presence.', style: TextStyle(color: Colors.white70)),
-      const SizedBox(height: 14),
-      const Text('Runtime module status is shown above. This page focuses on live diagnostics and working app functions.', style: TextStyle(color: Colors.white70, fontSize: 12)),
-    ],
-  );
-}
-
-class ResearchEnginesPage extends StatelessWidget {
-  const ResearchEnginesPage({
-    required this.market,
-    required this.signals,
-    required this.ai,
-    required this.commodities,
-    required this.optionChains,
-    required this.lastFetch,
-    required this.selectedIndex,
-    required this.onIndexChanged,
-    super.key,
-  });
-  final Map<String, dynamic> market, signals, ai;
-  final List<dynamic> commodities;
-  final Map<String, List<dynamic>> optionChains;
-  final String? lastFetch;
-  final String selectedIndex;
-  final ValueChanged<String> onIndexChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    Map<String, dynamic>? commodity;
-    for (final raw in commodities) {
-      if (raw is! Map) continue;
-      final row = Map<String, dynamic>.from(raw);
-      final name = (row['name'] ?? row['symbol'] ?? '').toString().toUpperCase();
-      if (name == selectedIndex.toUpperCase() ||
-          (row['symbol'] ?? '').toString().toUpperCase() == selectedIndex.toUpperCase()) {
-        commodity = row;
-        break;
-      }
-    }
-    final m = commodity ?? Map<String, dynamic>.from(market[selectedIndex] as Map? ?? const {});
-    final s = commodity ?? Map<String, dynamic>.from(signals[selectedIndex] as Map? ?? const {});
-    final strategySuite = Map<String, dynamic>.from(
-      s['strategy_suite'] as Map? ?? m['strategy_suite'] as Map? ?? const {},
-    );
-    final strategySignals = Map<String, dynamic>.from(strategySuite['strategies'] as Map? ?? const {});
-    final strategyVotes = Map<String, dynamic>.from(strategySuite['votes'] as Map? ?? const {});
-    final strategyLevels = Map<String, dynamic>.from(strategySuite['support_resistance'] as Map? ?? const {});
-    final indicators = Map<String, dynamic>.from(s['indicators'] as Map? ?? const {});
-    final chain = (m['option_chain'] as List?) ?? optionChains[selectedIndex] ?? const <dynamic>[];
-    final chainRows = chain.whereType<Map>().map((row) => Map<String, dynamic>.from(row)).toList();
-    final callOi = chainRows.where((row) => (row['side'] ?? '').toString().toUpperCase() == 'CE')
-        .fold<double>(0, (sum, row) => sum + (row['oi'] is num ? (row['oi'] as num).toDouble() : 0));
-    final putOi = chainRows.where((row) => (row['side'] ?? '').toString().toUpperCase() == 'PE')
-        .fold<double>(0, (sum, row) => sum + (row['oi'] is num ? (row['oi'] as num).toDouble() : 0));
-    final oi = Map<String, dynamic>.from(s['oi_summary'] as Map? ?? const {});
-    if (oi.isEmpty && chainRows.isNotEmpty) {
-      oi['call_oi'] = callOi;
-      oi['put_oi'] = putOi;
-      oi['pcr'] = callOi > 0 ? putOi / callOi : null;
-      oi['classification'] = callOi <= 0 ? 'DATA REQUIRED' : putOi / callOi >= 1.1 ? 'PUT OI HEAVY' : putOi / callOi <= 0.8 ? 'CALL OI HEAVY' : 'BALANCED';
-    }
-    final validation = Map<String, dynamic>.from(s['live_validation'] as Map? ?? const {});
-    final tf = Map<String, dynamic>.from(s['timeframe_analysis'] as Map? ?? const {});
-    final research = Map<String, dynamic>.from(tf['research_pack'] as Map? ?? const {});
-    final checks = Map<String, dynamic>.from(research['checks'] as Map? ?? const {});
-    final aiRow = Map<String, dynamic>.from(ai[selectedIndex] as Map? ?? const {});
-    final fresh = m['live'] == true;
-
-    return ListView(padding: const EdgeInsets.all(12), children: [
-      const Text('RESEARCH ENGINES • LIVE BACKEND OUTPUT', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
-      const SizedBox(height: 6),
-      const Text('This tab surfaces actual indicator, OI, confluence and validation outputs from available market data.', style: TextStyle(color: Colors.white70, fontSize: 12)),
-      const SizedBox(height: 10),
-      IndexPicker(selected: selectedIndex, onChanged: onIndexChanged),
-      Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Expanded(child: Text(selectedIndex, style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w900))),
-          _statusPill(fresh ? 'LIVE' : 'STALE / NO DATA', fresh ? Colors.greenAccent : Colors.orangeAccent),
-        ]),
-        Text('Spot LTP ₹${_val(m['ltp'])}', style: const TextStyle(fontSize: 25, fontWeight: FontWeight.w900, color: Color(0xFF12D6FF))),
-        Text('Snapshot: ${m['timestamp'] ?? lastFetch ?? 'No snapshot'}', style: const TextStyle(fontSize: 11, color: Colors.white60)),
-        Text('Engine trace: source=${m['source'] ?? m['feed_mode'] ?? 'unknown'} • freshness=${fresh ? 'PASS' : 'BLOCKED'} • strategy outputs=${strategySignals.length} • five-layer=${validation['verdict'] ?? 'WAIT / NOT RETURNED'}',
-          style: const TextStyle(fontSize: 10, color: Colors.white60)),
-        const Divider(height: 22),
-        const Text('TECHNICAL INDICATOR ENGINE', style: TextStyle(fontWeight: FontWeight.w900)),
-        for (final pair in <(String, dynamic)>[
-          ('EMA fast', indicators['ema_fast']), ('EMA slow', indicators['ema_slow']),
-          ('SMA 20', indicators['sma20']), ('RSI 14', indicators['rsi14']),
-          ('MACD histogram', indicators['macd_hist']), ('ATR 14', indicators['atr14']),
-          ('VWAP', indicators['vwap']), ('Bollinger upper', indicators['bb_upper']),
-          ('Bollinger mid', indicators['bb_mid']), ('Bollinger lower', indicators['bb_lower']),
-          ('Z-score 20', indicators['zscore20']), ('Realized volatility 20', indicators['realized_vol20']),
-        ]) InfoRow(pair.$1, _val(pair.$2)),
-        const Divider(height: 22),
-        const Text('SMC / ORDER-FLOW EVIDENCE', style: TextStyle(fontWeight: FontWeight.w900)),
-        InfoRow('BOS', (s['smc'] as Map?)?['bos']?.toString() ?? 'Not supplied'),
-        InfoRow('CHoCH', (s['smc'] as Map?)?['choch']?.toString() ?? 'Not supplied'),
-        InfoRow('FVG / order block', (s['smc'] as Map?)?['poi']?.toString() ?? 'Run SMC Pro Chart for candle-based analysis'),
-        InfoRow('Order-flow depth', (m['depth_status'] ?? m['order_flow_status'] ?? 'Use Order Flow tab; best-five depth is not classified trade prints').toString()),
-        const Divider(height: 22),
-        const Text('OPTIONS / OPEN INTEREST ENGINE', style: TextStyle(fontWeight: FontWeight.w900)),
-        InfoRow('CALL OI', _val(oi['call_oi'])),
-        InfoRow('PUT OI', _val(oi['put_oi'])),
-        InfoRow('PCR', _val(oi['pcr'])),
-        InfoRow('OI regime', (oi['selected_oi_regime'] ?? oi['classification'] ?? 'UNKNOWN').toString()),
-        InfoRow('Live option rows', chain.length.toString()),
-        if (commodity != null) ...[
-          InfoRow('MCX CE quotes', chainRows.where((row) => (row['side'] ?? '').toString().toUpperCase() == 'CE').length.toString()),
-          InfoRow('MCX PE quotes', chainRows.where((row) => (row['side'] ?? '').toString().toUpperCase() == 'PE').length.toString()),
-          InfoRow('Commodity options gate', 'WAIT'),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-            child: Text(
-              'Commodity CE/PE entries remain blocked until option Greeks, option ATR and risk inputs are verified. No signal is fabricated.',
-              style: TextStyle(color: Colors.orangeAccent, fontSize: 11),
-            ),
-          ),
-        ],
-        const Divider(height: 22),
-        const Text('RESEARCH PACK & CONFLUENCE', style: TextStyle(fontWeight: FontWeight.w900)),
-        InfoRow('Candidate alignment', (research['candidate_alignment'] ?? 'UNKNOWN').toString()),
-        InfoRow('Evidence alignment score', _val(research['evidence_score'])),
-        InfoRow('Known directional checks', (research['known_directional_checks'] ?? 0).toString()),
-        for (final entry in checks.entries)
-          if (entry.value is Map)
-            InfoRow(entry.key.replaceAll('_', ' '), (entry.value as Map)['state']?.toString() ?? 'UNKNOWN'),
-        const Divider(height: 22),
-        const Text('UNIFIED STRATEGY SUITE', style: TextStyle(fontWeight: FontWeight.w900)),
-        InfoRow('Suite status', (strategySuite['status'] ?? 'NOT AVAILABLE').toString()),
-        InfoRow('Consensus signal', (strategySuite['signal'] ?? 'WAIT').toString()),
-        InfoRow('Market regime', (strategySuite['market_regime'] ?? 'UNKNOWN').toString()),
-        InfoRow('Long votes', (strategyVotes['LONG'] ?? '—').toString()),
-        InfoRow('Short votes', (strategyVotes['SHORT'] ?? '—').toString()),
-        InfoRow('OI build-up context', (strategySuite['oi_context'] ?? 'UNKNOWN').toString()),
-        InfoRow('ATR 14', _val(strategySuite['atr_14'])),
-        InfoRow('Support (20 bars)', _val(strategyLevels['support'])),
-        InfoRow('Resistance (20 bars)', _val(strategyLevels['resistance'])),
-        for (final entry in strategySignals.entries)
-          InfoRow(entry.key.replaceAll('_', ' ').toUpperCase(), (entry.value ?? 'WAIT').toString()),
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-          child: Text(
-            'Strategy suite is research-only. Missing OI change stays UNKNOWN; the suite cannot override the five-layer risk gate or place orders.',
-            style: TextStyle(color: Colors.white70, fontSize: 11),
-          ),
-        ),
-        const Divider(height: 22),
-        const Text('SIGNAL & VALIDATION OUTPUT', style: TextStyle(fontWeight: FontWeight.w900)),
-        InfoRow('Strategy candidate', (s['decision'] ?? 'NO DATA').toString()),
-        InfoRow('Validated decision', (validation['decision'] ?? 'WAIT').toString()),
-        InfoRow('Validation verdict', (validation['verdict'] ?? 'NOT VALIDATED').toString()),
-        InfoRow('AI action', (aiRow['action'] ?? 'AI NOT READY').toString()),
-        InfoRow('Blocked reasons', ((validation['blocks'] as List?) ?? const []).map((x) => x.toString()).join(', ').isEmpty ? 'None reported' : ((validation['blocks'] as List?) ?? const []).map((x) => x.toString()).join(', ')),
-      ]))),
-      const Section('VALIDATION PERFORMANCE'),
-      InfoRow('Index snapshot compute time', '${(s['performance'] as Map?)?['index_snapshot_ms'] ?? '—'} ms'),
-      InfoRow('Five-layer validation time', '${(s['performance'] as Map?)?['five_layer_validation_ms'] ?? '—'} ms'),
-      InfoRow('Overall signal build time', '${(s['performance'] as Map?)?['signal_build_ms'] ?? '—'} ms'),
-      const Text('Timings are measured runtime values. A missing timing means the engine did not return a measurement.', style: TextStyle(fontSize: 11, color: Colors.white70)),
-    ]);
-  }
-
-  Widget _statusPill(String text, Color color) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-    decoration: BoxDecoration(color: color.withValues(alpha: 0.12), border: Border.all(color: color.withValues(alpha: 0.4)), borderRadius: BorderRadius.circular(20)),
-    child: Text(text, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w900)),
-  );
-}
-
-class TradingSetupPage extends StatelessWidget {
-  const TradingSetupPage({
-    required this.backendUrl,
-    required this.selectedIndex,
-    required this.aiProviders,
-    required this.apiOnline,
-    required this.signalsOnline,
-    required this.angelOnline,
-    required this.market,
-    required this.signals,
-    required this.ai,
-    required this.liveStatus,
-    required this.lastFetch,
-    super.key,
-  });
-  final String backendUrl;
-  final String selectedIndex;
-  final Map<String, dynamic> aiProviders;
-  final bool apiOnline, signalsOnline, angelOnline;
-  final Map<String, dynamic> market, signals, ai, liveStatus;
-  final String? lastFetch;
-
-  static const sections = <(String, String, List<(String, String, String)>)>[];
-
-  @override
-  Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.all(12),
-    children: [
-      const Text('COMPLETE TRADING SYSTEM • ANGEL ONE EDITION', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
-      const SizedBox(height: 8),
-      Builder(builder: (context) {
-        final liveIndexes = market.values.whereType<Map>().where((row) => row['live'] == true).length;
-        final optionRows = market.values.whereType<Map>().fold<int>(0, (sum, row) => sum + (((row['option_chain'] as List?) ?? const []).length));
-        final indicatorReady = signals.values.whereType<Map>().any((row) => row['indicators'] is Map);
-        final validationReady = signals.values.whereType<Map>().any((row) => row['live_validation'] is Map);
-        final providerMap = Map<String, dynamic>.from(aiProviders['providers'] as Map? ?? const {});
-        final nvidiaProvider = Map<String, dynamic>.from(providerMap['nvidia'] as Map? ?? const {});
-        final nvidiaReady = nvidiaProvider['ok'] == true;
-        final aiReady = ai.values.whereType<Map>().any((row) => row['action'] != null);
-        final checks = <(String, bool, String)>[
-          ('1. Backend API', apiOnline, backendUrl),
-          ('2. Angel One login', angelOnline, 'Authenticated session required'),
-          ('3. Live market data', liveIndexes > 0, '$liveIndexes of ${indexes.length} indexes fresh'),
-          ('4. Indicators & strategy engine', indicatorReady, 'Deterministic indicators and OI strategy output'),
-          ('5. Option chain / OI', optionRows > 0, '$optionRows option quotes in latest snapshots'),
-          ('6. Signal risk validation', validationReady, 'Backend supplies explicit fail-closed checks'),
-          ('7. Historical backtest', angelOnline, 'Historical candle replay requires an authenticated Angel One session'),
-          ('8. NVIDIA provider connectivity', nvidiaReady, (nvidiaProvider['status'] ?? 'Real NVIDIA test required').toString()),
-          ('9. AI signal analysis', aiReady, 'Review is advisory; provider connectivity alone is not a signal decision'),
-          ('10. Execution / order status', liveStatus.isNotEmpty, '${liveStatus['mode'] ?? 'Status not returned'} • live orders remain gated by risk and explicit approval'),
-        ];
-        return Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('LIVE SETUP CHECKLIST • 10 MODULES', style: TextStyle(fontWeight: FontWeight.w900)),
-          const SizedBox(height: 4),
-          Text('Last snapshot: ${lastFetch ?? 'No market snapshot'}', style: const TextStyle(fontSize: 11, color: Colors.white60)),
-          const Divider(),
-          for (final item in checks)
-            ListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(item.$2 ? Icons.check_circle : Icons.error_outline, color: item.$2 ? Colors.greenAccent : Colors.orangeAccent),
-              title: Text(item.$1, style: const TextStyle(fontWeight: FontWeight.w700)),
-              subtitle: Text(item.$3, maxLines: 2, overflow: TextOverflow.ellipsis),
-              trailing: Text(item.$2 ? 'READY' : 'CHECK', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: item.$2 ? Colors.greenAccent : Colors.orangeAccent)),
-              onTap: item.$1.startsWith('7.') ? () => DefaultTabController.of(context).animateTo(tabs.indexOf('Backtesting')) : null,
-            ),
-          SizedBox(width: double.infinity, child: FilledButton.icon(
-            onPressed: () => DefaultTabController.of(context).animateTo(tabs.indexOf('Backtesting')),
-            icon: const Icon(Icons.query_stats),
-            label: const Text('OPEN HISTORICAL BACKTEST'),
-          )),
-        ])));
-      }),
-      const SizedBox(height: 8),
-      NvidiaSignalReview(backendUrl: backendUrl, selectedIndex: selectedIndex),
-      const SizedBox(height: 8),
-      const Text('Broker choice: Angel One SmartAPI. No Zerodha/Kite integration is required for this app.', style: TextStyle(color: Color(0xFF12D6FF), fontWeight: FontWeight.w700)),
-      const SizedBox(height: 12),
-      Card(child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
-          Text('SYSTEM FLOW', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
-          SizedBox(height: 8),
-          Text('Angel One REST + WebSocket → freshness/data-quality gate → normalized market store → indicators + OI/option-chain engine → AI/search evidence → signal scoring → historical backtest validation → risk limits → optional explicitly gated Angel One order → order/fill/position monitor → dashboard + alerts'),
-          SizedBox(height: 8),
-          Text('Fail-safe: stale or incomplete feed, unknown lot size, wide spread, strategy conflict, exceeded risk limits or broker errors should block a trade and show WAIT/NO TRADE.', style: TextStyle(color: Colors.orangeAccent)),
-        ]),
-      )),
-      const SizedBox(height: 8),
-      for (final section in sections)
-        Card(
-          child: ExpansionTile(
-            initiallyExpanded: false,
-            leading: const Icon(Icons.account_tree_outlined, color: Color(0xFF12D6FF)),
-            title: Text(section.$1, style: const TextStyle(fontWeight: FontWeight.w800)),
-            subtitle: Text(section.$2, maxLines: 3, overflow: TextOverflow.ellipsis),
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-                child: Text(section.$2),
-              ),
-              for (final link in section.$3)
-                ListTile(
-                  dense: true,
-                  leading: const Icon(Icons.open_in_new, size: 18),
-                  title: Text(link.$1),
-                  subtitle: Text(link.$3),
-                  onTap: () => _openExternal(context, link.$2),
-                ),
-            ],
-          ),
-        ),
-      const Card(child: Padding(
-        padding: EdgeInsets.all(12),
-        child: Text('Decision support only. Validate fresh broker timestamps, provider output and deterministic risk gates before considering any trade; no signal guarantees profit.', style: TextStyle(fontSize: 12, color: Colors.white70)),
-      )),
-    ],
-  );
-}
-
-Future<void> _openExternal(BuildContext context, String url) async {
-  final uri = Uri.parse(url);
-  final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
-  if (!opened && context.mounted) {
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open link. Please check your browser.')));
-  }
-}
-
 class DashboardPage extends StatelessWidget {
-  const DashboardPage({required this.index,required this.connected,required this.status,required this.signals,required this.market,required this.aiProviders,required this.tradePlans,required this.qualifiedCount,required this.lastFetch,required this.onSelected,super.key});
+  const DashboardPage({required this.index,required this.connected,required this.status,required this.signals,required this.market,required this.tradePlans,required this.qualifiedCount,required this.lastFetch,required this.onSelected,super.key});
   final String index; final bool connected; final String status;
-  final Map<String,dynamic> signals,market,aiProviders; final List<dynamic> tradePlans; final int qualifiedCount; final String? lastFetch; final ValueChanged<String> onSelected;
-  bool _has(dynamic v)=>v!=null&&v.toString().trim().isNotEmpty;
-  double _n(dynamic v)=>v is num?v.toDouble():double.tryParse(v?.toString()??'')??0;
-  @override Widget build(BuildContext context){
-    final s=Map<String,dynamic>.from(signals[index] as Map? ?? const{}),m=Map<String,dynamic>.from(market[index] as Map? ?? const{});
-    final f=Map<String,dynamic>.from(s['order_flow'] as Map? ?? m['order_flow'] as Map? ?? const{}),i=Map<String,dynamic>.from(s['indicators'] as Map? ?? const{}),v=Map<String,dynamic>.from(s['live_validation'] as Map? ?? const{}),g=(s['guards'] as List? ?? const[]);
-    final providers=Map<String,dynamic>.from(aiProviders['providers'] as Map? ?? const{});
-    final nvidia=Map<String,dynamic>.from(providers['nvidia'] as Map? ?? const{});
-    final openrouter=Map<String,dynamic>.from(providers['openrouter'] as Map? ?? const{});
-    final d=(s['decision']??'WAIT').toString().toUpperCase(),fresh=s['data_fresh']==true&&connected,buy=_n(f['buy_volume']),sell=_n(f['sell_volume']),total=buy+sell;
-    final layers=<List<dynamic>>[
-      ['Market data integrity','Angel One quote + freshness',_has(m['ltp'])&&fresh],
-      ['Trend structure','EMA alignment',_has(i['ema_fast'])&&_has(i['ema_slow'])],
-      ['Momentum','RSI evidence',_has(i['rsi'])],
-      ['Volatility','ATR evidence',_has(i['atr14'])],
-      ['Market regime','Trend / range state',_has(s['regime'])],
-      ['Order flow','Buy/sell volume evidence',f.isNotEmpty],
-      ['Options analytics','Strike and side',_has(s['strike'])&&_has(s['option_side'])],
-      ['Strategy consensus','Backend decision',_has(s['decision'])],
-      ['Quant scoring','Quant evidence',_n(s['quant_score']) > 0 || _has(s['quant'])],
-      ['Risk management','Entry, stop, target',_has(s['entry'])&&_has(s['stop_loss'])&&_has(s['target'])&&g.isEmpty],
-    ];
-    final stable=Map<String,dynamic>.from(s['signal_stability'] as Map? ?? const{})['state']=='CONFIRMED';
-    final gates=<List<dynamic>>[
-      ['Freshness gate','Fresh broker data',fresh],['Live validation','Backend verdict PASS',v['verdict']=='PASS'],
-      ['Strategy agreement','Actionable candidate',d=='CALL BUY'||d=='PUT BUY'],
-      ['Risk gate','No blockers; stop and target',g.isEmpty&&_has(s['stop_loss'])&&_has(s['target'])],
-      ['Final decision gate','Stable confirmed trade plan',stable&&tradePlans.any((p)=>p is Map&&(p['index']??'').toString().toUpperCase()==index.toUpperCase())],
-    ];
-    final c=d=='CALL BUY'?const Color(0xFF35D39A):d=='PUT BUY'?const Color(0xFFFF6577):const Color(0xFFF5B84B);
-    return ListView(padding:const EdgeInsets.fromLTRB(14,12,14,28),children:[
-      const Text('AI TRADING TERMINAL',style:TextStyle(fontSize:11,letterSpacing:2,color:Color(0xFF6DDBFF),fontWeight:FontWeight.w900)),
-      const SizedBox(height:4),const Text('Market command center',style:TextStyle(fontSize:25,fontWeight:FontWeight.w900)),
-      const SizedBox(height:14),
-      Container(padding:const EdgeInsets.all(16),decoration:BoxDecoration(gradient:const LinearGradient(colors:[Color(0xFF142536),Color(0xFF101722)]),borderRadius:BorderRadius.circular(20),border:Border.all(color:const Color(0xFF294052))),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-        Row(children:[Expanded(child:DropdownButtonFormField<String>(value:index,decoration:const InputDecoration(labelText:'Market',border:InputBorder.none),items:indexes.map((x)=>DropdownMenuItem(value:x,child:Text(x))).toList(),onChanged:(x){if(x!=null)onSelected(x);})),Container(padding:const EdgeInsets.all(8),decoration:BoxDecoration(color:c.withOpacity(.12),borderRadius:BorderRadius.circular(8)),child:Text(d,style:TextStyle(color:c,fontWeight:FontWeight.w900,fontSize:11)))]),
-        Text('₹ '+(_has(m['ltp'])?_n(m['ltp']).toStringAsFixed(2):'—'),style:const TextStyle(fontSize:34,fontWeight:FontWeight.w900)),
-        const SizedBox(height:12),Row(children:[Expanded(child:_metric('CONFIDENCE',s['confidence']==null?'—':s['confidence'].toString()+'%')),Expanded(child:_metric('REGIME',(s['regime']??'—').toString())),Expanded(child:_metric('QUALIFIED',qualifiedCount.toString()+' / 5'))]),
-      ])),
-      const SizedBox(height:10),_status('Market feed',fresh?'LIVE VERIFIED':'NOT VERIFIED',fresh),
-      const Section('AI PROVIDERS • NVIDIA + OPENROUTER'),
-      Card(child: Column(children: [
-        ListTile(leading: Icon(Icons.circle, color: nvidia['ok'] == true ? Colors.greenAccent : Colors.redAccent, size: 12), title: const Text('NVIDIA'), subtitle: Text((nvidia['status'] ?? 'STATUS NOT CHECKED').toString()), trailing: Text((nvidia['model'] ?? '—').toString(), style: const TextStyle(fontSize: 10))),
-        ListTile(leading: Icon(Icons.circle, color: openrouter['ok'] == true ? Colors.greenAccent : Colors.redAccent, size: 12), title: const Text('OpenRouter'), subtitle: Text((openrouter['status'] ?? 'STATUS NOT CHECKED').toString()), trailing: Text((openrouter['model'] ?? '—').toString(), style: const TextStyle(fontSize: 10))),
-      ])),
-      const SizedBox(height:18),const Text('ORDER FLOW',style:TextStyle(fontSize:15,fontWeight:FontWeight.w900,letterSpacing:1)),
-      const SizedBox(height:8),Container(padding:const EdgeInsets.all(14),decoration:BoxDecoration(color:const Color(0xFF101722),borderRadius:BorderRadius.circular(16),border:Border.all(color:const Color(0xFF202D3A))),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-        Row(children:[Expanded(child:_metric('BUY VOLUME',f.isEmpty?'—':_fmt(buy),const Color(0xFF35D39A))),Expanded(child:_metric('SELL VOLUME',f.isEmpty?'—':_fmt(sell),const Color(0xFFFF6577))),Expanded(child:_metric('DELTA',f.isEmpty?'—':_fmt(buy-sell),(buy-sell)>=0?const Color(0xFF35D39A):const Color(0xFFFF6577)))]),
-        const SizedBox(height:14),if(total>0)ClipRRect(borderRadius:BorderRadius.circular(6),child:SizedBox(height:12,child:Row(children:[Expanded(flex:(buy/total*1000).round().clamp(1,1000),child:Container(color:const Color(0xFF35D39A))),Expanded(flex:(sell/total*1000).round().clamp(1,1000),child:Container(color:const Color(0xFFFF6577)))])))else Container(height:12,color:const Color(0xFF202D3A)),
-        const SizedBox(height:8),Text(f.isEmpty?'Order-flow unavailable. Waiting for broker evidence; no synthetic live chart is shown.':'Volume split is indicative and is not guaranteed exchange aggressor-side data.',style:const TextStyle(fontSize:11,color:Colors.white60)),
-      ])),
-      const SizedBox(height:18),Row(children:[const Expanded(child:Text('10-LAYER TRADING ENGINE',style:TextStyle(fontSize:14,fontWeight:FontWeight.w900))),Text(layers.where((x)=>x[2]==true).length.toString()+'/10 READY',style:const TextStyle(color:Color(0xFF6DDBFF),fontWeight:FontWeight.w800))]),
-      const SizedBox(height:8),...layers.asMap().entries.map((e)=>_layer(e.key+1,e.value[0].toString(),e.value[1].toString(),e.value[2]==true)),
-      const SizedBox(height:18),Row(children:[const Expanded(child:Text('5-LAYER FINAL VALIDATION',style:TextStyle(fontSize:14,fontWeight:FontWeight.w900))),Text(gates.where((x)=>x[2]==true).length.toString()+'/5 PASS',style:const TextStyle(color:Color(0xFFF5B84B),fontWeight:FontWeight.w800))]),
-      const SizedBox(height:8),...gates.asMap().entries.map((e)=>_layer(e.key+1,e.value[0].toString(),e.value[1].toString(),e.value[2]==true)),
-      const SizedBox(height:12),Container(padding:const EdgeInsets.all(12),decoration:BoxDecoration(color:const Color(0xFF171B22),borderRadius:BorderRadius.circular(12),border:Border.all(color:const Color(0xFF4B3C20))),child:Text(gates.every((x)=>x[2]==true)?'Validation gates passed for this candidate; verify broker data before trading.':'FINAL DECISION: WAIT. Missing or unverified evidence blocks an actionable signal. Readiness badges reflect received backend fields, not proof that every independent engine is implemented.',style:const TextStyle(fontSize:12,height:1.4))),
-      const SizedBox(height:18),const Text('BEST QUALIFIED CANDIDATES',style:TextStyle(fontSize:14,fontWeight:FontWeight.w900)),
-      if(tradePlans.isEmpty)const Padding(padding:EdgeInsets.symmetric(vertical:12),child:Text('No trade plan passed all gates. WAIT is the safe default.',style:TextStyle(color:Colors.white60)))else ...tradePlans.take(5).toList().asMap().entries.map((e)=>TradePlanCard(rank:e.key+1,plan:Map<String,dynamic>.from(e.value as Map))),
-      if(lastFetch!=null)Padding(padding:const EdgeInsets.only(top:12),child:Text('Last fetch: '+lastFetch!,style:const TextStyle(fontSize:10,color:Colors.white38))),
+  final Map<String,dynamic> signals, market; final List<dynamic> tradePlans; final int qualifiedCount; final String? lastFetch;
+  final ValueChanged<String> onSelected;
+  @override Widget build(BuildContext context) {
+    final s=Map<String,dynamic>.from(signals[index] as Map? ?? const {});
+    final m=Map<String,dynamic>.from(market[index] as Map? ?? const {});
+    return ListView(padding:const EdgeInsets.all(10),children:[
+      StatusCard(text:status,good:status == 'LIVE market feed connected.'),
+      if (lastFetch != null) Card(child: ListTile(leading: const Icon(Icons.history), title: const Text('Last market fetch'), subtitle: Text(lastFetch!), trailing: Text(status == 'LIVE market feed connected.' ? 'LIVE' : 'CACHED'))),
+      DropdownButtonFormField<String>(initialValue:index,decoration:const InputDecoration(labelText:'Select Index'),items:indexes.map((i)=>DropdownMenuItem(value:i,child:Text(i))).toList(),onChanged:(v){if(v!=null)onSelected(v);}),
+      Card(child:Padding(padding:const EdgeInsets.all(14),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+        Text(index,style:const TextStyle(fontSize:24,fontWeight:FontWeight.w900)),
+        InfoRow('LTP',_val(m['ltp'])),InfoRow('Decision',s['decision']?.toString()??'NO DATA'),
+        InfoRow('Confidence',(s['confidence']??0).toString()+'%'),InfoRow('Regime',s['regime']?.toString()??'—'),
+        InfoRow('Last fetch',m['timestamp']?.toString()??'—'),
+      ]))),
+      Row(children:[Expanded(child:Metric(title:'Qualified trades',value:qualifiedCount.toString()+' / 5')),Expanded(child:Metric(title:'Feed',value:status == 'LIVE market feed connected.'?'LIVE':'LAST'))]),
+      const Section('Trade Plan — best qualified candidates'),
+      if(tradePlans.isEmpty) const StatusCard(text:'0 qualified trades — no candidate passed all gates.',good:true)
+      else ...tradePlans.asMap().entries.map((e)=>TradePlanCard(rank:e.key+1,plan:Map<String,dynamic>.from(e.value as Map))),
+      const Section('Indian F&O Index Board'),
+      GridView.count(shrinkWrap:true,physics:const NeverScrollableScrollPhysics(),crossAxisCount:2,childAspectRatio:1.48,crossAxisSpacing:8,mainAxisSpacing:8,children:indexes.map((i){final x=Map<String,dynamic>.from(signals[i] as Map? ?? const {});final mx=Map<String,dynamic>.from(market[i] as Map? ?? const {});final decision=(x['decision']??'NO DATA').toString();final bullish=decision=='CALL BUY';final bearish=decision=='PUT BUY';final color=bullish?Colors.greenAccent:bearish?Colors.redAccent:Colors.orangeAccent;return InkWell(onTap:()=>onSelected(i),borderRadius:BorderRadius.circular(14),child:Card(child:Padding(padding:const EdgeInsets.all(10),child:Column(crossAxisAlignment:CrossAxisAlignment.start,mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[Row(children:[Expanded(child:Text(i,style:const TextStyle(fontWeight:FontWeight.w900,fontSize:15))),Icon(Icons.show_chart,color:color,size:18)]),Text('₹ ${_val(mx['ltp'])}',style:const TextStyle(fontSize:17,fontWeight:FontWeight.w800)),Container(padding:const EdgeInsets.symmetric(horizontal:7,vertical:4),decoration:BoxDecoration(color:color.withOpacity(.12),borderRadius:BorderRadius.circular(7)),child:Text(decision,style:TextStyle(fontSize:10,color:color,fontWeight:FontWeight.w900))),Text('${(x['confidence']??0)}% • ${(x['regime']??'—')}',style:const TextStyle(fontSize:10,color:Colors.white70))]))));}).toList()),
     ]);
   }
-  Widget _metric(String a,String b,[Color c=const Color(0xFFE7EEF7)])=>Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(a,style:const TextStyle(fontSize:9,letterSpacing:.7,color:Colors.white54,fontWeight:FontWeight.w800)),const SizedBox(height:4),Text(b,maxLines:1,overflow:TextOverflow.ellipsis,style:TextStyle(fontSize:13,fontWeight:FontWeight.w900,color:c))]);
-  Widget _status(String a,String b,bool ok)=>Container(padding:const EdgeInsets.all(12),decoration:BoxDecoration(color:const Color(0xFF101722),borderRadius:BorderRadius.circular(12),border:Border.all(color:const Color(0xFF202D3A))),child:Row(children:[Icon(Icons.circle,size:9,color:ok?const Color(0xFF35D39A):const Color(0xFFFF6577)),const SizedBox(width:9),Text(a,style:const TextStyle(fontWeight:FontWeight.w800)),const Spacer(),Flexible(child:Text(b,textAlign:TextAlign.end,style:TextStyle(fontSize:10,color:ok?const Color(0xFF35D39A):const Color(0xFFFF6577),fontWeight:FontWeight.w800)))]));
-  Widget _layer(int n,String a,String b,bool ok)=>Container(margin:const EdgeInsets.only(bottom:6),padding:const EdgeInsets.symmetric(horizontal:11,vertical:10),decoration:BoxDecoration(color:const Color(0xFF101722),borderRadius:BorderRadius.circular(11),border:Border.all(color:const Color(0xFF202D3A))),child:Row(children:[Container(width:28,height:28,alignment:Alignment.center,decoration:BoxDecoration(color:(ok?const Color(0xFF35D39A):const Color(0xFFFF6577)).withOpacity(.12),borderRadius:BorderRadius.circular(8)),child:Text(n.toString().padLeft(2,'0'),style:TextStyle(fontSize:10,fontWeight:FontWeight.w900,color:ok?const Color(0xFF35D39A):const Color(0xFFFF6577)))),const SizedBox(width:10),Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(a,style:const TextStyle(fontSize:12,fontWeight:FontWeight.w800)),Text(b,style:const TextStyle(fontSize:10,color:Colors.white54))])),Icon(ok?Icons.check_circle:Icons.lock_outline,size:17,color:ok?const Color(0xFF35D39A):const Color(0xFFFF6577))]));
-  String _fmt(double n)=>n.abs()>=10000000?(n/10000000).toStringAsFixed(2)+'Cr':n.abs()>=100000?(n/100000).toStringAsFixed(2)+'L':n.abs()>=1000?(n/1000).toStringAsFixed(1)+'k':n.toStringAsFixed(0);
 }
 
 class MarketPage extends StatelessWidget {
@@ -1674,18 +868,16 @@ class MarketPage extends StatelessWidget {
     InfoRow('ATR(14)',_val((signal['indicators'] as Map?)?['atr14'])),
     InfoRow('Decision',signal['decision']?.toString()??'NO DATA'),
     InfoRow('Last fetch',market['timestamp']?.toString()??'—'),
-    if (market['signal_error'] != null) InfoRow('Signal pipeline status', market['signal_error'].toString()),
     const Section('Timeframe Data • broker candles only'),
     ...['15m','5m','1m'].map((tf){final arr=((market['timeframes'] as Map?)?[tf] as List?)??const[];final last=arr.isEmpty?null:Map<String,dynamic>.from(arr.last as Map);return Card(child:ListTile(title:Text(tf+' • '+arr.length.toString()+' bars'),subtitle:Text('O '+_val(last?['open'])+' H '+_val(last?['high'])+' L '+_val(last?['low'])+' C '+_val(last?['close'])+' • '+_val(last?['count'])+' ticks')));}),
   ]);
 }
 
 class ChainPage extends StatefulWidget {
-  const ChainPage({required this.selected, required this.onChanged, required this.market, required this.error, super.key});
+  const ChainPage({required this.selected, required this.onChanged, required this.market, super.key});
   final String selected;
   final ValueChanged<String> onChanged;
   final Map<String, dynamic> market;
-  final String? error;
   @override
   State<ChainPage> createState() => _ChainPageState();
 }
@@ -1772,8 +964,6 @@ class _ChainPageState extends State<ChainPage> {
           onChanged: (v) { if (v != null) setState(() => _sort = v); },
         )),
       ]),
-      if (rows.isEmpty && widget.error != null)
-        Card(child: Padding(padding: const EdgeInsets.all(12), child: Text('Option-chain request: ${widget.error}', style: const TextStyle(color: Colors.orangeAccent, fontSize: 12)))),
       if (rows.isEmpty)
         const StatusCard(text: 'No option-chain quotes are available yet. Connect Angel One, sync the instrument master, and wait for live or historical quotes.', good: false)
       else
@@ -1852,65 +1042,12 @@ class _ChainPageState extends State<ChainPage> {
 
 
 class OIPage extends StatelessWidget {
-  const OIPage({required this.signals, required this.market, required this.commodities, required this.optionChains, super.key});
-  final Map<String, dynamic> signals;
-  final Map<String, dynamic> market;
-  final List<dynamic> commodities;
-  final Map<String, List<dynamic>> optionChains;
-  double _n(dynamic value) => value is num ? value.toDouble() : double.tryParse(value?.toString() ?? '') ?? 0;
-  @override
-  Widget build(BuildContext context) => ListView(padding: const EdgeInsets.all(10), children: [
-    const Section('OI Lab — broker option-chain data'),
-    const Text('OI/PCR are calculated only from returned Angel One option quotes. Missing chains remain unavailable; no sample OI is generated.', style: TextStyle(fontSize: 11, color: Colors.white70)),
-    const Section('MCX LIVE FUTURES • ANGEL ONE'),
-    ...commodities.whereType<Map>().map((raw) => Map<String, dynamic>.from(raw)).map((row) {
-      final name = (row['name'] ?? row['symbol'] ?? 'MCX').toString().toUpperCase();
-      final ltp = row['ltp'] ?? row['last_price'] ?? row['close'];
-      final age = row['age_seconds'] ?? row['tick_age_seconds'];
-      final live = row['live'] == true && age is num && age >= 0 && age <= 60;
-      return Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [Expanded(child: Text(name, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16))), Text(live ? 'LIVE' : 'NOT VERIFIED', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: live ? Colors.greenAccent : Colors.orangeAccent))]),
-        InfoRow('Contract', (row['symbol'] ?? name).toString()),
-        InfoRow('Futures LTP', _val(ltp)),
-        InfoRow('Source', (row['source'] ?? row['feed_mode'] ?? 'unknown').toString()),
-        InfoRow('Tick age (sec)', age?.toString() ?? 'unknown'),
-        InfoRow('Volume', _val(row['volume'])),
-        InfoRow('Open interest', _val(row['oi'])),
-        if (row['signal_error'] != null || row['error'] != null)
-          Text('Feed reason: ${row['signal_error'] ?? row['error']}', style: const TextStyle(color: Colors.orangeAccent, fontSize: 11)),
-        const Text('MCX futures data is shown separately. CE/PE option-chain OI is not inferred from futures quotes.', style: TextStyle(color: Colors.white60, fontSize: 10)),
-      ])));
-    }),
-    ...optionUnderlyings.where((index) => indexes.contains(index)).map((index) {
-      final signal = Map<String, dynamic>.from(signals[index] as Map? ?? const {});
-      final marketRow = Map<String, dynamic>.from(market[index] as Map? ?? const {});
-      final cached = optionChains[index];
-      final rows = ((marketRow['option_chain'] as List?) ?? cached ?? const <dynamic>[])
-          .whereType<Map>().map((row) => Map<String, dynamic>.from(row)).toList();
-      final calls = rows.where((row) => (row['side'] ?? row['option_type'] ?? '').toString().toUpperCase().contains('C')).toList();
-      final puts = rows.where((row) => (row['side'] ?? row['option_type'] ?? '').toString().toUpperCase().contains('P')).toList();
-      final callOi = calls.fold<double>(0, (sum, row) => sum + _n(row['oi']));
-      final putOi = puts.fold<double>(0, (sum, row) => sum + _n(row['oi']));
-      final callWall = calls.isEmpty ? null : calls.reduce((a, b) => _n(a['oi']) >= _n(b['oi']) ? a : b);
-      final putWall = puts.isEmpty ? null : puts.reduce((a, b) => _n(a['oi']) >= _n(b['oi']) ? a : b);
-      final old = Map<String, dynamic>.from(signal['oi_summary'] as Map? ?? const {});
-      final hasChainOi = rows.any((row) => row['oi'] != null);
-      final effectiveCallOi = hasChainOi ? callOi : old['call_oi'];
-      final effectivePutOi = hasChainOi ? putOi : old['put_oi'];
-      final pcr = hasChainOi ? (callOi > 0 ? putOi / callOi : null) : old['pcr'];
-      final classification = pcr is num ? (pcr >= 1.1 ? 'PUT OI HEAVY' : pcr <= 0.8 ? 'CALL OI HEAVY' : 'BALANCED') : 'DATA REQUIRED';
-      return Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [Expanded(child: Text(index, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w900))), Text(rows.isEmpty ? 'NO CHAIN' : '${rows.length} QUOTES', style: const TextStyle(color: Colors.white60, fontSize: 11))]),
-        InfoRow('CALL OI', _val(effectiveCallOi)),
-        InfoRow('PUT OI', _val(effectivePutOi)),
-        InfoRow('PCR', _val(pcr)),
-        InfoRow('CALL OI wall', callWall == null ? '—' : '${callWall['strike'] ?? '—'}'),
-        InfoRow('PUT OI wall', putWall == null ? '—' : '${putWall['strike'] ?? '—'}'),
-        InfoRow('Classification', hasChainOi ? classification : (old['classification']?.toString() ?? 'WAIT — no broker OI')),
-        InfoRow('Selected OI regime', old['selected_oi_regime']?.toString() ?? 'Derived from available chain only'),
-        if (marketRow['signal_error'] != null) Text('Signal engine: ${marketRow['signal_error']}', style: const TextStyle(color: Colors.orangeAccent, fontSize: 11)),
-      ])));
-    }),
+  const OIPage({required this.signals,super.key}); final Map<String,dynamic> signals;
+  @override Widget build(BuildContext context)=>ListView(padding:const EdgeInsets.all(10),children:[
+    const Section('OI Lab — all indices'),
+    ...indexes.map((i){final s=Map<String,dynamic>.from(signals[i] as Map? ?? const {});final o=Map<String,dynamic>.from(s['oi_summary'] as Map? ?? const{});return Card(child:Padding(padding:const EdgeInsets.all(14),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+      Text(i,style:const TextStyle(fontSize:19,fontWeight:FontWeight.w900)),InfoRow('CALL OI',_val(o['call_oi'])),InfoRow('PUT OI',_val(o['put_oi'])),InfoRow('PCR',_val(o['pcr'])),InfoRow('Classification',o['classification']?.toString()??'—'),InfoRow('Selected OI regime',o['selected_oi_regime']?.toString()??'—'),
+    ])));}),
   ]);
 }
 
@@ -1944,14 +1081,9 @@ class _IndicatorsState extends State<IndicatorsPage>{
 }
 
 class SignalPage extends StatelessWidget {
-  const SignalPage({required this.backendUrl, required this.liveStatus, required this.index, required this.signals, required this.signalPerformance, required this.ai, required this.aiProviders, required this.tradePlans, required this.market, required this.onChanged, super.key});
-  final String backendUrl;
-  final Map<String, dynamic> liveStatus;
+  const SignalPage({required this.index, required this.signals, required this.tradePlans, required this.market, required this.onChanged, super.key});
   final String index;
   final Map<String, dynamic> signals;
-  final Map<String, dynamic> signalPerformance;
-  final Map<String, dynamic> ai;
-  final Map<String, dynamic> aiProviders;
   final List<dynamic> tradePlans;
   final Map<String, dynamic> market;
   final ValueChanged<String> onChanged;
@@ -1961,68 +1093,21 @@ class SignalPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = Map<String, dynamic>.from(signals[index] as Map? ?? const {});
     final marketRow = Map<String, dynamic>.from(market[index] as Map? ?? const {});
+    final heroZero = Map<String, dynamic>.from(s['hero_zero'] as Map? ?? const {});
+    final heroZeroValidation = Map<String, dynamic>.from(heroZero['live_validation'] as Map? ?? const {});
+    final heroZeroReasons = (heroZero['reasons'] as List?) ?? const <dynamic>[];
+    final heroZeroGuards = (heroZero['guards'] as List?) ?? const <dynamic>[];
     final reasons = (s['reason'] as List?) ?? const <dynamic>[];
     final guards = (s['guards'] as List?) ?? const <dynamic>[];
     final validation = Map<String, dynamic>.from(s['live_validation'] as Map? ?? const {});
     final validationBlocks = (validation['blocks'] as List?) ?? const <dynamic>[];
     final timeframeAnalysis = Map<String, dynamic>.from(s['timeframe_analysis'] as Map? ?? const {});
-    final indicatorSummary = Map<String, dynamic>.from(s['indicator_summary'] as Map? ?? const {});
-    final newsSentiment = Map<String, dynamic>.from(marketRow['news_sentiment'] as Map? ?? const {});
     final researchPack = Map<String, dynamic>.from(timeframeAnalysis['research_pack'] as Map? ?? const {});
     final researchChecks = Map<String, dynamic>.from(researchPack['checks'] as Map? ?? const {});
-    final aiDecision = Map<String, dynamic>.from(ai[index] as Map? ?? const {});
-    final providerMap = Map<String, dynamic>.from(aiProviders['providers'] as Map? ?? const {});
-    final nvidiaProvider = Map<String, dynamic>.from(providerMap['nvidia'] as Map? ?? const {});
-    final openrouterProvider = Map<String, dynamic>.from(providerMap['openrouter'] as Map? ?? const {});
-    final agentAnalysis = Map<String, dynamic>.from(aiDecision['agent_analysis'] as Map? ?? const {});
-    final specialists = Map<String, dynamic>.from(agentAnalysis['specialists'] as Map? ?? const {});
     final decision = s['decision']?.toString() ?? '';
     final finalDecision = (validation['decision'] ?? 'WAIT').toString();
-    final perfMetrics = Map<String, dynamic>.from(signalPerformance['metrics'] as Map? ?? const {});
-    final perInstrumentPerf = Map<String, dynamic>.from(signalPerformance['by_instrument'] as Map? ?? const {});
-    final mcxPerf = Map<String, dynamic>.from(signalPerformance['mcx'] as Map? ?? const {});
-    String perfRate(dynamic value) => value is num ? '${(value * 100).toStringAsFixed(1)}%' : 'Not verified';
-    String perfMoney(dynamic value) => value is num ? '₹${value.toStringAsFixed(2)}' : 'Not available';
-    Widget instrumentPerformance(String name, Map<String, dynamic> metrics) => Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(name, style: const TextStyle(fontWeight: FontWeight.w800)),
-          InfoRow('Closed / open', '${metrics['closed_count'] ?? 0} / ${metrics['open_count'] ?? 0}'),
-          InfoRow('Target hits / SL hits', '${metrics['target_hits'] ?? 0} / ${metrics['stop_loss_hits'] ?? 0}'),
-          InfoRow('Target rate / SL rate', '${perfRate(metrics['target_hit_rate'])} / ${perfRate(metrics['stop_loss_rate'])}'),
-          InfoRow('Net win / loss rate', '${perfRate(metrics['win_rate'])} / ${perfRate(metrics['loss_rate'])}'),
-          InfoRow('Net P&L', metrics['net_pnl_inr'] is num ? perfMoney(metrics['net_pnl_inr']) : 'Not available'),
-          InfoRow('P&L coverage', '${metrics['net_pnl_coverage_count'] ?? 0} / ${metrics['closed_count'] ?? 0} closed outcomes'),
-        ]),
-      ),
-    );
     final children = <Widget>[
       IndexPicker(selected: index, onChanged: onChanged),
-      const Section('Observed Signal Performance'),
-      Card(child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          InfoRow('Tracker status', (signalPerformance['accuracy_status'] ?? 'UNVERIFIED — WAITING FOR OUTCOMES').toString()),
-          InfoRow('Ledger persistence', ((signalPerformance['persistence'] as Map?)?['status'] ?? 'UNKNOWN').toString()),
-          InfoRow('Closed / open', '${perfMetrics['closed_count'] ?? 0} / ${perfMetrics['open_count'] ?? 0}'),
-          InfoRow('Targets / stop-losses', '${perfMetrics['target_hits'] ?? 0} / ${perfMetrics['stop_loss_hits'] ?? 0}'),
-          InfoRow('Target hit / SL hit rate', '${perfRate(perfMetrics['target_hit_rate'])} / ${perfRate(perfMetrics['stop_loss_rate'])}'),
-          InfoRow('Fee-adjusted win / loss', '${perfRate(perfMetrics['win_rate'])} / ${perfRate(perfMetrics['loss_rate'])}'),
-          InfoRow('Net P&L estimate', perfMetrics['net_pnl_inr'] is num ? perfMoney(perfMetrics['net_pnl_inr']) : 'Not available — fees/quantity data incomplete'),
-          const SizedBox(height: 6),
-          const Text('Shadow/paper results only. Fresh quotes can miss intrabar touches; target hits are assumed at target level. This is not broker-filled or realized P&L.', style: TextStyle(fontSize: 11, color: Colors.white70)),
-        ]),
-      )),
-      instrumentPerformance('NIFTY', Map<String, dynamic>.from(perInstrumentPerf['NIFTY'] as Map? ?? const {})),
-      instrumentPerformance('BANKNIFTY', Map<String, dynamic>.from(perInstrumentPerf['BANKNIFTY'] as Map? ?? const {})),
-      if (mcxPerf['metrics'] is Map)
-        instrumentPerformance('MCX — all tracked commodities', Map<String, dynamic>.from(mcxPerf['metrics'] as Map))
-      else
-        Card(child: Padding(padding: const EdgeInsets.all(12), child: Text((mcxPerf['message'] ?? 'MCX accuracy has not been verified yet.').toString()))),
-      ...perInstrumentPerf.entries
-        .where((entry) => entry.key != 'NIFTY' && entry.key != 'BANKNIFTY')
-        .map((entry) => instrumentPerformance(entry.key, Map<String, dynamic>.from(entry.value as Map? ?? const {}))),
       const Section('Signal'),
       Card(
         child: Padding(
@@ -2058,6 +1143,43 @@ class SignalPage extends StatelessWidget {
           ),
         ),
       ),
+      const Section('Hero Zero — Expiry Only'),
+      Card(
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                const Expanded(child: Text('HERO ZERO CANDIDATE', style: TextStyle(fontWeight: FontWeight.w900))),
+                Chip(
+                  label: Text((heroZero['candidate_decision'] ?? 'WAIT').toString()),
+                  backgroundColor: heroZero['candidate_decision'] == 'CALL BUY' || heroZero['candidate_decision'] == 'PUT BUY'
+                      ? Colors.amber.withOpacity(.18) : Colors.grey.withOpacity(.15),
+                ),
+              ]),
+              const Text('Expiry day only • 13:30–14:45 IST • candidate only, not an order',
+                  style: TextStyle(fontSize: 11, color: Colors.white70)),
+              const Divider(),
+              InfoRow('Engine', (heroZero['engine_source'] ?? 'HERO_ZERO').toString()),
+              InfoRow('Decision', (heroZero['decision'] ?? 'WAIT').toString()),
+              InfoRow('Strike / side', '${_val(heroZero['strike'])} / ${heroZero['option_side'] ?? '—'}'),
+              InfoRow('Option premium entry', _val(heroZero['entry'])),
+              InfoRow('Soft stop loss', _val(heroZero['stop_loss'])),
+              InfoRow('Premium target', _val(heroZero['target'])),
+              InfoRow('Trigger', (heroZero['trigger'] ?? '—').toString()),
+              InfoRow('Validation', (heroZeroValidation['verdict'] ?? 'FAIL').toString()),
+              ...heroZeroReasons.map((r) => Text('• ' + r.toString(), style: const TextStyle(fontSize: 11))),
+              ...heroZeroGuards.map((g) => Text('⚠ ' + g.toString(), style: const TextStyle(fontSize: 11, color: Colors.orangeAccent))),
+              const SizedBox(height: 6),
+              const Text(
+                'High-risk premium strategy. Full premium loss is possible. Soft SL/target are not guaranteed fills. Downstream stability and rupee-risk gates must pass; no broker order is submitted.',
+                style: TextStyle(fontSize: 10, color: Colors.white70),
+              ),
+            ],
+          ),
+        ),
+      ),
       const Section('Research Strategy Pack'),
       Card(child: Padding(
         padding: const EdgeInsets.all(12),
@@ -2072,71 +1194,15 @@ class SignalPage extends StatelessWidget {
           Text((researchPack['safety_note'] ?? 'Research diagnostics are unavailable until the backend returns this payload.').toString(), style: const TextStyle(fontSize: 11)),
         ]),
       )),
-      const Section('Technical Indicators & Session Sentiment'),
-      Card(child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          InfoRow('EMA 8 / EMA 21', '${_val(indicatorSummary['ema_fast_8'])} / ${_val(indicatorSummary['ema_slow_21'])}'),
-          InfoRow('EMA alignment', (indicatorSummary['ema_alignment'] ?? 'UNKNOWN').toString()),
-          InfoRow('SMA 20 / SMA 50', '${_val(indicatorSummary['sma_20'])} / ${_val(indicatorSummary['sma_50'])}'),
-          InfoRow('RSI 14', _val(indicatorSummary['rsi_14'])),
-          InfoRow('RSI reversion', (indicatorSummary['rsi_reversion_signal'] ?? 'WAIT').toString()),
-          InfoRow('MACD histogram', _val(indicatorSummary['macd_histogram'])),
-          InfoRow('Underlying ATR 14', _val(indicatorSummary['underlying_atr_14'])),
-          InfoRow('Session VWAP', _val(indicatorSummary['vwap'])),
-          InfoRow('Session move', marketRow['day_move_pct'] == null ? '—' : '${marketRow['day_move_pct']}%'),
-          InfoRow('Option PCR (near ATM)', _val(marketRow['pcr'])),
-          InfoRow('Order-book imbalance', _val(marketRow['depth_imbalance'])),
-          InfoRow('Session sentiment score', _val(marketRow['sentiment_score'])),
-          InfoRow('Last-24h news sentiment', '${newsSentiment['label'] ?? 'UNKNOWN'} • ${newsSentiment['status'] ?? 'NOT_CONFIGURED'}'),
-          InfoRow('News evidence', '${newsSentiment['article_count'] ?? 0} articles • ${((newsSentiment['sources'] as List?) ?? const []).join(', ')}'),
-          Text((marketRow['sentiment_source'] ?? 'Session sentiment unavailable until fresh quotes arrive.').toString(), style: const TextStyle(fontSize: 11, color: Colors.white70)),
-        ]),
-      )),
-      const Section('Multi-Agent AI Review'),
-      Card(child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          InfoRow('AI mode', (agentAnalysis['mode'] ?? (nvidiaProvider['ok'] == true ? 'NVIDIA CONNECTED • PRIMARY REVIEW' : openrouterProvider['ok'] == true ? 'OPENROUTER CONNECTED • FALLBACK REVIEW' : 'WAITING FOR NVIDIA / OPENROUTER PROVIDER TEST')).toString()),
-          InfoRow('NVIDIA provider', (nvidiaProvider['status'] ?? 'STATUS NOT CHECKED').toString()),
-          InfoRow('NVIDIA model', (nvidiaProvider['model'] ?? '—').toString()),
-          InfoRow('OpenRouter provider', (openrouterProvider['status'] ?? 'STATUS NOT CHECKED').toString()),
-          InfoRow('OpenRouter model', (openrouterProvider['model'] ?? '—').toString()),
-          InfoRow('Evidence supplied', (agentAnalysis['source_evidence_count'] ?? aiDecision['evidence_count'] ?? 0).toString()),
-          ...specialists.entries.map((entry) {
-            final report = Map<String, dynamic>.from(entry.value as Map? ?? const {});
-            final status = (report['status'] ?? report['deterministic_status'] ?? 'UNKNOWN').toString();
-            final view = (report['view'] ?? report['direction'] ?? report['deterministic_direction'] ?? 'UNKNOWN').toString();
-            final rationale = (report['rationale'] ?? report['note'] ?? '').toString();
-            final flags = (report['flags'] as List?)?.map((x) => x.toString()).toList() ?? const <String>[];
-            return Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Card(
-                child: ListTile(
-                  dense: true,
-                  title: Text(entry.key.replaceAll('_', ' ').toUpperCase(), style: const TextStyle(fontWeight: FontWeight.w800)),
-                  subtitle: Text([view, status, rationale, if (flags.isNotEmpty) 'Flags: ${flags.join(', ')}'].where((x) => x.isNotEmpty).join(' • ')),
-                ),
-              ),
-            );
-          }),
-          const SizedBox(height: 4),
-          Text((agentAnalysis['safety_note'] ?? 'Specialist analysis appears after the cloud AI provider responds. Missing data must remain unavailable.').toString(), style: const TextStyle(fontSize: 11)),
-        ]),
-      )),
-      const Section('NVIDIA Signal Review'),
-      NvidiaSignalReview(backendUrl: backendUrl, selectedIndex: index),
-            const Section('Live AI Validation'),
+      const Section('Deterministic Signal Validation'),
       Card(child:Padding(
         padding:const EdgeInsets.all(12),
         child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
           InfoRow('Validation verdict',(validation['verdict'] ?? 'WAITING').toString()),
-          InfoRow('BUY / SELL direction',(validation['market_direction'] ?? 'WAIT').toString()),
+          InfoRow('Market direction',(validation['market_direction'] ?? 'WAIT').toString()),
           InfoRow('F&O action',(validation['decision'] ?? 'WAIT').toString()),
-          InfoRow('AI decision',(validation['ai_decision'] ?? 'NOT VALIDATED').toString()),
           InfoRow('Market tick age',validation['market_age_seconds'] == null ? '—' : '${validation['market_age_seconds']} sec'),
           InfoRow('Option quote age',validation['option_age_seconds'] == null ? '—' : '${validation['option_age_seconds']} sec'),
-          InfoRow('AI result age',validation['ai_age_seconds'] == null ? '—' : '${validation['ai_age_seconds']} sec'),
           InfoRow('Reward / risk',validation['reward_risk']?.toString() ?? '—'),
           if (validationBlocks.isNotEmpty) ...[
             const Divider(),
@@ -2144,7 +1210,7 @@ class SignalPage extends StatelessWidget {
             ...validationBlocks.map((b)=>Text('⚠ ${b.toString()}')),
           ],
           const SizedBox(height:4),
-          const Text('PASS requires fresh Angel One WebSocket data, a valid option quote, clear risk gates and a fresh AI decision agreeing with the strategy. Otherwise the final decision is WAIT.',style:TextStyle(fontSize:11)),
+          const Text('PASS requires fresh broker data, a valid option quote and all strategy/risk gates to pass. Missing or stale evidence means WAIT.',style:TextStyle(fontSize:11)),
         ]),
       )),
       const Section('Signal-only mode'),
@@ -2170,12 +1236,10 @@ class SignalPage extends StatelessWidget {
 }
 
 class RiskPage extends StatelessWidget {
-  const RiskPage({required this.index, required this.signal, required this.plans, required this.market, required this.commodities, super.key});
+  const RiskPage({required this.index, required this.signal, required this.plans, super.key});
   final String index;
   final Map<String, dynamic> signal;
   final List<dynamic> plans;
-  final Map<String, dynamic> market;
-  final List<dynamic> commodities;
 
   @override
   Widget build(BuildContext context) {
@@ -2185,11 +1249,6 @@ class RiskPage extends StatelessWidget {
       padding: const EdgeInsets.all(10),
       children: [
         Section('Risk — ' + index),
-        RiskCalculator(
-          selectedIndex: index,
-          marketByIndex: market,
-          commodities: commodities,
-        ),
         InfoRow('Entry', _val(signal['entry'])),
         InfoRow('Stop Loss', _val(signal['stop_loss'])),
         InfoRow('Target', _val(signal['target'])),
@@ -2206,40 +1265,9 @@ class RiskPage extends StatelessWidget {
   }
 }
 
-class CommodityPage extends StatelessWidget {
-  const CommodityPage({required this.items, super.key});
-  final List<dynamic> items;
-
-  @override
-  Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.all(10),
-    children: [
-      const Section('MCX Commodities — Angel One market feed'),
-      const Text('Front-expiry commodity futures. Live status is shown only when the quote timestamp is fresh; stale or missing prices are not treated as live.', style: TextStyle(fontSize: 12)),
-      if (items.isEmpty)
-        const StatusCard(text: 'No commodity quotes yet. Connect Angel One and sync the instrument master; MCX feed may be unavailable outside market hours.', good: false),
-      ...items.map((raw) {
-        final item = Map<String, dynamic>.from(raw as Map);
-        final live = item['live'] == true;
-        return Card(child: ListTile(
-          leading: Icon(Icons.show_chart, color: live ? Colors.greenAccent : Colors.orangeAccent),
-          title: Text((item['name'] ?? item['symbol'] ?? 'Commodity').toString(), style: const TextStyle(fontWeight: FontWeight.w800)),
-          subtitle: Text('Symbol: ${item['symbol'] ?? '—'} • Expiry: ${item['expiry'] ?? '—'}\nTrend: ${item['trend'] ?? 'UNKNOWN'} • Sentiment: ${item['sentiment_label'] ?? 'UNKNOWN'}\nSignal: ${item['decision'] ?? 'WAIT'} • Candidate: ${item['candidate_decision'] ?? 'WAIT'}\nEntry: ${_val(item['entry'])} • SL: ${_val(item['stop_loss'])} • Target: ${_val(item['target'])}\nStability: ${(item['signal_stability'] as Map?)?['state'] ?? 'BLOCKED'} • Lot: ${item['lotsize'] ?? '—'} • Age: ${item['age_seconds'] ?? '—'}s'),
-          isThreeLine: true,
-          trailing: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [
-            Text(item['ltp'] == null ? '—' : '₹${_val(item['ltp'])}', style: const TextStyle(fontWeight: FontWeight.w900)),
-            Text(live ? 'LIVE' : 'STALE', style: TextStyle(fontSize: 10, color: live ? Colors.greenAccent : Colors.orangeAccent)),
-          ]),
-        ));
-      }),
-    ],
-  );
-}
-
 class ApiPage extends StatefulWidget {
-  const ApiPage({required this.backendUrl,required this.signalBackendUrl,required this.feed,required this.storeDiagnostics,required this.market,required this.onSaved,super.key});
+  const ApiPage({required this.backendUrl,required this.feed,required this.storeDiagnostics,required this.market,required this.onSaved,super.key});
   final String backendUrl;
-  final String signalBackendUrl;
   final Map<String,dynamic> feed,storeDiagnostics,market;
   final ValueChanged<String> onSaved;
   @override State<ApiPage> createState()=>_ApiPageState();
@@ -2259,13 +1287,11 @@ class _ApiPageState extends State<ApiPage> {
 
   Future<void> loadSavedStatus() async {
     try {
-      final result=await FreshApi(widget.signalBackendUrl.trim()).angelStatus();
+      final result=await FreshApi.signal().angelStatus();
       if(!mounted)return;
       setState(()=>savedStatus=result);
       if(result['stored_session']==true) {
-        setState(()=>message='Active Angel One session found. A fresh TOTP is needed only if the broker session expires.');
-      } else if(result['stored_credentials']==true) {
-        setState(()=>message='Encrypted credentials found. Enter the current six-digit TOTP to reconnect after a backend restart.');
+        setState(()=>message='Saved Angel session found. The app will restore it automatically; enter TOTP only if the session has expired.');
       }
     } catch (_) {}
   }
@@ -2281,7 +1307,7 @@ class _ApiPageState extends State<ApiPage> {
   Future<void> connect() async {
     setState(()=>working=true);
     try {
-      final api=FreshApi(widget.signalBackendUrl.trim());
+      final api=FreshApi.signal();
       final result=await api.connectAngel(payload());
       if (result['authenticated'] != true ||
           result['has_jwt_token'] != true ||
@@ -2305,15 +1331,9 @@ class _ApiPageState extends State<ApiPage> {
 
   @override Widget build(BuildContext context)=>ListView(padding:const EdgeInsets.all(10),children:[
     const Section('Angel One • SmartAPI'),
-    ListTile(
-      dense: true,
-      leading: const Icon(Icons.cloud_done_outlined),
-      title: const Text('Live signal service'),
-      subtitle: SelectableText(widget.signalBackendUrl),
-    ),
-    if(savedStatus['stored_session']==true || savedStatus['stored_credentials']==true) Card(child:ListTile(
-      leading:Icon(savedStatus['stored_session']==true?Icons.verified_user:Icons.lock_outline,color:savedStatus['stored_session']==true?Colors.greenAccent:Colors.orangeAccent),
-      title:Text(savedStatus['stored_session']==true?'Active Angel One session':'Encrypted Angel credentials saved'),
+    if(savedStatus['stored_session']==true) Card(child:ListTile(
+      leading:const Icon(Icons.verified_user,color:Colors.greenAccent),
+      title:const Text('Remembered Angel credentials'),
       subtitle:Text('Client ID: ${savedStatus['client_code']??'saved'} • API Key: ${savedStatus['stored_api_key']==true?'saved':''} • MPIN: ${savedStatus['stored_pin']==true?'saved':''}'),
       trailing:const Icon(Icons.lock),
     )),
@@ -2325,11 +1345,11 @@ class _ApiPageState extends State<ApiPage> {
       contentPadding:EdgeInsets.zero,
       value:rememberCredentials,
       onChanged:working?null:(v)=>setState(()=>rememberCredentials=v??true),
-      title:const Text('Remember API Key, Client ID and MPIN (encrypted)'),
-      subtitle:const Text('TOTP and generated JWT/feed tokens are not persisted. Turn off to delete previously saved credentials. A fresh TOTP may be required after backend restart.'),
+      title:const Text('Remember API Key, Client ID, MPIN and access tokens'),
+      subtitle:const Text('Stored encrypted on backend. TOTP is never stored. Turn off to forget saved credentials after this login.'),
       controlAffinity:ListTileControlAffinity.leading,
     ),
-    FilledButton.icon(onPressed:working?null:connect,icon:const Icon(Icons.link),label:Text(working?'CONNECTING…':(savedStatus['stored_session']==true?'RESTORE / CONNECT':(savedStatus['stored_credentials']==true?'RECONNECT WITH TOTP':'CONNECT ANGEL ONE')))),
+    FilledButton.icon(onPressed:working?null:connect,icon:const Icon(Icons.link),label:Text(working?'CONNECTING…':(savedStatus['stored_session']==true?'RESTORE / CONNECT':'CONNECT ANGEL ONE'))),
     const SizedBox(height:10),Text(message),
     const Section('Live Feed Diagnostics'),
     InfoRow('Angel authenticated',widget.feed['authenticated']==true?'YES':'NO'),
@@ -2350,218 +1370,6 @@ class _ApiPageState extends State<ApiPage> {
 
   Widget field(TextEditingController c,String label,bool secret)=>Padding(padding:const EdgeInsets.only(bottom:8),child:TextField(controller:c,obscureText:secret,decoration:InputDecoration(labelText:label)));
   @override void dispose(){for(final c in [angelKey,client,pin,totp]){c.dispose();}super.dispose();}
-}
-
-class AiAccessPage extends StatefulWidget {
-  const AiAccessPage({required this.backendUrl, super.key});
-  final String backendUrl;
-  @override State<AiAccessPage> createState()=>_AiAccessState();
-}
-class _AiAccessState extends State<AiAccessPage>{
-  bool working=false,checking=false,searchWorking=false;
-  String message='Cloud AI status has not been checked.';
-  Map<String,Map<String,dynamic>> providers=const{};
-  Map<String,dynamic> kumoStatus=const{};
-  @override void initState(){super.initState();refresh();}
-  Future<void> refresh() async {
-    if (checking) return;
-    setState(() => checking = true);
-    final api = FreshApi(widget.backendUrl.trim());
-    final next = <String, Map<String, dynamic>>{};
-    Map<String, dynamic> nextKumo = const {};
-    try {
-      final result = await api.postJson('/v1/providers/search/status', {});
-      final raw = result['providers'];
-      if (raw is Map) {
-        for (final name in ['exa', 'tavily']) {
-          final value = raw[name];
-          if (value is Map) next[name] = Map<String, dynamic>.from(value);
-        }
-      }
-    } catch (error) {
-      if (mounted) setState(() => message = 'Search provider check failed: ' + error.toString().replaceFirst('Exception: ', ''));
-    }
-    try {
-      final result = await api.aiStatus();
-      final raw = result['providers'];
-      if (raw is Map) {
-        for (final name in ['nvidia', 'openrouter']) {
-          final value = raw[name];
-          if (value is Map) next[name] = Map<String, dynamic>.from(value);
-        }
-      } else {
-        // Fresh-Apk's AI backend returns provider_health as a list. Configuration
-        // alone is not a successful test, so keep every configured model red until
-        // the explicit Test AI button returns a real completion.
-        final health = result['provider_health'];
-        if (health is List) {
-          for (final item in health.whereType<Map>()) {
-            final name = (item['name'] ?? '').toString().toLowerCase();
-            if (!['nvidia', 'openrouter'].contains(name)) continue;
-            next[name] = <String, dynamic>{
-              'configured': true,
-              'ok': false,
-              'working': false,
-              'status': item['status'] == 'COOLDOWN' ? 'cooldown' : 'configured_not_tested',
-              'model': item['model'] ?? item['model_name'] ?? 'model not reported',
-              'last_error': item['last_error'],
-            };
-          }
-        }
-        for (final name in ['nvidia', 'openrouter']) {
-          next.putIfAbsent(name, () => <String, dynamic>{
-            'configured': false, 'ok': false, 'working': false, 'status': 'not_configured',
-          });
-        }
-      }
-    } catch (error) {
-      if (mounted) setState(() => message = 'AI provider status failed: ' + error.toString().replaceFirst('Exception: ', ''));
-    }
-    try {
-      nextKumo = await api.kumoStatus();
-    } catch (error) {
-      nextKumo = <String, dynamic>{
-        'status': 'unavailable', 'ready': false,
-        'message': error.toString().replaceFirst('Exception: ', ''),
-      };
-    }
-    if (mounted) setState(() { providers = next; kumoStatus = nextKumo; checking = false; });
-  }
-
-  Future<void> test() async {
-    setState(() => working = true);
-    try {
-      final result = await FreshApi(widget.backendUrl.trim()).testAIProviders();
-      final checks = (result['checks'] as List? ?? const []);
-      final updated = <String, Map<String, dynamic>>{...providers};
-      for (final item in checks.whereType<Map>()) {
-        final name = (item['provider'] ?? '').toString();
-        if (name == 'nvidia' || name == 'openrouter') {
-          final check = Map<String, dynamic>.from(item);
-          check['configured'] = item['configured'] == true;
-          check['status'] = check['ok'] == true ? 'ok' : (item['status'] ?? item['error'] ?? 'test_failed').toString();
-          updated[name] = check;
-        }
-      }
-      final details = checks.whereType<Map>().map((item) {
-        final name = (item['provider'] ?? 'provider').toString().toUpperCase();
-        final status = (item['status'] ?? (item['ok'] == true ? 'working' : 'not_working')).toString();
-        final error = (item['error'] ?? '').toString();
-        return '$name: $status${error.isEmpty ? '' : ' ($error)'}';
-      }).join(' • ');
-      final notice = (result['message'] ?? details).toString();
-      if (mounted) {
-        setState(() { providers = updated; message = '$notice • $details'; });
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$notice • $details'), duration: const Duration(seconds: 6)));
-      }
-    } catch (error) {
-      if (mounted) setState(() => message = 'Cloud AI test failed: ' + error.toString().replaceFirst('Exception: ', ''));
-    } finally {
-      if (mounted) setState(() => working = false);
-    }
-  }
-
-  Future<void> testSearch() async {
-    if (searchWorking) return;
-    setState(() => searchWorking = true);
-    try {
-      final result = await FreshApi(widget.backendUrl.trim()).postJson('/v1/providers/search/test', {});
-      final checks = (result['checks'] as List? ?? const []);
-      final updated = <String, Map<String, dynamic>>{...providers};
-      for (final item in checks.whereType<Map>()) {
-        final name = (item['provider'] ?? '').toString();
-        if (name == 'exa' || name == 'tavily') updated[name] = Map<String, dynamic>.from(item);
-      }
-      final details = checks.whereType<Map>().map((item) {
-        final name = (item['provider'] ?? 'provider').toString().toUpperCase();
-        final status = (item['status'] ?? (item['ok'] == true ? 'ok' : 'not_working')).toString();
-        final error = (item['error'] ?? '').toString();
-        final count = item['result_count'];
-        return '$name: $status${count == null ? '' : ' • $count results'}${error.isEmpty ? '' : ' ($error)'}';
-      }).join(' • ');
-      final notice = (result['message'] ?? details).toString();
-      if (mounted) {
-        setState(() { providers = updated; message = '$notice • $details'; });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$notice • $details'), duration: const Duration(seconds: 6)),
-        );
-      }
-    } catch (error) {
-      if (mounted) setState(() => message = 'Search provider test failed: ${error.toString().replaceFirst('Exception: ', '')}');
-    } finally {
-      if (mounted) setState(() => searchWorking = false);
-    }
-  }
-
-  Widget provider(String name) {
-    final data = providers[name];
-    final configured = data?['configured'] == true;
-    final ok = data?['working'] == true || data?['ok'] == true;
-    final status = (data?['status'] ?? '').toString();
-    final label = data == null ? 'CHECK REQUIRED'
-        : ok ? 'WORKING'
-        : !configured ? 'NOT CONFIGURED'
-        : status == 'configured_not_tested' ? 'NOT TESTED' : 'NOT WORKING';
-    final color = data == null ? Colors.blueGrey
-        : ok ? const Color(0xFF35D39A) : const Color(0xFFFF6577);
-    final title = switch (name) {
-      'exa' => 'Exa Search',
-      'tavily' => 'Tavily Search',
-      'openrouter' => 'OpenRouter',
-      _ => name,
-    };
-    final detail = name == 'exa' || name == 'tavily'
-        ? (data == null ? 'Not checked' : '$label • ${data['result_count'] ?? data['evidence_count'] ?? 0} result(s)')
-        : (data == null ? 'Not checked' : '$label • ${data['model'] ?? 'model not reported'}');
-    return Card(child: ListTile(
-      leading: Icon(Icons.circle, size: 13, color: color),
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
-      subtitle: Text(detail),
-      trailing: Text(label, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w900)),
-    ));
-  }
-
-  @override
-  Widget build(BuildContext context) => ListView(padding: const EdgeInsets.all(14), children: [
-    const Section('CLOUD AI • NVIDIA CHAT + PROVIDER VALIDATION'),
-    Card(child: ListTile(
-      leading: Icon(
-        providers['nvidia']?['ok'] == true ? Icons.cloud_done : Icons.cloud_off,
-        color: providers['nvidia']?['ok'] == true ? const Color(0xFF35D39A) : const Color(0xFFFF6577),
-        size: 30,
-      ),
-      title: const Text('NVIDIA Cloud Validation'),
-      subtitle: Text(
-        '${providers['nvidia']?['status'] ?? 'not tested'} • AI remains advisory; deterministic freshness and risk gates control trade eligibility.',
-      ),
-    )),
-    FilledButton.icon(onPressed: working ? null : test, icon: const Icon(Icons.psychology), label: Text(working ? 'TESTING NVIDIA + OPENROUTER…' : 'TEST NVIDIA + OPENROUTER')),
-    const SizedBox(height: 10),
-    Card(child: Padding(padding: const EdgeInsets.all(12), child: Text(message))),
-    const Section('NVIDIA KUMO TABULAR • STRUCTURED PREDICTION'),
-    Card(child: ListTile(
-      leading: Icon(
-        kumoStatus['ready'] == true ? Icons.cloud_done : Icons.cloud_off,
-        color: kumoStatus['ready'] == true ? Colors.lightBlueAccent : const Color(0xFFFF6577),
-        size: 26,
-      ),
-      title: const Text('NVIDIA Kumo Tabular API'),
-      subtitle: Text(
-        '${kumoStatus['status'] ?? 'not checked'} • latency ${kumoStatus['latency_ms'] ?? '—'} ms\n'
-        'Reachability check only; a real prediction and validated target/schema are still required before quant-engine use.\n'
-        '${kumoStatus['message'] ?? 'Hosted Kumo status not checked.'}',
-      ),
-    )),
-    const Section('LLM PROVIDERS • NVIDIA + OPENROUTER'),
-    provider('nvidia'), provider('openrouter'),
-    OutlinedButton.icon(onPressed: checking ? null : refresh, icon: const Icon(Icons.refresh), label: Text(checking ? 'CHECKING…' : 'REFRESH LLM STATUS')),
-    const Section('SEARCH EVIDENCE • BACKEND CONFIGURED'),
-    provider('exa'), provider('tavily'),
-    FilledButton.icon(onPressed: searchWorking ? null : testSearch, icon: const Icon(Icons.travel_explore), label: Text(searchWorking ? 'TESTING EXA + TAVILY…' : 'TEST EXA + TAVILY')),
-    OutlinedButton.icon(onPressed: checking ? null : refresh, icon: const Icon(Icons.refresh), label: Text(checking ? 'CHECKING…' : 'REFRESH EXA / TAVILY STATUS')),
-    const SizedBox(height: 8),
-    const Text('Provider keys remain on Railway. NVIDIA chat/search indicators require real provider tests. Kumo status only confirms API reachability; it is not a prediction or a live signal until a validated target/schema is wired into the engine.', style: TextStyle(fontSize: 12, color: Colors.white60)),
-  ]);
 }
 
 class ProCandlestickChart extends StatefulWidget {
@@ -2627,12 +1435,12 @@ class StatusCard extends StatelessWidget { const StatusCard({required this.text,
 class HeroCard extends StatelessWidget { const HeroCard({required this.index,required this.connected,super.key}); final String index; final bool connected; @override Widget build(BuildContext context)=>Card(child:Padding(padding:const EdgeInsets.all(16),child:Row(children:[CircleAvatar(radius:26,child:Text(index.substring(0,1))),const SizedBox(width:12),Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(index,style:const TextStyle(fontSize:22,fontWeight:FontWeight.w900)),Text(connected?'LIVE • broker connected':'WAITING • connect broker',style:const TextStyle(fontSize:12))])),const Icon(Icons.auto_graph)]))); }
 class Metric extends StatelessWidget { const Metric({required this.title,required this.value,super.key}); final String title,value; @override Widget build(BuildContext context)=>Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(title,style:const TextStyle(fontSize:12)),const SizedBox(height:5),Text(value,style:const TextStyle(fontSize:18,fontWeight:FontWeight.w900))]))); }
 class Section extends StatelessWidget { const Section(this.text,{super.key}); final String text; @override Widget build(BuildContext context)=>Padding(padding:const EdgeInsets.fromLTRB(4,16,4,8),child:Text(text,style:const TextStyle(fontSize:16,fontWeight:FontWeight.w800))); }
-class InfoRow extends StatelessWidget { const InfoRow(this.left,this.right,{super.key}); final String left,right; @override Widget build(BuildContext context)=>Card(child:ListTile(title:Text(left),trailing:SizedBox(width:140,child:Text(right,maxLines:3,overflow:TextOverflow.ellipsis,textAlign:TextAlign.right,style:const TextStyle(fontWeight:FontWeight.w700,fontSize:12))))); }
+class InfoRow extends StatelessWidget { const InfoRow(this.left,this.right,{super.key}); final String left,right; @override Widget build(BuildContext context)=>Card(child:ListTile(title:Text(left),trailing:Text(right,style:const TextStyle(fontWeight:FontWeight.w700)))); }
 class ChainRow extends StatelessWidget { const ChainRow(this.strike,this.ce,this.pe,{super.key}); final String strike,ce,pe; @override Widget build(BuildContext context)=>Card(child:Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[Padding(padding:const EdgeInsets.all(14),child:Text(ce)),Text(strike,style:const TextStyle(fontWeight:FontWeight.w900)),Padding(padding:const EdgeInsets.all(14),child:Text(pe))])); }
 class OIBox extends StatelessWidget { const OIBox(this.title,this.hint,{super.key}); final String title,hint; @override Widget build(BuildContext context)=>Card(child:ListTile(leading:const Icon(Icons.swap_vert),title:Text(title,style:const TextStyle(fontWeight:FontWeight.w800)),subtitle:Text(hint),trailing:const Text('—'))); }
 class IndexPicker extends StatelessWidget{
   const IndexPicker({required this.selected,required this.onChanged,super.key});final String selected;final ValueChanged<String> onChanged;
-  @override Widget build(BuildContext context)=>DropdownButtonFormField<String>(initialValue:selected,decoration:const InputDecoration(labelText:'Select Index / MCX Commodity'),items:optionUnderlyings.map((i)=>DropdownMenuItem(value:i,child:Text(commodityOptionUnderlyings.contains(i) ? 'MCX • $i' : i))).toList(),onChanged:(v){if(v!=null)onChanged(v);});
+  @override Widget build(BuildContext context)=>DropdownButtonFormField<String>(initialValue:selected,decoration:const InputDecoration(labelText:'Select Index'),items:indexes.map((i)=>DropdownMenuItem(value:i,child:Text(i))).toList(),onChanged:(v){if(v!=null)onChanged(v);});
 }
 class TradePlanCard extends StatelessWidget {
   const TradePlanCard({required this.rank, required this.plan, super.key});
@@ -2665,3 +1473,148 @@ class TradePlanCard extends StatelessWidget {
 }
 
 String _val(dynamic v){if(v==null)return '—';if(v is num)return v.toStringAsFixed(v.abs()>=100?2:3);return v.toString();}
+
+
+class IsolatedSignalPage extends StatefulWidget {
+  const IsolatedSignalPage({required this.endpoint, required this.title, required this.description, super.key});
+  final String endpoint, title, description;
+  @override
+  State<IsolatedSignalPage> createState() => _IsolatedSignalPageState();
+}
+
+class _IsolatedSignalPageState extends State<IsolatedSignalPage> {
+  Map<String, dynamic> payload = const {};
+  bool loading = false;
+  String? error;
+  @override
+  void initState() { super.initState(); refresh(); }
+  Future<void> refresh() async {
+    if (loading) return;
+    setState(() { loading = true; error = null; });
+    try {
+      final result = await FreshApi.signal().getJson(widget.endpoint, timeout: const Duration(seconds: 20));
+      if (!mounted) return;
+      setState(() { payload = result; loading = false; });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { error = e.toString(); loading = false; });
+    }
+  }
+  @override
+  Widget build(BuildContext context) {
+    final rows = payload['signals'] is Map ? Map<String,dynamic>.from(payload['signals'] as Map) : <String,dynamic>{};
+    final candidates = payload['strategy_candidates'] is List ? List<dynamic>.from(payload['strategy_candidates'] as List) : <dynamic>[];
+    final isStrategies = widget.endpoint.endsWith('/strategies');
+    return RefreshIndicator(onRefresh: refresh, child: ListView(padding: const EdgeInsets.all(12), children: [
+      Text(widget.title, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+      const SizedBox(height: 6), Text(widget.description),
+      const SizedBox(height: 10),
+      Card(child: ListTile(
+        leading: Icon(loading ? Icons.sync : error == null ? Icons.cloud_done : Icons.cloud_off),
+        title: Text(error != null ? 'DATA CHECK NEEDED' : (payload['status']?.toString().toUpperCase() ?? 'WAIT')),
+        subtitle: Text(error ?? 'Source: ${payload['source'] ?? widget.endpoint} • refresh to fetch latest backend snapshot'),
+        trailing: IconButton(onPressed: refresh, icon: const Icon(Icons.refresh)),
+      )),
+      if (error != null) Card(child: Padding(padding: const EdgeInsets.all(12), child: Text(error!, style: const TextStyle(color: Colors.orangeAccent)))),
+      if (!isStrategies) ...rows.entries.map((entry) {
+        final row = entry.value is Map ? Map<String,dynamic>.from(entry.value as Map) : <String,dynamic>{};
+        final q = row['quant_engine'] is Map ? Map<String,dynamic>.from(row['quant_engine'] as Map) : <String,dynamic>{};
+        return Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(entry.key, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+          Text('Decision: ${row['decision'] ?? 'WAIT'}  •  Strike: ${row['strike'] ?? '—'}  •  Expiry: ${row['expiry'] ?? '—'}'),
+          Text('Entry: ${row['entry'] ?? '—'}  •  SL: ${row['stop_loss'] ?? '—'}  •  Target: ${row['target'] ?? '—'}'),
+          Text('Quant: ${q['passed_layers'] ?? '—'}/${q['total_layers'] ?? 5} layers • Fresh: ${row['data_fresh'] == true ? 'YES' : 'NO'}'),
+          Text('Stability: ${(row['signal_stability'] as Map?)?['state'] ?? 'UNVERIFIED'}'),
+          if (row['blockers'] is List) Text('Blockers: ${(row['blockers'] as List).join(', ')}'),
+        ])));
+      }),
+      if (isStrategies && candidates.isEmpty) const Card(child: ListTile(title: Text('No strategy candidates returned'), subtitle: Text('This is not a failure by itself; the backend must return explicit candidate evidence.'))),
+      if (isStrategies) ...candidates.map((item) {
+        final row = item is Map ? Map<String,dynamic>.from(item) : <String,dynamic>{'detail': item.toString()};
+        return Card(child: ListTile(
+          leading: const Icon(Icons.hub_outlined),
+          title: Text((row['strategy'] ?? row['strategy_id'] ?? row['name'] ?? 'Strategy candidate').toString()),
+          subtitle: Text('Candidate: ${row['candidate_decision'] ?? row['decision'] ?? 'WAIT'} • Status: ${row['status'] ?? row['state'] ?? 'UNVERIFIED'}\n${row['reason'] ?? row['detail'] ?? 'Candidate only; Quant and risk gates still apply.'}'),
+        ));
+      }),
+      const Padding(padding: EdgeInsets.all(8), child: Text('Signal-only mode. No broker orders are placed. Do not treat a candidate or a shadow outcome as a guaranteed fill.', style: TextStyle(color: Colors.orangeAccent))),
+    ]));
+  }
+}
+
+class SignalCalendarPage extends StatefulWidget {
+  const SignalCalendarPage({super.key});
+  @override
+  State<SignalCalendarPage> createState() => _SignalCalendarPageState();
+}
+
+class _SignalCalendarPageState extends State<SignalCalendarPage> {
+  DateTime month = DateTime.now();
+  Map<String,dynamic> days = const {};
+  bool loading = false;
+  String? error;
+  String dayKey(DateTime d) => '${d.year.toString().padLeft(4,'0')}-${d.month.toString().padLeft(2,'0')}-${d.day.toString().padLeft(2,'0')}';
+  @override
+  void initState() { super.initState(); refresh(); }
+  Future<void> refresh() async {
+    setState(() { loading = true; error = null; });
+    final first = DateTime(month.year, month.month, 1);
+    final last = DateTime(month.year, month.month + 1, 0);
+    try {
+      final data = await FreshApi.signal().getJson('/v1/signals/calendar?start_date=${dayKey(first)}&end_date=${dayKey(last)}', timeout: const Duration(seconds: 20));
+      if (!mounted) return;
+      setState(() { days = data['days'] is Map ? Map<String,dynamic>.from(data['days'] as Map) : {}; loading = false; });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { error = e.toString(); loading = false; });
+    }
+  }
+  @override
+  Widget build(BuildContext context) {
+    final first = DateTime(month.year, month.month, 1);
+    final count = DateTime(month.year, month.month + 1, 0).day;
+    final offset = first.weekday % 7;
+    final selected = days.values.whereType<Map>().toList();
+    final targets = selected.fold<int>(0, (v,d) => v + ((d['targets'] as num?)?.toInt() ?? 0));
+    final stops = selected.fold<int>(0, (v,d) => v + ((d['stop_losses'] as num?)?.toInt() ?? 0));
+    final closed = targets + stops;
+    return ListView(padding: const EdgeInsets.all(12), children: [
+      Row(children: [
+        IconButton(onPressed: () { setState(() { month = DateTime(month.year, month.month - 1, 1); }); refresh(); }, icon: const Icon(Icons.chevron_left)),
+        Expanded(child: Text('${month.year}-${month.month.toString().padLeft(2,'0')} • Signal accuracy', textAlign: TextAlign.center, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900))),
+        IconButton(onPressed: () { setState(() { month = DateTime(month.year, month.month + 1, 1); }); refresh(); }, icon: const Icon(Icons.chevron_right)),
+        IconButton(onPressed: refresh, icon: const Icon(Icons.refresh)),
+      ]),
+      if (error != null) Card(child: Padding(padding: const EdgeInsets.all(12), child: Text('Calendar data unavailable: $error', style: const TextStyle(color: Colors.orangeAccent)))),
+      if (loading) const LinearProgressIndicator(),
+      Card(child: Padding(padding: const EdgeInsets.all(12), child: Wrap(spacing: 12, runSpacing: 8, children: [
+        Text('Targets: $targets', style: const TextStyle(color: Colors.greenAccent)),
+        Text('SL: $stops', style: const TextStyle(color: Colors.redAccent)),
+        Text('Closed: $closed'),
+        Text('Target hit rate: ${closed == 0 ? '—' : '${(targets * 100 / closed).toStringAsFixed(1)}%'}'),
+      ]))),
+      const Row(children: [Expanded(child: Center(child: Text('Sun'))),Expanded(child: Center(child: Text('Mon'))),Expanded(child: Center(child: Text('Tue'))),Expanded(child: Center(child: Text('Wed'))),Expanded(child: Center(child: Text('Thu'))),Expanded(child: Center(child: Text('Fri'))),Expanded(child: Center(child: Text('Sat')))]),
+      GridView.count(
+        crossAxisCount: 7, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+        children: [
+          for (var i = 0; i < offset; i++) const SizedBox.shrink(),
+          for (var d = 1; d <= count; d++) Builder(builder: (context) {
+            final row = days[dayKey(DateTime(month.year, month.month, d))] is Map ? Map<String,dynamic>.from(days[dayKey(DateTime(month.year, month.month, d))] as Map) : <String,dynamic>{};
+            final t = (row['targets'] as num?)?.toInt() ?? 0;
+            final sl = (row['stop_losses'] as num?)?.toInt() ?? 0;
+            final open = (row['open'] as num?)?.toInt() ?? 0;
+            return Card(color: t + sl == 0 ? null : t >= sl ? const Color(0xFF12352D) : const Color(0xFF3B2025), child: InkWell(
+              onTap: () => showDialog<void>(context: context, builder: (context) => AlertDialog(title: Text(dayKey(DateTime(month.year, month.month, d))), content: Text('Opened: ${row['signals_opened'] ?? 0}\nOpen: $open\nTargets: $t\nStop losses: $sl\nAccuracy: ${row['accuracy_percent'] == null ? 'Not enough closed outcomes' : '${row['accuracy_percent']}%'}'), actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))]),
+              child: Padding(padding: const EdgeInsets.all(3), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                Text('$d', style: const TextStyle(fontWeight: FontWeight.w800)),
+                if (t + sl > 0) Text('T$t / S$sl', style: const TextStyle(fontSize: 9)),
+                if (open > 0) Text('O$open', style: const TextStyle(fontSize: 9)),
+              ])),
+            ));
+          }),
+        ],
+      ),
+      const Text('Accuracy is based on closed shadow outcomes observed from market quotes, not actual broker fills. Open signals remain visible until a target/SL outcome is observed.', style: TextStyle(color: Colors.orangeAccent)),
+    ]);
+  }
+}
