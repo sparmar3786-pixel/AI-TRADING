@@ -5162,11 +5162,18 @@ def _signal_outcome_report(rows: list[dict[str, Any]], persistence: dict[str, An
     mcx_rows = [row for row in rows if row.get("signal_type") == "MCX_FUTURE"]
     mcx_closed = sum(1 for row in mcx_rows if row.get("status") == "CLOSED" and row.get("exit_reason") in {"TARGET", "STOP_LOSS"})
     closed = sum(1 for row in rows if row.get("status") == "CLOSED" and row.get("exit_reason") in {"TARGET", "STOP_LOSS"})
+    by_strategy: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        strategy = str(row.get("strategy_id") or "quant_unattributed")
+        by_strategy.setdefault(strategy, []).append(row)
+    expired_unresolved = sum(1 for row in rows if row.get("status") == "EXPIRED_UNRESOLVED")
     return {
         "status": "ok",
         "mode": "LIVE_SIGNAL_SHADOW_TRACKING",
         "accuracy_status": "UNVERIFIED_NO_CLOSED_SIGNAL_OUTCOMES" if closed == 0 else "OBSERVED_QUOTE_OUTCOMES",
+        "expired_unresolved_count": expired_unresolved,
         "metrics": _signal_outcome_metrics(rows),
+        "by_strategy": {key: _signal_outcome_metrics(value) for key, value in sorted(by_strategy.items())},
         "by_instrument": {key: _signal_outcome_metrics(value) for key, value in sorted(by_instrument.items())},
         "mcx": {
             "status": "OBSERVED_QUOTE_OUTCOMES" if mcx_closed else "WAITING_FOR_CLOSED_MCX_OUTCOMES",
@@ -5190,7 +5197,9 @@ def _update_signal_outcomes(
     rows = _load_signal_outcomes()
     commodity_rows = [row for row in (commodities or []) if isinstance(row, dict)]
     changed = False
-    now = _utc_now().isoformat()
+    now_dt = _utc_now()
+    now = now_dt.isoformat()
+    now_ist = now_dt.astimezone(IST)
 
     # Resolve open rows only from fresh source-timestamped quotes for their exact instrument.
     for outcome in rows:
@@ -5198,6 +5207,28 @@ def _update_signal_outcomes(
             continue
         index = str(outcome.get("index") or "").upper()
         is_mcx = outcome.get("signal_type") == "MCX_FUTURE"
+        # Never leave an option record OPEN indefinitely after its contract expired.
+        # If a final fresh quote was not observed before session close, retain it as
+        # unresolved; expiry alone is not evidence of a win or loss.
+        if outcome.get("signal_type") == "INDEX_OPTION":
+            expiry_day = _expiry_date(outcome.get("expiry"))
+            expiry_passed = expiry_day is not None and (
+                now_ist.date() > expiry_day
+                or (now_ist.date() == expiry_day and now_ist.time().replace(tzinfo=None) >= dt_time(15, 30))
+            )
+            if expiry_passed:
+                outcome["status"] = "EXPIRED_UNRESOLVED"
+                outcome["exit_reason"] = "EXPIRED_UNRESOLVED"
+                outcome["unresolved_reason"] = "EXPIRY_PASSED_WITHOUT_VERIFIED_EXIT_QUOTE"
+                outcome["expired_at"] = now
+                outcome["closed_at"] = None
+                outcome["exit_price"] = None
+                outcome["gross_points"] = None
+                outcome["gross_pnl_inr"] = None
+                outcome["net_pnl_inr"] = None
+                outcome["pnl_status"] = "UNRESOLVED_NO_SETTLEMENT_EVIDENCE"
+                changed = True
+                continue
         if is_mcx:
             quote = next((row for row in commodity_rows
                           if str(row.get("name") or row.get("symbol") or "").upper() == index
@@ -5278,8 +5309,12 @@ def _update_signal_outcomes(
         if quote is None:
             continue
         confirmation = signal.get("confirmation_state") if isinstance(signal.get("confirmation_state"), dict) else {}
+        strategy_filter = signal.get("strategy_filter") if isinstance(signal.get("strategy_filter"), dict) else {}
+        strategy_id = str(signal.get("strategy_id") or signal.get("selected_strategy_id")
+                          or strategy_filter.get("strategy_id") or "quant_unattributed")[:128]
         signature_payload = {
             "signal_type": "INDEX_OPTION", "index": str(index).upper(), "decision": decision,
+            "strategy_id": strategy_id,
             "strike": strike, "expiry": expiry, "entry": entry,
             "since": str(stability.get("since_utc") or confirmation.get("since_utc") or ""),
         }
@@ -5288,8 +5323,15 @@ def _update_signal_outcomes(
             continue
         plan = signal.get("trade_plan") if isinstance(signal.get("trade_plan"), dict) else {}
         quantity, lot_size = _number(plan.get("quantity") or signal.get("quantity")), _number(plan.get("lot_size") or signal.get("lot_size"))
+        signal_identity = {
+            "index": str(index).upper(), "engine_id": "quant_five_layer",
+            "strategy_id": strategy_id, "decision": decision, "strike": strike,
+            "expiry": expiry, "entry": entry, "stop_loss": stop, "target": target,
+        }
+        signal_id = hashlib.sha256(json.dumps(signal_identity, sort_keys=True, default=str).encode()).hexdigest()
         rows.append({
             "outcome_id": f"sig-{uuid.uuid4().hex}", "signature": signature,
+            "signal_id": signal_id, "strategy_id": strategy_id,
             "signal_type": "INDEX_OPTION", "index": str(index).upper(), "decision": decision,
             "option_type": "CALL" if decision == "CALL BUY" else "PUT",
             "strike": strike, "expiry": expiry, "entry_price": entry,
