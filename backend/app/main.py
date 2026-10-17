@@ -367,6 +367,9 @@ def _is_market_session_open(symbol: str, now: datetime | None = None) -> bool:
     if calendar_status.get("market_status") in {"EXCHANGE_HOLIDAY", "SPECIAL_SESSION"}:
         # Special-session timings are not inferred from normal weekday hours.
         return False
+    if segment_for_symbol(key) != "MCX" and not calendar_status.get("calendar_verified"):
+        # An unknown equity holiday calendar must not be treated as an open session.
+        return False
     clock = local.time().replace(tzinfo=None)
     if key in COMMODITY_NAMES:
         return dt_time(9, 0) <= clock <= dt_time(23, 30)
