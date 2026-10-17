@@ -13,7 +13,6 @@ import {
 } from 'lucide-react';
 import { useTrading } from '../context/TradingContext';
 import { IndexSymbol } from '../types/market';
-import { INDEX_CONFIG } from '../services/api';
 
 const ALL_INDICES: IndexSymbol[] = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'];
 
@@ -74,7 +73,6 @@ export const SignalsPage: React.FC = () => {
         {ALL_INDICES.map(idx => {
           const sig = signals[idx];
           const mkt = market[idx];
-          const cfg = INDEX_CONFIG[idx];
           const stability = sig?.signal_stability;
           const isConfirmed = stability?.state === 'CONFIRMED';
           const isConfirming = stability?.state === 'CONFIRMED' ? false : (stability?.state === 'CONFIRMING' || (sig?.candidate_decision && sig.candidate_decision !== 'WAIT'));
