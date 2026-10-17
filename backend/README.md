@@ -30,6 +30,25 @@ For production Railway deployment:
 
 Environment-variable-only setup is also supported with ANGEL_API_KEY, ANGEL_CLIENT_CODE, ANGEL_PIN, and ANGEL_TOTP_SECRET. Keep all four in Railway variables, not GitHub or Flutter build args.
 
+## Security rollout and abuse controls
+
+The device ID header is a device-scope label, not authentication. This branch supports a staged server-side gate:
+
+- For a single-owner/private deployment, set `API_AUTH_MODE=required` and set `API_ACCESS_KEY` to a random secret of at least 32 characters in Railway Variables. Requests must send `X-API-Access-Key`; never compile the secret into Flutter/web source. The client-side settings UI must store it securely on-device.
+- Alternatively, set `FIREBASE_PROJECT_ID` and an explicit comma-separated `AUTH_ALLOWED_UIDS` allow-list. Requests send a Firebase ID token as `Authorization: Bearer <token>`. Firebase IDs not in the allow-list are rejected.
+- Do not enable required mode until the matching client build supports the header/token; otherwise existing clients will receive HTTP 401/503. Legacy mode exists only for staged rollout and still accepts forged device IDs.
+- The WebSocket at `/ws` checks the same credentials before accepting a connection.
+- API rate limiting returns HTTP 429 and `Retry-After`. Limits are in-process and therefore do not replace edge/gateway rate limiting for multiple replicas.
+- No server-side order placement is exposed; this API remains signal-only.
+
+## Signal event journal, expiry lifecycle and exchange calendar
+
+- `GET /v1/signals/events?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&limit=1000&offset=0` provides the persisted Quant/Strategy state-transition journal, including WAIT and blocked states. Repeated identical polls are deduplicated within a trading date; a new date starts a fresh daily transition record.
+- `GET /v1/signals/calendar?start_date=...&end_date=...` now returns daily `state_transition_events` separately from shadow outcome rows. `accuracy_percent` remains target-hit rate over target/stop-loss outcomes, not broker-fill profitability.
+- An option outcome still OPEN after expiry-session close is marked `EXPIRED_UNRESOLVED`; it is excluded from win/loss calculations unless verified settlement/outcome data exists.
+- `GET /v1/calendar/holidays?year=2026&segment=NSE_FO` returns holiday dates and provenance. The checked-in NSE/BSE calendar snapshot covers 2026; NSE source refresh is best-effort and retains last-known-good data on failure. MCX holiday coverage is explicitly `UNVERIFIED` until its official segment calendar is configured. Special-session timings are never inferred from normal weekday hours.
+- Check `/v1/system/diagnostics` for `security`, `exchange_calendar`, and `signal_event_journal` status before production sign-off.
+
 ## Honest limitations
 
 - SmartWebSocketV2 is started after successful Angel One login and subscribes to index/active MCX tokens; nearby option tokens are subscribed as they are discovered. REST FULL-depth quotes are the fallback when a fresh WebSocket tick or required bid/ask depth is missing. Diagnostics distinguish WebSocket-open from actual fresh ticks.
@@ -75,3 +94,8 @@ Set `REDIS_URL` to a Railway Redis connection string and set a strong random `MA
 **Order safety:** this backend remains read-only and has no broker order-placement route. Do not add order placement to the chart or candle worker. Any future order service must be separate, validate freshness and deterministic risk gates again at submission, require explicit user authorization, and use a durable idempotency key before calling the broker.
 
 **Still required before production cutover:** verify token mapping against the current Angel One instrument master; configure Railway Redis/Postgres and separate worker service; run Flutter analysis, Android build and physical-device reconnect/gap tests; add Android background decode/visible-candle rendering only if profiling shows it is needed; and compare measured tick-to-screen latency against a baseline. Do not route live orders through the chart service.
+
+
+## Flutter client authentication rollout
+
+The Flutter API tab includes a Backend API Access field that stores the owner-provided key in platform secure storage and sends `X-API-Access-Key` on API requests, including the Android background signal poller. This is a staged single-owner gate, not per-user identity; Firebase ID-token verification with a narrow `AUTH_ALLOWED_UIDS` allow-list is preferred where user isolation is required. Roll out the compatible APK before setting `API_AUTH_MODE=required`; health-check success alone does not certify authenticated signal routes.

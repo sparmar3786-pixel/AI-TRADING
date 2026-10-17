@@ -23,13 +23,13 @@ import uuid
 import asyncio
 from datetime import date, datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 from zoneinfo import ZoneInfo
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 try:
@@ -57,6 +57,12 @@ from strategies.technical import atr as technical_atr, ema as technical_ema, rsi
 from strategies.advanced import bollinger_bands, macd as advanced_macd, donchian_channels
 from strategies.suite import evaluate_strategy_suite
 try:
+    from app.api_auth import require_authenticated_device
+    from app.exchange_calendar import day_status as exchange_day_status, holidays_for as exchange_holidays_for, segment_for_symbol, start_refresh_scheduler
+except ModuleNotFoundError:
+    from backend.app.api_auth import require_authenticated_device
+    from backend.app.exchange_calendar import day_status as exchange_day_status, holidays_for as exchange_holidays_for, segment_for_symbol, start_refresh_scheduler
+try:
     # Docker image runs the service as app.main with backend/app copied to /app/app.
     from app.smc_api import router as smc_router
 except ModuleNotFoundError:
@@ -83,7 +89,7 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Accept", "Content-Type", "X-Device-Id", "Authorization"],
+    allow_headers=["Accept", "Content-Type", "X-Device-Id", "X-API-Access-Key", "Authorization"],
     max_age=600,
 )
 app.include_router(smc_router)
@@ -193,6 +199,41 @@ _option_history: dict[str, dict[str, float]] = {}
 _footprint_history: dict[str, list[dict[str, Any]]] = {}
 _footprint_history_interval: dict[str, str] = {}
 
+_rate_limit_lock = threading.Lock()
+_rate_limit_windows: dict[tuple[str, str], list[float]] = {}
+_RATE_WINDOW_SECONDS = 60.0
+
+
+def _rate_limit_policy(path: str, method: str) -> tuple[str, int]:
+    normalized = path.rstrip("/") or "/"
+    if normalized.startswith(("/v1/ai/", "/v1/providers/")) or normalized == "/v1/market-intelligence/refresh":
+        return f"provider:{normalized}", 30
+    if method.upper() == "POST" and (
+        normalized.startswith(("/v1/angel/connect", "/v1/instruments/sync", "/v1/stream/start",
+                               "/v1/backtest/", "/v1/research/", "/v1/paper/trades"))
+    ):
+        return f"mutation:{normalized}", 30
+    return "general", 600
+
+
+def _consume_rate_limit(identity: str, bucket: str, limit: int, now: float | None = None) -> tuple[bool, int]:
+    moment = time.monotonic() if now is None else now
+    key = (identity or "unknown", bucket)
+    with _rate_limit_lock:
+        window = [stamp for stamp in _rate_limit_windows.get(key, []) if moment - stamp < _RATE_WINDOW_SECONDS]
+        if len(window) >= limit:
+            _rate_limit_windows[key] = window
+            return False, max(1, int(_RATE_WINDOW_SECONDS - (moment - window[0])))
+        window.append(moment)
+        _rate_limit_windows[key] = window
+        if len(_rate_limit_windows) > 4096:
+            expired = [candidate for candidate, stamps in _rate_limit_windows.items()
+                       if not stamps or moment - stamps[-1] >= _RATE_WINDOW_SECONDS]
+            for candidate in expired[:2048]:
+                _rate_limit_windows.pop(candidate, None)
+        return True, max(0, limit - len(window))
+
+
 def _record_request_metric(path: str, status_code: int, elapsed_ms: float, response_bytes: int | None) -> None:
     with _lock:
         item = dict(_request_metrics.get(path) or {"count": 0, "errors": 0, "total_ms": 0.0})
@@ -214,11 +255,29 @@ def _record_request_metric(path: str, status_code: int, elapsed_ms: float, respo
 @app.middleware("http")
 async def request_timing_middleware(request, call_next):
     started = time.perf_counter()
+    path = request.url.path
+    if path not in {"/health", "/favicon.ico"} and request.method.upper() != "OPTIONS":
+        client_host = request.client.host if request.client else "unknown"
+        bucket, limit = _rate_limit_policy(path, request.method)
+        allowed, remaining = _consume_rate_limit(client_host, bucket, limit)
+        if not allowed:
+            elapsed_ms = (time.perf_counter() - started) * 1000
+            response = JSONResponse(
+                status_code=429,
+                content={"detail": "Rate limit exceeded; retry after the supplied interval."},
+                headers={"Retry-After": str(remaining), "X-RateLimit-Limit": str(limit), "X-RateLimit-Remaining": "0"},
+            )
+            response.headers["X-Response-Time-Ms"] = f"{elapsed_ms:.1f}"
+            _record_request_metric(path, 429, elapsed_ms, None)
+            return response
+    else:
+        remaining = None
+        limit = None
     try:
         response = await call_next(request)
     except Exception:
         elapsed_ms = (time.perf_counter() - started) * 1000
-        _record_request_metric(request.url.path, 500, elapsed_ms, None)
+        _record_request_metric(path, 500, elapsed_ms, None)
         raise
     elapsed_ms = (time.perf_counter() - started) * 1000
     try:
@@ -227,7 +286,10 @@ async def request_timing_middleware(request, call_next):
         response_bytes = None
     response.headers["X-Response-Time-Ms"] = f"{elapsed_ms:.1f}"
     response.headers["Server-Timing"] = f"app;dur={elapsed_ms:.1f}"
-    _record_request_metric(request.url.path, response.status_code, elapsed_ms, response_bytes)
+    if limit is not None:
+        response.headers["X-RateLimit-Limit"] = str(limit)
+        response.headers["X-RateLimit-Remaining"] = str(remaining or 0)
+    _record_request_metric(path, response.status_code, elapsed_ms, response_bytes)
     return response
 
 
@@ -270,23 +332,37 @@ class BacktestRequest(BaseModel):
     initial_capital: float = Field(default=100000.0, gt=0, le=1000000000)
 
 
-def _device(x_device_id: str = Header(default="")) -> str:
-    # This is a device-scope identifier, not a substitute for account auth.
-    if not DEVICE_ID_RE.fullmatch(x_device_id or ""):
-        raise HTTPException(status_code=401, detail="Missing or invalid X-Device-Id")
-    return x_device_id
+def _device(
+    x_device_id: Annotated[str, Header()] = "",
+    x_api_access_key: Annotated[str, Header(alias="X-API-Access-Key")] = "",
+    authorization: Annotated[str, Header()] = "",
+) -> str:
+    """Validate a device label only after server-side authentication succeeds.
+
+    Legacy mode is retained for a staged client rollout. Production must set
+    API_AUTH_MODE=required and configure API_ACCESS_KEY or allow-listed Firebase
+    ID tokens before claiming authenticated access.
+    """
+    return require_authenticated_device(x_device_id, x_api_access_key, authorization)
 
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 def _is_market_session_open(symbol: str, now: datetime | None = None) -> bool:
-    """Conservative weekday session clock; quote freshness remains an independent required gate."""
+    """Session clock plus verified exchange closures; quote freshness remains mandatory."""
     local = (now or datetime.now(IST)).astimezone(IST)
     if local.weekday() >= 5:
         return False
-    clock = local.time().replace(tzinfo=None)
     key = symbol.strip().upper()
+    calendar_status = exchange_day_status(local.date(), segment_for_symbol(key))
+    if calendar_status.get("market_status") in {"EXCHANGE_HOLIDAY", "SPECIAL_SESSION"}:
+        # Special-session timings are not inferred from normal weekday hours.
+        return False
+    if segment_for_symbol(key) != "MCX" and not calendar_status.get("calendar_verified"):
+        # An unknown equity holiday calendar must not be treated as an open session.
+        return False
+    clock = local.time().replace(tzinfo=None)
     if key in COMMODITY_NAMES:
         return dt_time(9, 0) <= clock <= dt_time(23, 30)
     return dt_time(9, 15) <= clock <= dt_time(15, 30)
@@ -570,6 +646,8 @@ def _ensure_market_intelligence_scheduler() -> None:
 
 @app.on_event("startup")
 def _start_market_intelligence_scheduler_on_startup() -> None:
+    # Holiday refresh is best-effort and retains the checked-in last-known-good calendar.
+    start_refresh_scheduler()
     # Migrate legacy volume state only after a reachable PostgreSQL is available.
     # Keep /data as a fallback until diagnostics verifies row-count parity.
     if database_configured():
@@ -2666,6 +2744,15 @@ def _empty_payload(reason: str) -> dict[str, Any]:
 @app.websocket("/ws")
 async def market_snapshot_stream(websocket: WebSocket) -> None:
     """Stream broker-only nearest-future snapshots without running the slow signal fan-out."""
+    try:
+        require_authenticated_device(
+            websocket.headers.get("x-device-id", ""),
+            websocket.headers.get("x-api-access-key", ""),
+            websocket.headers.get("authorization", ""),
+        )
+    except HTTPException:
+        await websocket.close(code=1008, reason="Authentication required")
+        return
     await websocket.accept()
     symbol = (websocket.query_params.get("symbol") or "NIFTY").strip().upper()
     timeframe = (websocket.query_params.get("tf") or "1").strip().lower()
@@ -3080,6 +3167,27 @@ def diagnostics(_: str = Depends(_device)) -> dict[str, Any]:
     fresh_count = sum(1 for row in (_signal_cache or {}).get("market", {}).values() if row.get("live") is True)
     return {
         "service": "ai-trading-readonly-api",
+        "security": {
+            "auth_mode": os.getenv("API_AUTH_MODE", "legacy").strip().lower(),
+            "api_access_key_configured": bool((os.getenv("API_ACCESS_KEY") or os.getenv("BACKEND_ACCESS_KEY") or "").strip()),
+            "firebase_verification_configured": bool((os.getenv("FIREBASE_PROJECT_ID") or os.getenv("GOOGLE_CLOUD_PROJECT") or "").strip()),
+            "firebase_allowlist_configured": bool(os.getenv("AUTH_ALLOWED_UIDS", "").strip()),
+            "legacy_device_id_only_auth_active": (
+                os.getenv("API_AUTH_MODE", "legacy").strip().lower() == "legacy"
+                and not (os.getenv("API_ACCESS_KEY") or os.getenv("BACKEND_ACCESS_KEY") or "").strip()
+            ),
+            "rate_limit_window_seconds": int(_RATE_WINDOW_SECONDS),
+            "rate_limits_per_minute": {"general": 600, "provider_and_ai_per_route": 30, "mutation_per_route": 30},
+        },
+        "signal_event_journal": dict(_signal_event_persistence),
+        "exchange_calendar": {
+            segment: {
+                "source_status": exchange_holidays_for(segment, datetime.now(IST).year).get("source_status"),
+                "verified": exchange_holidays_for(segment, datetime.now(IST).year).get("verified"),
+                "source_as_of": exchange_holidays_for(segment, datetime.now(IST).year).get("source_as_of"),
+            }
+            for segment in ("NSE_FO", "BSE_FO", "MCX")
+        },
         "signal_build": dict(_signal_build_metrics),
         "api_performance": {
             path: {key: value for key, value in metric.items() if key != "total_ms"}
@@ -3803,6 +3911,7 @@ def _get_signals_uncached(force: bool = False) -> dict[str, Any]:
             "order_placement_enabled": False,
         }
         result["signal_performance"] = _update_signal_outcomes(signals, market, commodities)
+        result["signal_event_journal"] = _record_signal_events(signals, market)
         with _lock:
             _signal_cache = result
             _signal_cache_at = time.monotonic()
@@ -4753,6 +4862,242 @@ def _save_signal_outcomes(rows: list[dict[str, Any]]) -> bool:
         })
         return db_saved or file_saved
 
+SIGNAL_EVENTS_MAX_ROWS = 25000
+_signal_events_memory: list[dict[str, Any]] = []
+_signal_event_persistence: dict[str, Any] = {
+    "status": "NOT_INITIALIZED", "path": "/data/signal_events.json", "records": 0,
+}
+
+
+def _signal_event_path() -> Path:
+    return Path(os.getenv("SIGNAL_EVENTS_FILE", "/data/signal_events.json"))
+
+
+def _load_signal_events() -> list[dict[str, Any]]:
+    with _lock:
+        db_ok, db_value = get_state("signal_event_journal")
+        path = _signal_event_path()
+        volume_rows: list[dict[str, Any]] = []
+        try:
+            if path.is_file():
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(raw, list):
+                    volume_rows = [dict(item) for item in raw if isinstance(item, dict) and item.get("event_id")]
+        except (OSError, ValueError, TypeError):
+            volume_rows = []
+        if db_ok and isinstance(db_value, list):
+            merged: dict[str, dict[str, Any]] = {str(item["event_id"]): item for item in volume_rows}
+            for item in db_value:
+                if isinstance(item, dict) and item.get("event_id"):
+                    merged[str(item["event_id"])] = dict(item)
+            rows = sorted(merged.values(), key=lambda item: str(item.get("occurred_at") or ""))[-SIGNAL_EVENTS_MAX_ROWS:]
+            if len(rows) > len(db_value):
+                put_state("signal_event_journal", rows)
+            status = "POSTGRES_OK_MERGED_VOLUME" if len(rows) > len(db_value) else "POSTGRES_OK"
+            location = "postgresql:ai_trading_state/signal_event_journal"
+        elif volume_rows:
+            rows = sorted(volume_rows, key=lambda item: str(item.get("occurred_at") or ""))[-SIGNAL_EVENTS_MAX_ROWS:]
+            migrated = put_state("signal_event_journal", rows)
+            status = "VOLUME_OK_POSTGRES_MIGRATED" if migrated else "VOLUME_FALLBACK"
+            location = str(path)
+        else:
+            rows = list(_signal_events_memory[-SIGNAL_EVENTS_MAX_ROWS:])
+            status = "MEMORY_ONLY_OR_EMPTY"
+            location = str(path)
+        _signal_events_memory.clear()
+        _signal_events_memory.extend(dict(item) for item in rows)
+        _signal_event_persistence.update({"status": status, "path": location, "records": len(rows)})
+        return [dict(item) for item in rows]
+
+
+def _save_signal_events(rows: list[dict[str, Any]]) -> bool:
+    bounded = sorted(rows, key=lambda item: str(item.get("occurred_at") or ""))[-SIGNAL_EVENTS_MAX_ROWS:]
+    with _lock:
+        db_saved = put_state("signal_event_journal", bounded)
+        file_saved = False
+        path = _signal_event_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_suffix(path.suffix + ".tmp")
+            temporary.write_text(json.dumps(bounded, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+            temporary.replace(path)
+            file_saved = True
+        except OSError:
+            pass
+        _signal_events_memory.clear()
+        _signal_events_memory.extend(dict(item) for item in bounded)
+        if db_saved:
+            status, error = ("POSTGRES_OK_VOLUME_BACKUP_OK" if file_saved else "POSTGRES_OK"), None
+        elif file_saved:
+            status, error = "VOLUME_FALLBACK_POSTGRES_UNAVAILABLE", "PostgreSQLWriteFailed"
+        else:
+            status, error = "ERROR", "NoDurableStoreAvailable"
+        _signal_event_persistence.update({
+            "status": status, "last_error": error,
+            "path": "postgresql+volume" if db_saved and file_saved else str(path),
+            "records": len(bounded),
+        })
+        return db_saved or file_saved
+
+
+def _event_fingerprint_payload(
+    *, index: str, engine_id: str, strategy_id: str, decision: str,
+    state: str, validation: str, data_fresh: bool, strike: Any, expiry: Any,
+    entry: Any, stop_loss: Any, target: Any, reasons: list[str], layer_statuses: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "index": index, "engine_id": engine_id, "strategy_id": strategy_id,
+        "decision": decision, "state": state, "validation": validation,
+        "data_fresh": data_fresh, "strike": strike, "expiry": expiry,
+        "entry": entry, "stop_loss": stop_loss, "target": target,
+        "reasons": reasons[:2], "layer_statuses": layer_statuses,
+    }
+
+
+def _record_signal_events(
+    signals: dict[str, Any], market: dict[str, Any]
+) -> dict[str, Any]:
+    """Persist each changed Quant/Strategy state, including WAIT and blocked states."""
+    rows = _load_signal_events()
+    latest_fingerprint: dict[str, str] = {}
+    for row in rows:
+        key = str(row.get("transition_key") or "")
+        if key:
+            latest_fingerprint[key] = str(row.get("fingerprint") or "")
+    now = _utc_now()
+    trade_date = now.astimezone(IST).date().isoformat()
+    appended = 0
+
+    for raw_index, raw_signal in signals.items():
+        if not isinstance(raw_signal, dict):
+            continue
+        index = str(raw_index).strip().upper()
+        signal = raw_signal
+        validation = signal.get("live_validation") if isinstance(signal.get("live_validation"), dict) else {}
+        stability = signal.get("signal_stability") if isinstance(signal.get("signal_stability"), dict) else {}
+        quant_engine = signal.get("quant_engine") if isinstance(signal.get("quant_engine"), dict) else (
+            signal.get("five_layer_engine") if isinstance(signal.get("five_layer_engine"), dict) else {}
+        )
+        layer_source = quant_engine.get("layers") if isinstance(quant_engine.get("layers"), dict) else (
+            signal.get("layers") if isinstance(signal.get("layers"), dict) else {}
+        )
+        layer_statuses = {
+            str(name): bool(value.get("pass") is True) if isinstance(value, dict) else None
+            for name, value in layer_source.items()
+        }
+        reasons_raw = signal.get("reasons") or signal.get("reason") or []
+        if isinstance(reasons_raw, str):
+            reasons = [reasons_raw[:240]]
+        elif isinstance(reasons_raw, list):
+            reasons = [str(item)[:240] for item in reasons_raw[:4]]
+        else:
+            reasons = []
+        data_row = market.get(index) if isinstance(market.get(index), dict) else {}
+        source_timestamp = data_row.get("source_timestamp") or data_row.get("timestamp") or signal.get("source_timestamp")
+        final_decision = str(signal.get("decision") or "WAIT").upper()
+        final_state = str(stability.get("state") or validation.get("verdict") or ("BLOCKED" if final_decision == "WAIT" else "CANDIDATE")).upper()
+        engine_specs: list[dict[str, Any]] = [{
+            "engine_id": "quant_five_layer",
+            "strategy_id": str(signal.get("strategy_id") or signal.get("selected_strategy_id")
+                               or (signal.get("strategy_filter") or {}).get("strategy_id")
+                               or "quant_five_layer"),
+            "decision": final_decision,
+            "state": final_state,
+            "validation": str(validation.get("verdict") or "UNAVAILABLE").upper(),
+            "data_fresh": signal.get("data_fresh") is True,
+            "strike": signal.get("strike"), "expiry": signal.get("expiry"),
+            "entry": signal.get("entry"), "stop_loss": signal.get("stop_loss"),
+            "target": signal.get("target"), "reasons": reasons,
+            "layer_statuses": layer_statuses,
+        }]
+        candidates = signal.get("strategy_candidates")
+        if isinstance(candidates, list):
+            for position, candidate in enumerate(candidates):
+                if not isinstance(candidate, dict):
+                    continue
+                strategy_id = str(candidate.get("strategy_id") or candidate.get("strategy_key")
+                                  or candidate.get("strategy_name") or candidate.get("name")
+                                  or f"strategy_{position + 1}")[:128]
+                candidate_decision = str(candidate.get("decision") or candidate.get("candidate_decision") or "WAIT").upper()
+                candidate_validation = candidate.get("live_validation") if isinstance(candidate.get("live_validation"), dict) else {}
+                candidate_reasons = candidate.get("reasons") or candidate.get("reason") or []
+                if isinstance(candidate_reasons, str):
+                    candidate_reasons = [candidate_reasons]
+                if not isinstance(candidate_reasons, list):
+                    candidate_reasons = []
+                candidate_state = str(candidate.get("state") or candidate.get("status") or (
+                    "BLOCKED" if candidate_decision == "WAIT" else "CANDIDATE"
+                )).upper()
+                engine_specs.append({
+                    "engine_id": "strategy_candidate",
+                    "strategy_id": strategy_id,
+                    "decision": candidate_decision,
+                    "state": candidate_state,
+                    "validation": str(candidate_validation.get("verdict") or "UNAVAILABLE").upper(),
+                    "data_fresh": candidate.get("data_fresh") is True,
+                    "strike": candidate.get("strike"), "expiry": candidate.get("expiry"),
+                    "entry": candidate.get("entry"), "stop_loss": candidate.get("stop_loss"),
+                    "target": candidate.get("target"),
+                    "reasons": [str(item)[:240] for item in candidate_reasons[:4]],
+                    "layer_statuses": {},
+                })
+
+        for spec in engine_specs:
+            fingerprint_payload = _event_fingerprint_payload(
+                index=index, engine_id=spec["engine_id"], strategy_id=spec["strategy_id"],
+                decision=spec["decision"], state=spec["state"], validation=spec["validation"],
+                data_fresh=spec["data_fresh"], strike=spec["strike"], expiry=spec["expiry"],
+                entry=spec["entry"], stop_loss=spec["stop_loss"], target=spec["target"],
+                reasons=spec["reasons"], layer_statuses=spec["layer_statuses"],
+            )
+            serialized = json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":"), default=str)
+            fingerprint = hashlib.sha256(serialized.encode()).hexdigest()
+            transition_key = f"{trade_date}|{index}|{spec['engine_id']}|{spec['strategy_id']}"
+            if latest_fingerprint.get(transition_key) == fingerprint:
+                continue
+            signal_identity = {
+                "index": index, "engine_id": spec["engine_id"], "strategy_id": spec["strategy_id"],
+                "decision": spec["decision"], "strike": spec["strike"], "expiry": spec["expiry"],
+                "entry": spec["entry"], "stop_loss": spec["stop_loss"], "target": spec["target"],
+            }
+            signal_id = hashlib.sha256(json.dumps(signal_identity, sort_keys=True, default=str).encode()).hexdigest()
+            event = {
+                "event_id": f"evt-{uuid.uuid4().hex}",
+                "signal_id": signal_id,
+                "transition_key": transition_key,
+                "fingerprint": fingerprint,
+                "event_type": "STATE_TRANSITION",
+                "occurred_at": now.isoformat(),
+                "trade_date": trade_date,
+                "index": index,
+                "engine_id": spec["engine_id"],
+                "strategy_id": spec["strategy_id"],
+                "decision": spec["decision"],
+                "state": spec["state"],
+                "validation": spec["validation"],
+                "data_fresh": spec["data_fresh"],
+                "source_timestamp": source_timestamp,
+                "strike": spec["strike"], "expiry": spec["expiry"],
+                "entry": spec["entry"], "stop_loss": spec["stop_loss"], "target": spec["target"],
+                "reasons": spec["reasons"],
+                "layer_statuses": spec["layer_statuses"],
+                "paper_only": True, "order_placement_enabled": False,
+            }
+            rows.append(event)
+            latest_fingerprint[transition_key] = fingerprint
+            appended += 1
+
+    if appended:
+        _save_signal_events(rows)
+    return {
+        "status": _signal_event_persistence.get("status", "MEMORY_ONLY_OR_EMPTY"),
+        "record_count": len(_signal_events_memory),
+        "new_events": appended,
+        "max_records": SIGNAL_EVENTS_MAX_ROWS,
+        "latest_event_at": _signal_events_memory[-1].get("occurred_at") if _signal_events_memory else None,
+    }
+
+
 def _signal_option_quote(index: str, signal: dict[str, Any], market: dict[str, Any]) -> dict[str, Any] | None:
     market_row = market.get(index)
     if not isinstance(market_row, dict) or market_row.get("live") is not True or market_row.get("cached") is True:
@@ -4834,11 +5179,18 @@ def _signal_outcome_report(rows: list[dict[str, Any]], persistence: dict[str, An
     mcx_rows = [row for row in rows if row.get("signal_type") == "MCX_FUTURE"]
     mcx_closed = sum(1 for row in mcx_rows if row.get("status") == "CLOSED" and row.get("exit_reason") in {"TARGET", "STOP_LOSS"})
     closed = sum(1 for row in rows if row.get("status") == "CLOSED" and row.get("exit_reason") in {"TARGET", "STOP_LOSS"})
+    by_strategy: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        strategy = str(row.get("strategy_id") or "quant_unattributed")
+        by_strategy.setdefault(strategy, []).append(row)
+    expired_unresolved = sum(1 for row in rows if row.get("status") == "EXPIRED_UNRESOLVED")
     return {
         "status": "ok",
         "mode": "LIVE_SIGNAL_SHADOW_TRACKING",
         "accuracy_status": "UNVERIFIED_NO_CLOSED_SIGNAL_OUTCOMES" if closed == 0 else "OBSERVED_QUOTE_OUTCOMES",
+        "expired_unresolved_count": expired_unresolved,
         "metrics": _signal_outcome_metrics(rows),
+        "by_strategy": {key: _signal_outcome_metrics(value) for key, value in sorted(by_strategy.items())},
         "by_instrument": {key: _signal_outcome_metrics(value) for key, value in sorted(by_instrument.items())},
         "mcx": {
             "status": "OBSERVED_QUOTE_OUTCOMES" if mcx_closed else "WAITING_FOR_CLOSED_MCX_OUTCOMES",
@@ -4862,7 +5214,9 @@ def _update_signal_outcomes(
     rows = _load_signal_outcomes()
     commodity_rows = [row for row in (commodities or []) if isinstance(row, dict)]
     changed = False
-    now = _utc_now().isoformat()
+    now_dt = _utc_now()
+    now = now_dt.isoformat()
+    now_ist = now_dt.astimezone(IST)
 
     # Resolve open rows only from fresh source-timestamped quotes for their exact instrument.
     for outcome in rows:
@@ -4870,6 +5224,28 @@ def _update_signal_outcomes(
             continue
         index = str(outcome.get("index") or "").upper()
         is_mcx = outcome.get("signal_type") == "MCX_FUTURE"
+        # Never leave an option record OPEN indefinitely after its contract expired.
+        # If a final fresh quote was not observed before session close, retain it as
+        # unresolved; expiry alone is not evidence of a win or loss.
+        if outcome.get("signal_type") == "INDEX_OPTION":
+            expiry_day = _expiry_date(outcome.get("expiry"))
+            expiry_passed = expiry_day is not None and (
+                now_ist.date() > expiry_day
+                or (now_ist.date() == expiry_day and now_ist.time().replace(tzinfo=None) >= dt_time(15, 30))
+            )
+            if expiry_passed:
+                outcome["status"] = "EXPIRED_UNRESOLVED"
+                outcome["exit_reason"] = "EXPIRED_UNRESOLVED"
+                outcome["unresolved_reason"] = "EXPIRY_PASSED_WITHOUT_VERIFIED_EXIT_QUOTE"
+                outcome["expired_at"] = now
+                outcome["closed_at"] = None
+                outcome["exit_price"] = None
+                outcome["gross_points"] = None
+                outcome["gross_pnl_inr"] = None
+                outcome["net_pnl_inr"] = None
+                outcome["pnl_status"] = "UNRESOLVED_NO_SETTLEMENT_EVIDENCE"
+                changed = True
+                continue
         if is_mcx:
             quote = next((row for row in commodity_rows
                           if str(row.get("name") or row.get("symbol") or "").upper() == index
@@ -4950,8 +5326,12 @@ def _update_signal_outcomes(
         if quote is None:
             continue
         confirmation = signal.get("confirmation_state") if isinstance(signal.get("confirmation_state"), dict) else {}
+        strategy_filter = signal.get("strategy_filter") if isinstance(signal.get("strategy_filter"), dict) else {}
+        strategy_id = str(signal.get("strategy_id") or signal.get("selected_strategy_id")
+                          or strategy_filter.get("strategy_id") or "quant_unattributed")[:128]
         signature_payload = {
             "signal_type": "INDEX_OPTION", "index": str(index).upper(), "decision": decision,
+            "strategy_id": strategy_id,
             "strike": strike, "expiry": expiry, "entry": entry,
             "since": str(stability.get("since_utc") or confirmation.get("since_utc") or ""),
         }
@@ -4960,8 +5340,15 @@ def _update_signal_outcomes(
             continue
         plan = signal.get("trade_plan") if isinstance(signal.get("trade_plan"), dict) else {}
         quantity, lot_size = _number(plan.get("quantity") or signal.get("quantity")), _number(plan.get("lot_size") or signal.get("lot_size"))
+        signal_identity = {
+            "index": str(index).upper(), "engine_id": "quant_five_layer",
+            "strategy_id": strategy_id, "decision": decision, "strike": strike,
+            "expiry": expiry, "entry": entry, "stop_loss": stop, "target": target,
+        }
+        signal_id = hashlib.sha256(json.dumps(signal_identity, sort_keys=True, default=str).encode()).hexdigest()
         rows.append({
             "outcome_id": f"sig-{uuid.uuid4().hex}", "signature": signature,
+            "signal_id": signal_id, "strategy_id": strategy_id,
             "signal_type": "INDEX_OPTION", "index": str(index).upper(), "decision": decision,
             "option_type": "CALL" if decision == "CALL BUY" else "PUT",
             "strike": strike, "expiry": expiry, "entry_price": entry,
@@ -5378,6 +5765,54 @@ def evaluate_strategies(body: dict[str, Any], _: str = Depends(_device)) -> dict
     }
 
 
+@app.get("/v1/calendar/holidays")
+def exchange_holiday_calendar(
+    year: int = Query(default=datetime.now(IST).year, ge=2020, le=2100),
+    segment: str = Query(default="NSE_FO"),
+    _: str = Depends(_device),
+) -> dict[str, Any]:
+    """Return exchange-segment holiday dates with source freshness and coverage status."""
+    normalized = segment.strip().upper()
+    if normalized not in {"NSE_EQ", "NSE_FO", "BSE_EQ", "BSE_FO", "MCX"}:
+        raise HTTPException(status_code=400, detail="Unsupported segment. Use NSE_EQ, NSE_FO, BSE_EQ, BSE_FO, or MCX.")
+    return {"status": "ok", **exchange_holidays_for(normalized, year)}
+
+
+@app.get("/v1/signals/events")
+def signal_events(
+    start_date: str,
+    end_date: str,
+    limit: int = Query(default=1000, ge=1, le=5000),
+    offset: int = Query(default=0, ge=0, le=25000),
+    _: str = Depends(_device),
+) -> dict[str, Any]:
+    """Read the durable state-transition journal for Quant and Strategy signals."""
+    try:
+        start = date.fromisoformat(start_date)
+        end = date.fromisoformat(end_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Dates must use YYYY-MM-DD") from exc
+    if end < start or (end - start).days > 366:
+        raise HTTPException(status_code=400, detail="Date range must be ordered and no longer than 367 days")
+    rows = _load_signal_events()
+    matching = [row for row in rows if start_date <= str(row.get("trade_date") or "") <= end_date]
+    matching.sort(key=lambda row: str(row.get("occurred_at") or ""))
+    page = matching[offset:offset + limit]
+    return {
+        "status": "ok",
+        "source": "persisted_signal_state_transition_journal",
+        "timezone": "Asia/Kolkata",
+        "events": page,
+        "total": len(matching),
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + len(page) < len(matching),
+        "persistence": dict(_signal_event_persistence),
+        "retention_limit": SIGNAL_EVENTS_MAX_ROWS,
+        "note": "Records state transitions and changed candidate evidence, including WAIT/blocked rows. It is not an execution/fill ledger.",
+    }
+
+
 @app.get("/v1/signals/performance")
 def signal_performance(_: str = Depends(_device)) -> dict[str, Any]:
     rows = _load_signal_outcomes()
@@ -5456,22 +5891,38 @@ def signal_outcome_calendar(start_date: str, end_date: str, _: str = Depends(_de
         if not opened or opened < start_date or opened > end_date:
             continue
         daily.setdefault(opened, []).append(row)
+    event_rows = _load_signal_events()
+    event_daily: dict[str, list[dict[str, Any]]] = {}
+    for event in event_rows:
+        trade_date = str(event.get("trade_date") or "")
+        if trade_date and start_date <= trade_date <= end_date:
+            event_daily.setdefault(trade_date, []).append(event)
     days: dict[str, Any] = {}
     cursor = start
     while cursor <= end:
         key = cursor.isoformat()
         day_rows = daily.get(key, [])
+        day_events = event_daily.get(key, [])
+        market_calendar = {
+            segment: exchange_day_status(cursor, segment)
+            for segment in ("NSE_FO", "BSE_FO", "MCX")
+        }
         closed = [row for row in day_rows if row.get("status") == "CLOSED" and row.get("exit_reason") in {"TARGET", "STOP_LOSS"}]
         targets = sum(1 for row in closed if row.get("exit_reason") == "TARGET")
         stops = sum(1 for row in closed if row.get("exit_reason") == "STOP_LOSS")
         days[key] = {
             "signals_opened": len(day_rows),
+            "event_count": len(day_events),
+            "state_transition_events": day_events,
             "open": sum(1 for row in day_rows if row.get("status") == "OPEN"),
+            "expired_unresolved": sum(1 for row in day_rows if row.get("status") == "EXPIRED_UNRESOLVED"),
             "closed": len(closed),
             "targets": targets,
             "stop_losses": stops,
             "accuracy_percent": round(100 * targets / len(closed), 2) if closed else None,
             "accuracy_status": "OBSERVED" if closed else "NO_CLOSED_OUTCOMES",
+            "market_calendar": market_calendar,
+            "is_exchange_holiday": any(value.get("market_status") == "EXCHANGE_HOLIDAY" for value in market_calendar.values()),
             "signals": day_rows,
         }
         cursor += timedelta(days=1)
@@ -5481,7 +5932,8 @@ def signal_outcome_calendar(start_date: str, end_date: str, _: str = Depends(_de
         "timezone": "Asia/Kolkata",
         "days": days,
         "persistence": dict(_signal_outcome_persistence),
-        "note": "Observed quote outcomes only, not broker fills. Accuracy is target hits divided by target/stop-loss closed outcomes; open signals are excluded.",
+        "event_persistence": dict(_signal_event_persistence),
+        "note": "state_transition_events records distinct Quant/Strategy state changes including WAIT. accuracy_percent is target hits divided by target/stop-loss closed quote outcomes, not broker fills; open and expired-unresolved signals are excluded.",
         "order_placement_enabled": False,
     }
 

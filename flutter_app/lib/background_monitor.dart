@@ -9,6 +9,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'api.dart';
 import 'config.dart';
 
 const _serviceChannelId = 'ai_trading_background_monitor';
@@ -118,10 +119,14 @@ Future<void> _pollQualifiedSetups(FlutterLocalNotificationsPlugin notifications)
   }
   final base = AppConfig.signalBackendUrl.replaceAll(RegExp(r'/+$'), '');
   final uri = Uri.parse('$base/v1/signals');
-  final response = await http.get(uri, headers: {
+  final headers = <String, String>{
     'accept': 'application/json',
     'X-Device-Id': deviceId,
-  }).timeout(const Duration(seconds: 18));
+  };
+  final accessKey = await FreshApi.readSavedBackendAccessKey();
+  if (accessKey != null) headers['X-API-Access-Key'] = accessKey;
+  final response = await http.get(uri, headers: headers)
+      .timeout(const Duration(seconds: 18));
   if (response.statusCode != 200) return;
   final decoded = jsonDecode(response.body);
   if (decoded is! Map) return;

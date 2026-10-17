@@ -2,11 +2,16 @@
 from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+try:
+    from app.api_auth import require_authenticated_device
+except ModuleNotFoundError:
+    from backend.app.api_auth import require_authenticated_device
 from pydantic import BaseModel, Field
 from strategies.smc import analyze_guardeer, analyze_inner_circle, ict_killzone_status
 
-router = APIRouter(tags=["SMC / ICT"])
+router = APIRouter(tags=["SMC / ICT"], dependencies=[Depends(require_authenticated_device)])
 
 
 class SmcAnalyzeRequest(BaseModel):
@@ -48,13 +53,11 @@ def market_candles(
     days: int = Query(default=3, ge=1, le=7),
     exchange: str | None = None,
     symboltoken: str | None = None,
-    x_device_id: str = Header(default="", alias="X-Device-Id"),
 ) -> dict[str, Any]:
     """Read validated historical OHLCV candles from Angel One; never synthesize bars."""
     # Lazy import avoids a circular import while main.py includes this router.
     from app import main as api
 
-    api._device(x_device_id)
     instrument = index.strip().upper()
     candle_interval = interval.strip().upper()
     allowed = {"ONE_MINUTE", "FIVE_MINUTE", "FIFTEEN_MINUTE", "ONE_HOUR", "ONE_DAY"}

@@ -5,19 +5,56 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'config.dart';
 
+typedef BackendAccessKeyReader = Future<String?> Function();
+
 class FreshApi {
-  FreshApi([String? baseUrl, http.Client? client, String? signalBaseUrl])
-      : baseUrl = baseUrl ?? AppConfig.backendUrl,
+  FreshApi([
+    String? baseUrl,
+    http.Client? client,
+    String? signalBaseUrl,
+    BackendAccessKeyReader? backendAccessKeyReader,
+  ])  : baseUrl = baseUrl ?? AppConfig.backendUrl,
         signalBackendUrl = signalBaseUrl ?? AppConfig.signalBackendUrl,
-        _testClient = client;
+        _testClient = client,
+        _backendAccessKeyReader = backendAccessKeyReader;
 
   static const FlutterSecureStorage _secureStorage = FlutterSecureStorage();
+  static const String backendAccessKeyStorageName = 'ai_trading_backend_access_key';
 
   final String baseUrl;
   final String signalBackendUrl;
   // Injectable only for tests; production requests keep using package:http's
   // shared top-level client so periodic refreshes do not leak client instances.
   final http.Client? _testClient;
+  final BackendAccessKeyReader? _backendAccessKeyReader;
+
+  /// Read an owner-provided access key from platform-backed secure storage.
+  /// Storage failures return null; when the server requires auth, the API then
+  /// rejects the request rather than the client fabricating an authenticated state.
+  static Future<String?> readSavedBackendAccessKey() async {
+    try {
+      final raw = await _secureStorage.read(key: backendAccessKeyStorageName);
+      final value = raw?.trim();
+      return value == null || value.isEmpty ? null : value;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool> hasStoredBackendAccessKey() async =>
+      await readSavedBackendAccessKey() != null;
+
+  Future<void> saveBackendAccessKey(String rawKey) async {
+    final key = rawKey.trim();
+    if (key.length < 32) {
+      throw ArgumentError('Backend API access key must be at least 32 characters.');
+    }
+    await _secureStorage.write(key: backendAccessKeyStorageName, value: key);
+  }
+
+  Future<void> clearBackendAccessKey() async {
+    await _secureStorage.delete(key: backendAccessKeyStorageName);
+  }
 
   /// Client-side request telemetry shared across tabs in this app process.
   /// Stores only route names, timings, byte counts and status codes.
@@ -139,11 +176,18 @@ class FreshApi {
     return id;
   }
 
-  Future<Map<String, String>> _headers() async => {
-        'accept': 'application/json',
-        'content-type': 'application/json',
-        'X-Device-Id': await _deviceId(),
-      };
+  Future<Map<String, String>> _headers() async {
+    final rawKey = _backendAccessKeyReader == null
+        ? await readSavedBackendAccessKey()
+        : await _backendAccessKeyReader();
+    final accessKey = rawKey?.trim();
+    return <String, String>{
+      'accept': 'application/json',
+      'content-type': 'application/json',
+      'X-Device-Id': await _deviceId(),
+      if (accessKey != null && accessKey.isNotEmpty) 'X-API-Access-Key': accessKey,
+    };
+  }
 
   Future<Map<String, dynamic>> getJson(
     String path, {

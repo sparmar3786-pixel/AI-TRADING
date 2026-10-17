@@ -1,3 +1,4 @@
+import os
 import sys
 import unittest
 from contextlib import ExitStack
@@ -26,15 +27,23 @@ class SmcApiTests(unittest.TestCase):
             "timezone": "America/New_York",
             "local_time": "2026-10-13T14:00:00-04:00",
         }
-        with patched_killzone(killzone):
-            response = self.client.post("/v1/smc/analyze", json={
-                "instrument": "NIFTY",
-                "strategy_format": "Guardeer",
-                "htf_candles": [],
-                "mtf_candles": [],
-                "ltf_candles": [],
-                "liquidity_tolerance": 1.25,
-            })
+        with patch.dict(os.environ, {
+            "API_AUTH_MODE": "legacy",
+            "API_ACCESS_KEY": "",
+            "BACKEND_ACCESS_KEY": "",
+            "FIREBASE_PROJECT_ID": "",
+            "GOOGLE_CLOUD_PROJECT": "",
+            "AUTH_ALLOWED_UIDS": "",
+        }, clear=False):
+            with patched_killzone(killzone):
+                response = self.client.post("/v1/smc/analyze", headers={"X-Device-Id": "A" * 43}, json={
+                    "instrument": "NIFTY",
+                    "strategy_format": "Guardeer",
+                    "htf_candles": [],
+                    "mtf_candles": [],
+                    "ltf_candles": [],
+                    "liquidity_tolerance": 1.25,
+                })
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
         self.assertEqual(body["strategy_format"], "Guardeer")
