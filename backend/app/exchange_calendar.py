@@ -64,10 +64,6 @@ for _segment in ("NSE_EQ", "NSE_FO", "BSE_EQ", "BSE_FO"):
     _DATA[_segment]["special_sessions"] = [dict(item) for item in _SPECIAL_2026] if _segment.startswith(("NSE", "BSE")) else []
 
 
-def _rows(items: list[tuple[str, str]]) -> list[dict[str, str]]:
-    return [{"date": day, "name": name, "kind": "HOLIDAY"} for day, name in items]
-
-
 class _TableParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
