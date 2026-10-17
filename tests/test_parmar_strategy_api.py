@@ -61,6 +61,25 @@ def test_verify_wiring_never_promotes_from_route_or_source_presence():
     assert result["blockers"]
 
 
+
+def test_verify_wiring_reports_hero_zero_candidate_pipeline_but_keeps_it_wait_gated():
+    client = TestClient(app)
+    response = client.post(
+        "/v1/parmar/strategies/hero_zero/verify-wiring",
+        headers=DEVICE_HEADERS,
+    )
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["status"] == "WAIT"
+    assert result["live_api_wiring"] == "CANDIDATE_PIPELINE_WIRED; ACTIONABILITY_NOT_VERIFIED"
+    assert result["candidate_route"] == "/v1/signals.hero_zero"
+    assert result["checks"]["candidate_pipeline_wired"] is True
+    assert result["checks"]["fresh_live_market_data"] is False
+    assert result["checks"]["risk_gate_verified"] is False
+    assert result["actionable"] is False
+    assert result["blockers"]
+
+
 def test_direct_evaluate_never_trusts_caller_snapshot_or_emits_trade_levels():
     client = TestClient(app)
     response = client.post(
