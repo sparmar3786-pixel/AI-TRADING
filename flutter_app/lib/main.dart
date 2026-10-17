@@ -1603,14 +1603,32 @@ class _SignalCalendarPageState extends State<SignalCalendarPage> {
             final t = (row['targets'] as num?)?.toInt() ?? 0;
             final sl = (row['stop_losses'] as num?)?.toInt() ?? 0;
             final open = (row['open'] as num?)?.toInt() ?? 0;
-            return Card(color: t + sl == 0 ? null : t >= sl ? const Color(0xFF12352D) : const Color(0xFF3B2025), child: InkWell(
-              onTap: () => showDialog<void>(context: context, builder: (context) => AlertDialog(title: Text(dayKey(DateTime(month.year, month.month, d))), content: Text('Opened: ${row['signals_opened'] ?? 0}\nOpen: $open\nTargets: $t\nStop losses: $sl\nAccuracy: ${row['accuracy_percent'] == null ? 'Not enough closed outcomes' : '${row['accuracy_percent']}%'}'), actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))]),
-              child: Padding(padding: const EdgeInsets.all(3), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                Text('$d', style: const TextStyle(fontWeight: FontWeight.w800)),
-                if (t + sl > 0) Text('T$t / S$sl', style: const TextStyle(fontSize: 9)),
-                if (open > 0) Text('O$open', style: const TextStyle(fontSize: 9)),
-              ])),
-            ));
+            return Card(
+              color: t + sl == 0 ? null : (t >= sl ? const Color(0xFF12352D) : const Color(0xFF3B2025)),
+              child: InkWell(
+                onTap: () {
+                  showDialog<void>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: Text(dayKey(DateTime(month.year, month.month, d))),
+                      content: Text('Opened: ${row['signals_opened'] ?? 0}\\nOpen: $open\\nTargets: $t\\nStop losses: $sl\\nAccuracy: ${row['accuracy_percent'] == null ? 'Not enough closed outcomes' : '${row['accuracy_percent']}%'}'),
+                      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+                    ),
+                  );
+                },
+                child: Padding(
+                  padding: const EdgeInsets.all(3),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text('$d', style: const TextStyle(fontWeight: FontWeight.w800)),
+                      if (t + sl > 0) Text('T$t / S$sl', style: const TextStyle(fontSize: 9)),
+                      if (open > 0) Text('O$open', style: const TextStyle(fontSize: 9)),
+                    ],
+                  ),
+                ),
+              ),
+            );
           }),
         ],
       ),
