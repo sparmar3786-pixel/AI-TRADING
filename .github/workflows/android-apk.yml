@@ -314,3 +314,12 @@ jobs:
           else
             gh release create "$TAG" "$APK" "$ARM64_APK" "$APK.sha256" "$ARM64_APK.sha256" "$(dirname "$APK")/BUILD_COMMIT_SHA.txt" "$(dirname "$APK")/BUILD_INFO.txt" --title "AI-TRADING Signal APK" --notes "$NOTES" --prerelease --target "$GITHUB_SHA"
           fi
+          RELEASE_COMMIT_SHA=$(gh api "repos/sparmar3786-pixel/AI-TRADING/commits/$TAG" --jq .sha)
+          if [ "$RELEASE_COMMIT_SHA" != "$GITHUB_SHA" ]; then
+            echo "Rolling release tag resolves to $RELEASE_COMMIT_SHA, expected $GITHUB_SHA"
+            exit 1
+          fi
+          if [ "$(cat "$(dirname "$APK")/BUILD_COMMIT_SHA.txt")" != "$GITHUB_SHA" ]; then
+            echo "APK build metadata does not match the verified source commit"
+            exit 1
+          fi
