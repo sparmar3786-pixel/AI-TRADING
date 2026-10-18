@@ -272,9 +272,12 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         tradePlans = ((s['trade_plans'] as List?) ?? const []).whereType<Map>().map((plan) => Map<String, dynamic>.from(plan)).toList();
         qualifiedCount = (s['qualified_trade_count'] as num?)?.toInt() ?? tradePlans.length;
         lastFetch = s['last_fetch']?.toString();
-        status = signalsEndpointOnline && s['live'] == true
+        // Do not trust the root-level API "live" flag alone. Verify at least
+        // one market row using its explicit live marker, trusted source,
+        // positive LTP and a non-future timestamp no older than 120 seconds.
+        status = signalsEndpointOnline && _hasVerifiedLiveMarket
             ? 'LIVE market feed connected.'
-            : (signalsFetchError != null && (s['market'] as Map?)?.isEmpty != false
+            : (signalsFetchError != null && market.isEmpty
                 ? 'Signal data request failed: $signalsFetchError'
                 : (angelStatusError != null
                     ? 'Signal API responded, but Angel One status check failed: $angelStatusError'
@@ -305,6 +308,32 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     } finally {
       _refreshing = false;
     }
+  }
+
+  /// A live badge requires verified market-row evidence, not merely HTTP 200
+  /// or a backend-level live flag. One verified row means at least one index
+  /// is live; each index must still be assessed independently by its own UI.
+  bool get _hasVerifiedLiveMarket {
+    final now = DateTime.now().toUtc();
+    final trustedSourcePattern = RegExp(r'angel|smartapi|nse|bse|broker|exchange');
+    for (final value in market.values) {
+      if (value is! Map) continue;
+      final row = Map<String, dynamic>.from(value);
+      if (row['live'] != true) continue;
+      final ltp = row['ltp'];
+      if (ltp is! num || !ltp.isFinite || ltp <= 0) continue;
+      final timestamp = DateTime.tryParse(row['timestamp']?.toString() ?? '')?.toUtc();
+      if (timestamp == null) continue;
+      final ageMs = now.difference(timestamp).inMilliseconds;
+      if (ageMs < 0 || ageMs > 120000) continue;
+      final source = (row['source'] ?? row['data_source'] ?? '').toString().toLowerCase();
+      if (!trustedSourcePattern.hasMatch(source)) continue;
+      final high = row['high'] ?? row['session_high'];
+      final low = row['low'] ?? row['session_low'];
+      if (high is num && low is num && (high < low || ltp > high || ltp < low)) continue;
+      return true;
+    }
+    return false;
   }
 
   bool get _marketOpenNow {
