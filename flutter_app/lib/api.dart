@@ -77,8 +77,11 @@ class FreshApi {
     String path, {
     Duration timeout = const Duration(seconds: 30),
   }) async {
-    final response = await http
-        .get(_uri(path), headers: await _headers())
+    final uri = _uri(path);
+    final headers = await _headers();
+    final response = await (_testClient == null
+            ? http.get(uri, headers: headers)
+            : _testClient.get(uri, headers: headers))
         .timeout(timeout);
     return _decode(response);
   }
@@ -88,12 +91,11 @@ class FreshApi {
     Map<String, dynamic> body, {
     Duration timeout = const Duration(seconds: 30),
   }) async {
-    final response = await http
-        .post(
-          _uri(path),
-          headers: await _headers(),
-          body: jsonEncode(body),
-        )
+    final uri = _uri(path);
+    final headers = await _headers();
+    final response = await (_testClient == null
+            ? http.post(uri, headers: headers, body: jsonEncode(body))
+            : _testClient.post(uri, headers: headers, body: jsonEncode(body)))
         .timeout(timeout);
     return _decode(response);
   }
@@ -147,7 +149,11 @@ class FreshApi {
       postJson('/v1/settings/credentials', body);
 
   Future<void> checkBackend() async {
-    final response = await http.get(_uri('/health')).timeout(const Duration(seconds: 10));
+    final uri = _uri('/health');
+    final response = await (_testClient == null
+            ? http.get(uri)
+            : _testClient.get(uri))
+        .timeout(const Duration(seconds: 10));
     if (response.statusCode != 200) {
       throw Exception('Backend health check failed: HTTP ${response.statusCode}. Railway service may be down or the domain may be wrong.');
     }
