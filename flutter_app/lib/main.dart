@@ -76,6 +76,16 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
   String status = 'Connect Angel One from Settings.';
   Timer? _refreshTimer;
 
+  /// Normalize untrusted API JSON without throwing on a malformed row shape.
+  /// Transport health and payload validity are tracked separately.
+  Map<String, dynamic> _safeMap(dynamic value) {
+    if (value is! Map) return <String, dynamic>{};
+    return value.map((key, item) => MapEntry(key.toString(), item));
+  }
+
+  List<dynamic> _safeList(dynamic value) =>
+      value is List ? value : const <dynamic>[];
+
   /// Cache is best-effort only: corrupted or outdated local JSON must never
   /// crash refresh or be presented as a live backend response.
   Future<Map<String, dynamic>> _loadCachedSignals() async {
@@ -97,15 +107,15 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
   Future<Map<String, dynamic>> _applyTenMinuteSignalGate(Map<String, dynamic> response) async {
     final prefs = await SharedPreferences.getInstance();
     final result = Map<String, dynamic>.from(response);
-    final rawSignals = Map<String, dynamic>.from(result['signals'] as Map? ?? const {});
+    final rawSignals = _safeMap(result['signals']);
     final stableIndices = <String>{};
     final now = DateTime.now().toUtc();
     for (final entry in rawSignals.entries) {
       final index = entry.key.toString().toUpperCase();
-      final row = Map<String, dynamic>.from(entry.value as Map? ?? const {});
+      final row = _safeMap(entry.value);
       final decision = (row['decision'] ?? 'WAIT').toString().toUpperCase();
-      final validation = Map<String, dynamic>.from(row['live_validation'] as Map? ?? const {});
-      final guards = (row['guards'] as List?) ?? const <dynamic>[];
+      final validation = _safeMap(row['live_validation']);
+      final guards = _safeList(row['guards']);
       final isCandidate = (decision == 'CALL BUY' || decision == 'PUT BUY') &&
           row['strike'] != null && row['option_side'] != null &&
           row['entry'] != null && row['stop_loss'] != null && row['target'] != null &&
@@ -139,10 +149,10 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       row['candidate_decision'] = decision;
       if (elapsed < 600) {
         row['decision'] = 'WAIT';
-        final gatedValidation = Map<String, dynamic>.from(validation);
+        final gatedValidation = _safeMap(validation);
         gatedValidation['decision'] = 'WAIT';
         gatedValidation['verdict'] = 'WARN';
-        final blocks = List<dynamic>.from(gatedValidation['blocks'] as List? ?? const []);
+        final blocks = List<dynamic>.from(_safeList(gatedValidation['blocks']));
         if (!blocks.any((item) => item.toString().contains('10-minute stability gate'))) {
           blocks.add('10-minute stability gate: candidate must remain unchanged for 600 seconds');
         }
@@ -162,9 +172,9 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       rawSignals[entry.key] = row;
     }
     result['signals'] = rawSignals;
-    final plans = (result['trade_plans'] as List? ?? const [])
+    final plans = _safeList(result['trade_plans'])
         .whereType<Map>()
-        .map((plan) => Map<String, dynamic>.from(plan))
+        .map((plan) => _safeMap(plan))
         .where((plan) => stableIndices.contains((plan['index'] ?? '').toString().toUpperCase()))
         .toList();
     result['trade_plans'] = plans;
@@ -175,17 +185,17 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
   /// Cached quotes are display-only; cached BUY/SELL recommendations are never actionable.
   Map<String, dynamic> _makeCachedSignalsNonActionable(Map<String, dynamic> cached) {
     final result = Map<String, dynamic>.from(cached);
-    final rawSignals = Map<String, dynamic>.from(result['signals'] as Map? ?? const {});
+    final rawSignals = _safeMap(result['signals']);
     for (final entry in rawSignals.entries) {
       final row = Map<String, dynamic>.from(entry.value as Map? ?? const {});
       final decision = (row['decision'] ?? '').toString().toUpperCase();
       if (decision == 'CALL BUY' || decision == 'PUT BUY') {
         row['candidate_decision'] = decision;
         row['decision'] = 'WAIT';
-        final validation = Map<String, dynamic>.from(row['live_validation'] as Map? ?? const {});
+        final validation = _safeMap(row['live_validation']);
         validation['decision'] = 'WAIT';
         validation['verdict'] = 'WARN';
-        final blocks = List<dynamic>.from(validation['blocks'] as List? ?? const []);
+        final blocks = List<dynamic>.from(_safeList(validation['blocks']));
         blocks.add('Backend offline: cached signal is not actionable');
         validation['blocks'] = blocks;
         row['live_validation'] = validation;
@@ -235,12 +245,19 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
       try { liveStatus = await signalApi.liveExecutionStatus(); } catch (_) {}
       Map<String,dynamic> s;
       try {
+        // Mark transport success immediately. A malformed signal row or local
+        // confirmation-gate exception must not be misreported as an API outage.
         s = await signalApi.signals(emaFast: emaFast, emaSlow: emaSlow);
-        s = await _applyTenMinuteSignalGate(s);
-        // API success is independent of local cache persistence. A full device,
-        // oversized cached payload or SharedPreferences write error must not
-        // falsely turn a successful Railway response into "API UP • DATA ERROR".
         if (mounted) setState(() { signalsEndpointOnline = true; signalsFetchError = null; });
+        try {
+          s = await _applyTenMinuteSignalGate(s);
+        } catch (processingError) {
+          debugPrint('SIGNAL_RESPONSE_PROCESSING_FAILED: $processingError');
+          // Fail closed if validation/gating cannot parse the response: no
+          // cached/fresh BUY plan is allowed to remain actionable.
+          s = _makeCachedSignalsNonActionable(s);
+          s['message'] = 'Signal API responded, but local validation failed; all trade plans are blocked.';
+        }
         try {
           final prefs = await SharedPreferences.getInstance();
           await prefs.setString('fresh_last_signals', jsonEncode(s));
