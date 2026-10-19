@@ -84,4 +84,23 @@ void main() {
     expect(paths, ['/health', '/v1/angel/connect']);
   });
 
+  test('signal feed diagnostics survive the shared JSON API layer', () async {
+    final client = MockClient((request) async => http.Response(
+          jsonEncode({
+            'live': false,
+            'message': 'Angel One is not connected. Connect with current TOTP.',
+            'feed': {'message': 'Broker session required'},
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        ));
+    addTearDown(client.close);
+
+    final payload = await FreshApi.signal(client).getJson('/v1/signals');
+
+    expect(payload['live'], isFalse);
+    expect(payload['message'], contains('current TOTP'));
+    expect((payload['feed'] as Map)['message'], 'Broker session required');
+  });
+
 }
