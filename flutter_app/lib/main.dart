@@ -347,9 +347,9 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     if (!apiOnline) return "API OFFLINE";
     if (!signalsEndpointOnline) return "API UP • DATA ERROR";
     if (!_marketOpenNow) return "API UP • MARKET CLOSED";
-    if (status == "LIVE market feed connected.") return "API LIVE";
-    if (status.startsWith("Backend online")) return "API UP • WAITING DATA";
-    return "API UP • DATA ERROR";
+    // A successful HTTP response does not prove fresh market data.
+    if (_hasVerifiedLiveMarket && status == "LIVE market feed connected.") return "API LIVE";
+    return "API UP • WAITING DATA";
   }
 
   Color get _appBarStatusColor {
