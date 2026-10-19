@@ -275,13 +275,21 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         // Do not trust the root-level API "live" flag alone. Verify at least
         // one market row using its explicit live marker, trusted source,
         // positive LTP and a non-future timestamp no older than 120 seconds.
+        final backendMessage = (s['message'] ??
+                (s['feed'] as Map?)?['message'] ??
+                (s['store'] as Map?)?['message'] ??
+                '').toString().trim();
         status = signalsEndpointOnline && _hasVerifiedLiveMarket
             ? 'LIVE market feed connected.'
             : (signalsFetchError != null && market.isEmpty
                 ? 'Signal data request failed: $signalsFetchError'
                 : (angelStatusError != null
                     ? 'Signal API responded, but Angel One status check failed: $angelStatusError'
-                    : (lastFetch != null ? 'LIVE unavailable — showing last fetched market data.' : 'Backend online — waiting for Angel One market data. Check broker credentials and connection status.')));
+                    : (backendMessage.isNotEmpty && s['live'] != true
+                        ? backendMessage
+                        : (lastFetch != null
+                            ? 'LIVE unavailable — showing last fetched market data.'
+                            : 'Backend online — waiting for Angel One market data. Check broker credentials and connection status.'))));
       });
     } catch (e) {
       if (mounted) setState(() { apiOnline = generalApiOnline; signalsEndpointOnline = false; signalsFetchError = e.toString().replaceFirst('Exception: ', ''); systemDiagnostics = const {}; systemDiagnosticsError = e.toString().replaceFirst('Exception: ', ''); });
@@ -347,8 +355,18 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     if (!apiOnline) return "API OFFLINE";
     if (!signalsEndpointOnline) return "API UP • DATA ERROR";
     if (!_marketOpenNow) return "API UP • MARKET CLOSED";
-    // A successful HTTP response does not prove fresh market data.
+    // A successful HTTP response does not prove fresh market data or a valid
+    // broker session. Keep transport errors and feed/auth errors distinct.
     if (_hasVerifiedLiveMarket && status == "LIVE market feed connected.") return "API LIVE";
+    final message = status.toLowerCase();
+    if (message.contains('angel one') &&
+        (message.contains('not connected') ||
+         message.contains('expired') ||
+         message.contains('credential') ||
+         message.contains('totp') ||
+         message.contains('login failed'))) {
+      return "API UP • FEED ERROR";
+    }
     return "API UP • WAITING DATA";
   }
 
