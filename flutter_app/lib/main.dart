@@ -355,8 +355,18 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     if (!apiOnline) return "API OFFLINE";
     if (!signalsEndpointOnline) return "API UP • DATA ERROR";
     if (!_marketOpenNow) return "API UP • MARKET CLOSED";
-    // A successful HTTP response does not prove fresh market data.
+    // A successful HTTP response does not prove fresh market data or a valid
+    // broker session. Keep transport errors and feed/auth errors distinct.
     if (_hasVerifiedLiveMarket && status == "LIVE market feed connected.") return "API LIVE";
+    final message = status.toLowerCase();
+    if (message.contains('angel one') &&
+        (message.contains('not connected') ||
+         message.contains('expired') ||
+         message.contains('credential') ||
+         message.contains('totp') ||
+         message.contains('login failed'))) {
+      return "API UP • FEED ERROR";
+    }
     return "API UP • WAITING DATA";
   }
 
