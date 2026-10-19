@@ -275,13 +275,21 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
         // Do not trust the root-level API "live" flag alone. Verify at least
         // one market row using its explicit live marker, trusted source,
         // positive LTP and a non-future timestamp no older than 120 seconds.
+        final backendMessage = (s['message'] ??
+                (s['feed'] as Map?)?['message'] ??
+                (s['store'] as Map?)?['message'] ??
+                '').toString().trim();
         status = signalsEndpointOnline && _hasVerifiedLiveMarket
             ? 'LIVE market feed connected.'
             : (signalsFetchError != null && market.isEmpty
                 ? 'Signal data request failed: $signalsFetchError'
                 : (angelStatusError != null
                     ? 'Signal API responded, but Angel One status check failed: $angelStatusError'
-                    : (lastFetch != null ? 'LIVE unavailable — showing last fetched market data.' : 'Backend online — waiting for Angel One market data. Check broker credentials and connection status.')));
+                    : (backendMessage.isNotEmpty && s['live'] != true
+                        ? backendMessage
+                        : (lastFetch != null
+                            ? 'LIVE unavailable — showing last fetched market data.'
+                            : 'Backend online — waiting for Angel One market data. Check broker credentials and connection status.'))));
       });
     } catch (e) {
       if (mounted) setState(() { apiOnline = generalApiOnline; signalsEndpointOnline = false; signalsFetchError = e.toString().replaceFirst('Exception: ', ''); systemDiagnostics = const {}; systemDiagnosticsError = e.toString().replaceFirst('Exception: ', ''); });
