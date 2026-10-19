@@ -187,7 +187,7 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
     final result = Map<String, dynamic>.from(cached);
     final rawSignals = _safeMap(result['signals']);
     for (final entry in rawSignals.entries) {
-      final row = Map<String, dynamic>.from(entry.value as Map? ?? const {});
+      final row = _safeMap(entry.value);
       final decision = (row['decision'] ?? '').toString().toUpperCase();
       if (decision == 'CALL BUY' || decision == 'PUT BUY') {
         row['candidate_decision'] = decision;
