@@ -3514,8 +3514,25 @@ def _refresh_signals_worker() -> None:
     try:
         _get_signals_uncached(force=True)
     except Exception as exc:
-        error_text = f"{type(exc).__name__}: signal refresh failed"
-        logger.warning("SIGNAL_REFRESH_FAILED: %s", type(exc).__name__)
+        # Report safe HTTP error context for production diagnosis; never log credentials.
+        if isinstance(exc, HTTPException):
+            raw_detail = exc.detail
+            if isinstance(raw_detail, str):
+                safe_detail = re.sub(r"[\\r\\n]+", " ", raw_detail).strip()[:240]
+            elif isinstance(raw_detail, dict):
+                safe_detail = " ".join(
+                    str(raw_detail.get(key, "")).strip()
+                    for key in ("message", "reason", "action")
+                    if str(raw_detail.get(key, "")).strip()
+                )[:240]
+            else:
+                safe_detail = "structured HTTP error"
+            safe_detail = safe_detail or "no detail"
+            error_text = f"HTTPException {exc.status_code}: {safe_detail}"
+            logger.warning("SIGNAL_REFRESH_FAILED status=%s detail=%s", exc.status_code, safe_detail)
+        else:
+            error_text = f"{type(exc).__name__}: signal refresh failed"
+            logger.warning("SIGNAL_REFRESH_FAILED: %s", type(exc).__name__)
     finally:
         elapsed_ms = round((time.monotonic() - started) * 1000, 1)
         with _lock:
