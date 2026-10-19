@@ -192,7 +192,7 @@ class FreshApi {
       final response = await (_testClient == null
               ? http.get(uri, headers: headers)
               : _testClient.get(uri, headers: headers))
-          .timeout(const Duration(seconds: 30));
+          .timeout(const Duration(seconds: 80));
       if (response.statusCode == 404) {
         last404 = 'HTTP 404 from ${Uri.parse(baseUrl).host}${route.split('?').first}';
         continue;

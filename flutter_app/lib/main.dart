@@ -387,7 +387,10 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
 
   void _startRefreshTimer() {
     if (_refreshTimer?.isActive == true) return;
-    _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+    // The backend signal snapshot can take ~30s to rebuild. Polling every
+    // 5s overloads the single-flight worker and repeatedly surfaces stale cache.
+    // Use a calmer 15s cadence; refresh() also guards against overlapping calls.
+    _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (mounted) refresh();
     });
   }

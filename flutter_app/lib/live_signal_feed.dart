@@ -12,14 +12,18 @@ class LiveSignalFeed {
 
   void start() {
     _timer ??= Timer.periodic(
-      const Duration(seconds: 5),
+      const Duration(seconds: 15),
       (_) async {
         try {
           final payload = await api.signals();
           if (!_controller.isClosed) {
             _controller.add(payload);
           }
-        } catch (_) {}
+        } catch (error, stackTrace) {
+          // Do not silently swallow transport/authentication errors; listeners
+          // can render a data-error state while keeping signals fail-closed.
+          if (!_controller.isClosed) _controller.addError(error, stackTrace);
+        }
       },
     );
   }
