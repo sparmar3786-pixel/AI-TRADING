@@ -7,10 +7,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'api.dart';
 import 'config.dart';
 import 'broker_home_prototype_page.dart';
-import 'strategy_library_page.dart';
-import 'quant_engine_page.dart';
 
-const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Backtesting','API','Data Health','Broker Home','Strategies','Quant Engine','Quant Signal','Strategy Signal','Signal Calendar'];
+const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Backtesting','API','Data Health','Broker Home','Quant Signal','Strategy Signal','Signal Calendar'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
 
 void main() {
@@ -530,14 +528,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           status: status,
           onIndexSelected: (value) => setState(() => selectedIndex = value),
         ),
-        StrategyLibraryPage(signals: signals, selectedIndex: selectedIndex),
-        QuantEnginePage(
-          selectedIndex: selectedIndex,
-          signals: signals,
-          market: market,
-          marketOpen: _marketOpenNow,
-          onIndexChanged: (value) => setState(() => selectedIndex = value),
-        ),
         const IsolatedSignalPage(endpoint: '/v1/signals/quant', title: 'Quant Engine Signal', description: 'Quant owns the final validated decision and its evidence. Missing/stale evidence remains WAIT/BLOCK.'),
         const IsolatedSignalPage(endpoint: '/v1/signals/strategies', title: 'Parmar Engine Strategy Signals', description: 'Strategy candidates are separate from Quant decisions and cannot override safety gates.'),
         const SignalCalendarPage(),
@@ -558,9 +548,10 @@ IconData _tabIcon(int index) => switch (index) {
   8 => Icons.settings_ethernet,
   9 => Icons.monitor_heart_outlined,
   10 => Icons.account_balance_wallet_outlined,
-  11 => Icons.library_books_outlined,
-  12 => Icons.layers_outlined,
-  _ => Icons.layers_outlined,
+  11 => Icons.bolt,
+  12 => Icons.hub_outlined,
+  13 => Icons.calendar_month_outlined,
+  _ => Icons.dashboard_outlined,
 };
 
 class DataHealthPage extends StatelessWidget {
