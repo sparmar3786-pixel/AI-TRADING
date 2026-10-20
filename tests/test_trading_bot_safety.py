@@ -28,8 +28,7 @@ class PaperRiskTests(unittest.TestCase):
         close = 25000 + np.cumsum(rng.normal(0, 8, 80))
         candles = []
         for index, price in enumerate(close):
-            candles.append({'ts': f'2026-10-20T09:{15 + index:02d}:00+05:30',
-                            'open': float(price - 1), 'high': float(price + 5),
+            candles.append({'open': float(price - 1), 'high': float(price + 5),
                             'low': float(price - 5), 'close': float(price),
                             'volume': float(1000 + index * 3)})
         result = MultiLevelAdvisor().evaluate(candles)
