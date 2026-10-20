@@ -546,9 +546,8 @@ IconData _tabIcon(int index) => switch (index) {
   8 => Icons.settings_ethernet,
   9 => Icons.monitor_heart_outlined,
   10 => Icons.account_balance_wallet_outlined,
-  11 => Icons.library_books_outlined,
-  12 => Icons.layers_outlined,
-  _ => Icons.layers_outlined,
+  11 => Icons.calendar_month_outlined,
+  _ => Icons.calendar_month_outlined,
 };
 
 class DataHealthPage extends StatelessWidget {
