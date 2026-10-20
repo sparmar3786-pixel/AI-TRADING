@@ -33,17 +33,17 @@ jobs:
         run: |
           node --input-type=commonjs <<'NODE'
           const { execFileSync } = require('node:child_process');
-          const tree = JSON.parse(execFileSync('npm', ['ls', '@grpc/grpc-js', 'postcss-selector-parser', 'braces', '--all', '--json'], { encoding: 'utf8' }));
+          const tree = JSON.parse(execFileSync('npm', ['ls', '--all', '--json'], { encoding: 'utf8' }));
           const found = new Map();
-          function walk(node) {
+          function walk(node, name = '') {
             if (!node || typeof node !== 'object') return;
-            if (node.name && node.version && ['@grpc/grpc-js', 'postcss-selector-parser', 'braces'].includes(node.name)) {
-              if (!found.has(node.name)) found.set(node.name, []);
-              found.get(node.name).push(node.version);
+            if (node.version && ['@grpc/grpc-js', 'postcss-selector-parser', 'braces'].includes(name)) {
+              if (!found.has(name)) found.set(name, []);
+              found.get(name).push(node.version);
             }
-            for (const child of Object.values(node.dependencies || {})) walk(child);
+            for (const [childName, child] of Object.entries(node.dependencies || {})) walk(child, childName);
           }
-          walk(tree);
+          walk(tree, tree.name || '');
           const grpc = found.get('@grpc/grpc-js') || [];
           const selector = found.get('postcss-selector-parser') || [];
           const braces = found.get('braces') || [];
@@ -75,7 +75,6 @@ jobs:
           const fs = require('node:fs');
           const report = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
           console.log(JSON.stringify({
-            auditCommandExitCode: process.env.AUDIT_STATUS || 'see npm audit step',
             vulnerabilities: report.metadata?.vulnerabilities || {},
             bracesAdvisoryStillUnresolved: true
           }, null, 2));
