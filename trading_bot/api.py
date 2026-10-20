@@ -30,7 +30,7 @@ class PaperRiskUpdate(BaseModel):
 @app.get('/')
 def root():
     return {'service': 'AI-TRADING Signal-Only Bot', 'mode': 'advisory_only', 'orders_enabled': False,
-            'endpoints': ['/health', '/status', '/evaluate', '/risk', '/trades', '/daily']}
+            'endpoints': ['/health', '/status', '/evaluate', '/angel/evaluate', '/risk', '/risk/paper-update', '/trades', '/daily']}
 
 @app.get('/health')
 def health():
