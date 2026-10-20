@@ -7,10 +7,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'api.dart';
 import 'config.dart';
 import 'broker_home_prototype_page.dart';
-import 'strategy_library_page.dart';
-import 'quant_engine_page.dart';
 
-const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Backtesting','API','Data Health','Broker Home','Strategies','Quant Engine','Quant Signal','Strategy Signal','Signal Calendar'];
+const tabs = ['Dashboard','Market','Option Chain','OI Lab','Indicators','Signals','Risk','Backtesting','API','Data Health','Broker Home','Signal Calendar'];
 const indexes = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','BANKEX'];
 
 void main() {
@@ -530,16 +528,6 @@ class _FreshHomeState extends State<FreshHome> with WidgetsBindingObserver {
           status: status,
           onIndexSelected: (value) => setState(() => selectedIndex = value),
         ),
-        StrategyLibraryPage(signals: signals, selectedIndex: selectedIndex),
-        QuantEnginePage(
-          selectedIndex: selectedIndex,
-          signals: signals,
-          market: market,
-          marketOpen: _marketOpenNow,
-          onIndexChanged: (value) => setState(() => selectedIndex = value),
-        ),
-        const IsolatedSignalPage(endpoint: '/v1/signals/quant', title: 'Quant Engine Signal', description: 'Quant owns the final validated decision and its evidence. Missing/stale evidence remains WAIT/BLOCK.'),
-        const IsolatedSignalPage(endpoint: '/v1/signals/strategies', title: 'Parmar Engine Strategy Signals', description: 'Strategy candidates are separate from Quant decisions and cannot override safety gates.'),
         const SignalCalendarPage(),
       ]),
     ),
@@ -558,9 +546,8 @@ IconData _tabIcon(int index) => switch (index) {
   8 => Icons.settings_ethernet,
   9 => Icons.monitor_heart_outlined,
   10 => Icons.account_balance_wallet_outlined,
-  11 => Icons.library_books_outlined,
-  12 => Icons.layers_outlined,
-  _ => Icons.layers_outlined,
+  11 => Icons.calendar_month_outlined,
+  _ => Icons.calendar_month_outlined,
 };
 
 class DataHealthPage extends StatelessWidget {
@@ -1541,73 +1528,6 @@ class TradePlanCard extends StatelessWidget {
 
 String _val(dynamic v){if(v==null)return '—';if(v is num)return v.toStringAsFixed(v.abs()>=100?2:3);return v.toString();}
 
-
-class IsolatedSignalPage extends StatefulWidget {
-  const IsolatedSignalPage({required this.endpoint, required this.title, required this.description, super.key});
-  final String endpoint, title, description;
-  @override
-  State<IsolatedSignalPage> createState() => _IsolatedSignalPageState();
-}
-
-class _IsolatedSignalPageState extends State<IsolatedSignalPage> {
-  Map<String, dynamic> payload = const {};
-  bool loading = false;
-  String? error;
-  @override
-  void initState() { super.initState(); refresh(); }
-  Future<void> refresh() async {
-    if (loading) return;
-    setState(() { loading = true; error = null; });
-    try {
-      final result = await FreshApi.signal().getJson(widget.endpoint, timeout: const Duration(seconds: 20));
-      if (!mounted) return;
-      setState(() { payload = result; loading = false; });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() { error = e.toString(); loading = false; });
-    }
-  }
-  @override
-  Widget build(BuildContext context) {
-    final rows = payload['signals'] is Map ? Map<String,dynamic>.from(payload['signals'] as Map) : <String,dynamic>{};
-    final candidates = payload['strategy_candidates'] is List ? List<dynamic>.from(payload['strategy_candidates'] as List) : <dynamic>[];
-    final isStrategies = widget.endpoint.endsWith('/strategies');
-    return RefreshIndicator(onRefresh: refresh, child: ListView(padding: const EdgeInsets.all(12), children: [
-      Text(widget.title, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
-      const SizedBox(height: 6), Text(widget.description),
-      const SizedBox(height: 10),
-      Card(child: ListTile(
-        leading: Icon(loading ? Icons.sync : error == null ? Icons.cloud_done : Icons.cloud_off),
-        title: Text(error != null ? 'DATA CHECK NEEDED' : (payload['status']?.toString().toUpperCase() ?? 'WAIT')),
-        subtitle: Text(error ?? 'Source: ${payload['source'] ?? widget.endpoint} • refresh to fetch latest backend snapshot'),
-        trailing: IconButton(onPressed: refresh, icon: const Icon(Icons.refresh)),
-      )),
-      if (error != null) Card(child: Padding(padding: const EdgeInsets.all(12), child: Text(error!, style: const TextStyle(color: Colors.orangeAccent)))),
-      if (!isStrategies) ...rows.entries.map((entry) {
-        final row = entry.value is Map ? Map<String,dynamic>.from(entry.value as Map) : <String,dynamic>{};
-        final q = row['quant_engine'] is Map ? Map<String,dynamic>.from(row['quant_engine'] as Map) : <String,dynamic>{};
-        return Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(entry.key, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
-          Text('Decision: ${row['decision'] ?? 'WAIT'}  •  Strike: ${row['strike'] ?? '—'}  •  Expiry: ${row['expiry'] ?? '—'}'),
-          Text('Entry: ${row['entry'] ?? '—'}  •  SL: ${row['stop_loss'] ?? '—'}  •  Target: ${row['target'] ?? '—'}'),
-          Text('Quant: ${q['passed_layers'] ?? '—'}/${q['total_layers'] ?? 5} layers • Fresh: ${row['data_fresh'] == true ? 'YES' : 'NO'}'),
-          Text('Stability: ${(row['signal_stability'] as Map?)?['state'] ?? 'UNVERIFIED'}'),
-          if (row['blockers'] is List) Text('Blockers: ${(row['blockers'] as List).join(', ')}'),
-        ])));
-      }),
-      if (isStrategies && candidates.isEmpty) const Card(child: ListTile(title: Text('No strategy candidates returned'), subtitle: Text('This is not a failure by itself; the backend must return explicit candidate evidence.'))),
-      if (isStrategies) ...candidates.map((item) {
-        final row = item is Map ? Map<String,dynamic>.from(item) : <String,dynamic>{'detail': item.toString()};
-        return Card(child: ListTile(
-          leading: const Icon(Icons.hub_outlined),
-          title: Text((row['strategy'] ?? row['strategy_id'] ?? row['name'] ?? 'Strategy candidate').toString()),
-          subtitle: Text('Candidate: ${row['candidate_decision'] ?? row['decision'] ?? 'WAIT'} • Status: ${row['status'] ?? row['state'] ?? 'UNVERIFIED'}\n${row['reason'] ?? row['detail'] ?? 'Candidate only; Quant and risk gates still apply.'}'),
-        ));
-      }),
-      const Padding(padding: EdgeInsets.all(8), child: Text('Signal-only mode. No broker orders are placed. Do not treat a candidate or a shadow outcome as a guaranteed fill.', style: TextStyle(color: Colors.orangeAccent))),
-    ]));
-  }
-}
 
 class SignalCalendarPage extends StatefulWidget {
   const SignalCalendarPage({super.key});
