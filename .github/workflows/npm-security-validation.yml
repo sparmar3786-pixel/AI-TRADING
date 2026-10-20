@@ -47,12 +47,20 @@ jobs:
           const grpc = found.get('@grpc/grpc-js') || [];
           const selector = found.get('postcss-selector-parser') || [];
           const braces = found.get('braces') || [];
-          const semver = require('semver');
-          if (!grpc.length || grpc.some(v => semver.lt(v, '1.14.5'))) {
+          function below(version, minimum) {
+            const a = version.split('.').map(Number);
+            const b = minimum.split('.').map(Number);
+            for (let i = 0; i < 3; i++) {
+              if ((a[i] || 0) < (b[i] || 0)) return true;
+              if ((a[i] || 0) > (b[i] || 0)) return false;
+            }
+            return false;
+          }
+          if (!grpc.length || grpc.some(v => below(v, '1.14.5'))) {
             console.error('Unsafe @grpc/grpc-js version(s):', grpc);
             process.exit(1);
           }
-          if (!selector.length || selector.some(v => semver.lt(v, '7.1.6'))) {
+          if (!selector.length || selector.some(v => below(v, '7.1.6'))) {
             console.error('Unsafe postcss-selector-parser version(s):', selector);
             process.exit(1);
           }
