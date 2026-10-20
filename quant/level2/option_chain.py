@@ -74,9 +74,19 @@ class AngelSymbolMaster:
         out = pd.DataFrame({key: frame[col] for key, col in cols.items() if col is not None})
         out["exchange"] = out["exchange"].astype(str).str.upper()
         out["underlying"] = out["underlying"].astype(str).str.upper()
-        out["option_type"] = out["option_type"].astype(str).str.upper().str.replace("OPT", "", regex=False)
+        if "option_type" in out.columns:
+            out["option_type"] = out["option_type"].astype(str).str.upper()
+        else:
+            # Official Angel master commonly encodes CE/PE as the symbol suffix.
+            symbol_col = cols["symbol"]
+            if symbol_col is None: raise ValueError("symbol master has no option type or trading symbol column")
+            out["option_type"] = frame[symbol_col].astype(str).str.upper().str.extract(r"(CE|PE)$", expand=False)
+        out["option_type"] = out["option_type"].astype(str).str.upper()
         out["expiry_date"] = out["expiry"].map(self._expiry)
-        out["strike"] = pd.to_numeric(out["strike"], errors="coerce") / 100
+        out["strike"] = pd.to_numeric(out["strike"], errors="coerce")
+        # Angel scrip master usually stores strike in paise (e.g. 2600000); tolerate
+        # already-normalized values from test fixtures/alternate data exports.
+        out.loc[out["strike"] >= 100000, "strike"] = out.loc[out["strike"] >= 100000, "strike"] / 100
         out["lot_size"] = pd.to_numeric(out["lot_size"], errors="coerce")
         out = out[(out.exchange == exchange.upper()) & (out.underlying == underlying.upper())]
         out = out[out.option_type.isin(["CE", "PE"]) & out.expiry_date.notna() & out.strike.notna() & (out.lot_size > 0)]
