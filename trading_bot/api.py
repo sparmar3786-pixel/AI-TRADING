@@ -22,6 +22,11 @@ class EvaluateRequest(BaseModel):
     candles: list[dict[str, Any]] = Field(min_length=1, max_length=2000)
     spot: float | None = Field(default=None, gt=0)
 
+class PaperRiskUpdate(BaseModel):
+    realized_pnl_delta: float = 0.0
+    open_pnl: float = 0.0
+    register_new_trade: bool = False
+
 @app.get('/')
 def root():
     return {'service': 'AI-TRADING Signal-Only Bot', 'mode': 'advisory_only', 'orders_enabled': False,
@@ -90,6 +95,15 @@ def angel_evaluate():
 @app.get('/risk')
 def risk_status():
     return risk.as_dict()
+
+@app.post('/risk/paper-update')
+def paper_risk_update(request: PaperRiskUpdate):
+    """Record simulated PnL only; this never reads or changes a broker account."""
+    if request.register_new_trade and not risk.register_trade():
+        return {'accepted': False, 'reason': 'daily_risk_lock_or_trade_limit', 'risk': risk.as_dict()}
+    risk.add_realized_pnl(request.realized_pnl_delta)
+    risk.mark_open_pnl(request.open_pnl)
+    return {'accepted': True, 'risk': risk.as_dict(), 'orders_sent': False}
 
 @app.get('/trades')
 def trades(limit: int = 100):
