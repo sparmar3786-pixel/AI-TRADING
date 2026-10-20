@@ -30,12 +30,14 @@ Set these environment variables in the backend's secret manager, never in the AP
 - `POST /evaluate` with JSON `{ "candles": [{"ts":"...", "open":1, "high":2, "low":1, "close":1.5, "volume":100}], "spot": 1.5 }`
 - `GET /angel/evaluate` (read-only Angel One historical candles)
 - `GET /risk`, `GET /trades`, `GET /daily`
+- `POST /risk/paper-update` to record simulated PnL deltas/open PnL and optionally count a simulated trade
 - `POST /risk/reset-paper-day` (resets only the in-memory paper/advisory risk state)
 
 ## Safety and integration boundary
 
 - Daily profit lock (15%), daily max loss (5%), and trade-count caps are simulated risk gates; they do not close a real broker position.
-- The SQLite log stores evaluations, not a broker tradebook.
+- The SQLite log stores evaluations, not a broker tradebook. `trading_bot/position_manager.py` simulates partial exits/trailing stops; `trading_bot/optimizer.py` creates bounded candidates only and does not auto-promote them.
+- `/risk/paper-update` and `/risk/reset-paper-day` mutate in-memory simulation state. Keep the service bound to localhost unless authenticated, TLS-protected access is implemented.
 - The supplied partial-exit/trailing-stop/live-order code was not copied verbatim because it assumes fills and broker responses that have not been verified and could send unintended live orders. This service has no order placement method.
 - This new service is not yet deployed or connected to the app's existing `/v1/signals` backend. The HMM output is not currently controlling live app signals.
 - The Flutter APK and web app have the Strategy and Quant Engine pages removed. These backend research files do not restore those screens.
