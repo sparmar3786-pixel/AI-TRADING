@@ -176,13 +176,16 @@ jobs:
             echo "An AI-specific navigation tab remains in main.dart."
             exit 1
           fi
-          grep -F "'Strategies'" lib/main.dart >/dev/null
+          if grep -Eq "'Strategies'|'Strategy Library'|'Quant Engine'|'Quant Signal'|'Strategy Signal'" lib/main.dart || grep -RniE 'class StrategyLibraryPage|class QuantEnginePage' lib; then
+            echo "Removed Strategy or Quant Engine UI remains in Flutter source."
+            exit 1
+          fi
           if grep -F "'API & Railway'" lib/main.dart || grep -F "class ApiRailwayPage" lib/main.dart; then
             echo "Removed API & Railway reference screen remains in Flutter source."
             exit 1
           fi
           grep -F "BacktestingPage(backendUrl: AppConfig.signalBackendUrl)" lib/main.dart >/dev/null
-          echo "AI pages/provider integrations and API & Railway reference screen absent; backtesting uses the AI-TRADING signal backend."
+          echo "AI, Strategy, Quant Engine, and API & Railway screens absent; backtesting uses the AI-TRADING signal backend."
 
       - name: Analyze Dart
         working-directory: flutter_app
