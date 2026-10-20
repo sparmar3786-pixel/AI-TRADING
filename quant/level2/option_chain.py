@@ -62,7 +62,7 @@ class AngelSymbolMaster:
     def options(self, exchange: str, underlying: str) -> pd.DataFrame:
         frame = self._frame if self._frame is not None else self.load()
         aliases = {"exchange": ("exch_seg", "exchange"), "underlying": ("name", "symbol"),
-                   "expiry": ("expiry",), "strike": ("strike",), "option_type": ("instrumenttype", "optiontype"),
+                   "expiry": ("expiry",), "strike": ("strike",), "option_type": ("optiontype",),
                    "symbol": ("symbol", "tradingsymbol"), "token": ("token", "symboltoken"),
                    "lot_size": ("lotsize", "lot_size"), "tick_size": ("tick_size", "ticksize")}
         cols = {}
