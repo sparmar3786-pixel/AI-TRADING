@@ -1,5 +1,7 @@
 import unittest
 from trading_bot.risk import DailyRiskManager
+from trading_bot.advisor import MultiLevelAdvisor
+import numpy as np
 
 
 class PaperRiskTests(unittest.TestCase):
@@ -20,6 +22,21 @@ class PaperRiskTests(unittest.TestCase):
         risk = DailyRiskManager(starting_capital=100000, max_trades=1)
         self.assertTrue(risk.register_trade())
         self.assertFalse(risk.register_trade())
+
+    def test_advisor_waits_when_regime_history_is_insufficient(self):
+        rng = np.random.default_rng(5)
+        close = 25000 + np.cumsum(rng.normal(0, 8, 80))
+        candles = []
+        for index, price in enumerate(close):
+            candles.append({'ts': f'2026-10-20T09:{15 + index:02d}:00+05:30',
+                            'open': float(price - 1), 'high': float(price + 5),
+                            'low': float(price - 5), 'close': float(price),
+                            'volume': float(1000 + index * 3)})
+        result = MultiLevelAdvisor().evaluate(candles)
+        self.assertEqual(result['decision'], 'WAIT')
+        self.assertEqual(result['status'], 'blocked')
+        self.assertEqual(result['reason'], 'regime_unavailable_or_high_volatility')
+        self.assertIsNone(result['entry'])
 
 
 if __name__ == '__main__':
