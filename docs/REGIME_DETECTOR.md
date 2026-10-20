@@ -14,7 +14,7 @@ quant/regime_detector.py implements an optional Gaussian HMM over log returns, 2
 
 ```bash
 pip install -r requirements-quant.txt
-python -m pytest tests/test_regime_detector.py
+python -m unittest discover -s tests -p 'test_regime_detector.py' -v
 ```
 
 ## Integration status
