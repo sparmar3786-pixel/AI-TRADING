@@ -88,7 +88,6 @@ class AngelWebSocketSupervisor:
                 connection = self.connector_factory(self._on_message, self._on_error)
                 with self._lock: self._connection = connection
                 self.connected = True
-                attempts = 0
                 run_forever = getattr(connection, "connect", None) or getattr(connection, "run_forever", None)
                 if not callable(run_forever): raise TypeError("connector must expose connect() or run_forever()")
                 run_forever()
