@@ -1,6 +1,7 @@
 from __future__ import annotations
 import os
-from datetime import date
+from datetime import date, datetime, time
+from zoneinfo import ZoneInfo
 from typing import Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -58,11 +59,25 @@ def angel_evaluate():
         if angel_broker is None:
             angel_broker = AngelReadOnlyBroker.from_env()
         candles = angel_broker.fetch_candles(exchange, token, interval, int(os.getenv('ANGEL_LOOKBACK_DAYS', '5')))
-        spot = None
         symbol = os.getenv('ANGEL_TRADING_SYMBOL', '')
-        if symbol:
-            spot = angel_broker.fetch_ltp(exchange, symbol, token)
-        result = advisor.evaluate(candles, spot, risk.can_open())
+        if not symbol:
+            raise RuntimeError('ANGEL_TRADING_SYMBOL must be configured; candle close is not a live LTP')
+        spot = angel_broker.fetch_ltp(exchange, symbol, token)
+        if not candles or not candles[-1].get('ts'):
+            raise RuntimeError('Latest candle timestamp is missing')
+        raw_ts = str(candles[-1]['ts']).strip()
+        parsed = datetime.fromisoformat(raw_ts.replace('Z', '+00:00'))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=ZoneInfo('Asia/Kolkata'))
+        now_ist = datetime.now(ZoneInfo('Asia/Kolkata'))
+        age_seconds = (now_ist - parsed.astimezone(ZoneInfo('Asia/Kolkata'))).total_seconds()
+        if age_seconds < 0 or age_seconds > 600:
+            raise RuntimeError('Latest candle is stale or from the future')
+        if now_ist.weekday() >= 5 or not (time(9, 15) <= now_ist.time().replace(tzinfo=None) <= time(15, 30)):
+            result = {'decision': 'WAIT', 'status': 'blocked', 'reason': 'market_closed', 'entry': None,
+                      'stop_loss': None, 'target': None, 'strike': None, 'orders_sent': False}
+        else:
+            result = advisor.evaluate(candles, spot, risk.can_open())
         result['as_of'] = candles[-1].get('ts') if candles else None
         result['data_source'] = 'angel_one_historical_candles'
         result['orders_sent'] = False
