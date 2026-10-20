@@ -1,0 +1,96 @@
+name: npm security dependency validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/npm-security-validation.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    if: github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'fix/npm-security-update-1639966805')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Regenerate lockfile from package.json
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Clean reproducible install
+        run: npm ci --no-audit --no-fund
+      - name: Verify patched dependency versions
+        run: |
+          node --input-type=commonjs <<'NODE'
+          const { execFileSync } = require('node:child_process');
+          const tree = JSON.parse(execFileSync('npm', ['ls', '--all', '--json'], { encoding: 'utf8' }));
+          const found = new Map();
+          function walk(node, name = '') {
+            if (!node || typeof node !== 'object') return;
+            if (node.version && ['@grpc/grpc-js', 'postcss-selector-parser', 'braces'].includes(name)) {
+              if (!found.has(name)) found.set(name, []);
+              found.get(name).push(node.version);
+            }
+            for (const [childName, child] of Object.entries(node.dependencies || {})) walk(child, childName);
+          }
+          walk(tree, tree.name || '');
+          const grpc = found.get('@grpc/grpc-js') || [];
+          const selector = found.get('postcss-selector-parser') || [];
+          const braces = found.get('braces') || [];
+          const semver = require('semver');
+          if (!grpc.length || grpc.some(v => semver.lt(v, '1.14.5'))) {
+            console.error('Unsafe @grpc/grpc-js version(s):', grpc);
+            process.exit(1);
+          }
+          if (!selector.length || selector.some(v => semver.lt(v, '7.1.6'))) {
+            console.error('Unsafe postcss-selector-parser version(s):', selector);
+            process.exit(1);
+          }
+          console.log('Verified @grpc/grpc-js:', grpc);
+          console.log('Verified postcss-selector-parser:', selector);
+          console.log('braces versions present:', braces);
+          console.log('NOTE: GitHub advisory GHSA-vfj7-8cjw-p6xm currently lists no patched braces release; this workflow does not hide or falsely mark that alert as fixed.');
+          NODE
+      - name: TypeScript lint
+        run: npm run lint
+      - name: Production frontend build
+        run: npm run build
+      - name: Record audit findings without masking build failures
+        run: |
+          set +e
+          npm audit --json > "$RUNNER_TEMP/npm-audit.json"
+          audit_status=$?
+          set -e
+          node - "$RUNNER_TEMP/npm-audit.json" <<'NODE'
+          const fs = require('node:fs');
+          const report = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          console.log(JSON.stringify({
+            vulnerabilities: report.metadata?.vulnerabilities || {},
+            bracesAdvisoryStillUnresolved: true
+          }, null, 2));
+          NODE
+          echo "npm audit exit code: $audit_status (review findings; braces has no published patched release at the time of this change)."
+      - name: Commit regenerated package-lock.json
+        env:
+          BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- package-lock.json; then
+            echo "package-lock.json already matches package.json and overrides."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          git commit -m "Regenerate npm lockfile for security updates"
+          git push origin "HEAD:$BRANCH_NAME"
