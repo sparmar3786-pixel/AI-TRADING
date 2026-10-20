@@ -20,7 +20,8 @@ Set these environment variables in the backend's secret manager, never in the AP
 - `ANGEL_PIN`
 - `ANGEL_TOTP_SECRET`
 - `ANGEL_SYMBOL_TOKEN` (numeric token for the underlying/index instrument)
-- Optional: `ANGEL_EXCHANGE` (defaults to `NSE`), `ANGEL_INTERVAL` (defaults to `FIVE_MINUTE`), `ANGEL_LOOKBACK_DAYS` (defaults to `5`), `ANGEL_TRADING_SYMBOL` (if configured, used for an LTP request)
+- Required: `ANGEL_TRADING_SYMBOL` (trading symbol corresponding to the configured token, used for a fresh LTP request)
+- Optional: `ANGEL_EXCHANGE` (defaults to `NSE`), `ANGEL_INTERVAL` (defaults to `FIVE_MINUTE`), `ANGEL_LOOKBACK_DAYS` (defaults to `5`)
 
 `GET /angel/evaluate` fetches candles and computes an advisory result. Angel One SDK/API changes, login failures, invalid symbol tokens, empty/stale data, insufficient history, and HMM failures return an error/WAIT instead of reusing a cached BUY/SELL signal. Confirm the correct exchange, symbol, token, and interval from the current Angel One instrument master before use.
 
