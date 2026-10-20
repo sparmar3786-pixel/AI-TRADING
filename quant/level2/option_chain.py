@@ -62,13 +62,13 @@ class AngelSymbolMaster:
     def options(self, exchange: str, underlying: str) -> pd.DataFrame:
         frame = self._frame if self._frame is not None else self.load()
         aliases = {"exchange": ("exch_seg", "exchange"), "underlying": ("name", "symbol"),
-                   "expiry": ("expiry",), "strike": ("strike",), "option_type": ("instrumenttype", "optiontype"),
+                   "expiry": ("expiry",), "strike": ("strike",), "option_type": ("optiontype",),
                    "symbol": ("symbol", "tradingsymbol"), "token": ("token", "symboltoken"),
                    "lot_size": ("lotsize", "lot_size"), "tick_size": ("tick_size", "ticksize")}
         cols = {}
         for target, candidates in aliases.items():
             cols[target] = next((c for c in candidates if c in frame.columns), None)
-        required = ("exchange", "underlying", "expiry", "strike", "option_type", "symbol", "token", "lot_size")
+        required = ("exchange", "underlying", "expiry", "strike", "symbol", "token", "lot_size")
         missing = [key for key in required if cols[key] is None]
         if missing: raise ValueError("symbol master missing required columns: " + ",".join(missing))
         out = pd.DataFrame({key: frame[col] for key, col in cols.items() if col is not None})
