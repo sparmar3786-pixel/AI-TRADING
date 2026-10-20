@@ -25,7 +25,7 @@ class PaperRiskTests(unittest.TestCase):
 
     def test_advisor_waits_when_regime_history_is_insufficient(self):
         rng = np.random.default_rng(5)
-        close = 25000 + np.cumsum(rng.normal(0, 8, 80))
+        close = 25000 + np.cumsum(rng.normal(0, 25, 80))
         candles = []
         for index, price in enumerate(close):
             candles.append({'open': float(price - 1), 'high': float(price + 5),
