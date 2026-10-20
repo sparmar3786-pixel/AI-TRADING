@@ -20,18 +20,9 @@ class MarketDataError(ValueError):
 
 
 def normalize_smartapi_candles(response: Mapping[str, Any]) -> pd.DataFrame:
-    """Normalize common SmartAPI candle payload shapes or fail closed.
-
-    Supports `data: [[timestamp, open, high, low, close, volume], ...]`
-    and `data: {candles: [...]}`. Timestamp values may be ISO strings,
-    datetime objects, or numeric Unix seconds/milliseconds.
-    """
+    """Normalize common SmartAPI candle payload shapes or fail closed."""
     data = response.get("data")
-    if isinstance(data, Mapping):
-        rows = data.get("candles")
-    else:
-        rows = data
-
+    rows = data.get("candles") if isinstance(data, Mapping) else data
     if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)) or not rows:
         raise MarketDataError("SmartAPI returned no candle rows")
 
@@ -52,9 +43,13 @@ def normalize_smartapi_candles(response: Mapping[str, Any]) -> pd.DataFrame:
 
     def parse_timestamp(value: Any) -> pd.Timestamp:
         if isinstance(value, (int, float)) and math.isfinite(float(value)):
-            # SmartAPI numeric timestamps are commonly seconds; tolerate ms.
             unit = "ms" if abs(float(value)) >= 100_000_000_000 else "s"
             return pd.to_datetime(value, unit=unit, utc=True)
+        # Numeric timestamp strings should not be interpreted as calendar dates.
+        if isinstance(value, str) and value.strip().isdigit():
+            numeric = int(value.strip())
+            unit = "ms" if abs(numeric) >= 100_000_000_000 else "s"
+            return pd.to_datetime(numeric, unit=unit, utc=True)
         parsed = pd.to_datetime(value, utc=True, errors="coerce")
         if pd.isna(parsed):
             raise MarketDataError("Candle timestamp is invalid")
@@ -64,9 +59,10 @@ def normalize_smartapi_candles(response: Mapping[str, Any]) -> pd.DataFrame:
     for column in ("open", "high", "low", "close", "volume"):
         frame[column] = pd.to_numeric(frame[column], errors="coerce")
 
-    if frame[["open", "high", "low", "close", "volume"]].isna().any().any():
+    numeric = frame[["open", "high", "low", "close", "volume"]]
+    if numeric.isna().any().any():
         raise MarketDataError("Candle contains missing or non-numeric OHLCV values")
-    if not all(math.isfinite(float(v)) for v in frame[["open", "high", "low", "close", "volume"]].to_numpy().ravel()):
+    if not all(math.isfinite(float(v)) for v in numeric.to_numpy().ravel()):
         raise MarketDataError("Candle contains non-finite OHLCV values")
     if (frame[["open", "high", "low", "close"]] <= 0).any().any() or (frame["volume"] < 0).any():
         raise MarketDataError("Candle contains invalid prices or negative volume")
@@ -84,33 +80,40 @@ def normalize_smartapi_candles(response: Mapping[str, Any]) -> pd.DataFrame:
 
 def floor_to_lot(quantity: int, lot_size: int) -> int:
     """Round a non-negative quantity down to a whole lot; invalid sizes fail."""
-    if isinstance(quantity, bool) or isinstance(lot_size, bool) or quantity < 0 or lot_size <= 0:
-        raise ValueError("quantity must be >= 0 and lot_size must be > 0")
+    if (isinstance(quantity, bool) or isinstance(lot_size, bool)
+            or not isinstance(quantity, int) or not isinstance(lot_size, int)
+            or quantity < 0 or lot_size <= 0):
+        raise ValueError("quantity must be an integer >= 0 and lot_size an integer > 0")
     return (quantity // lot_size) * lot_size
 
 
 def target_exit_quantity(original_quantity: int, already_exited: int,
                          target_percent: float, lot_size: int) -> int:
-    """Return a lot-aligned incremental exit based on ORIGINAL quantity.
+    """Compute one exit tranche as a percentage of ORIGINAL quantity.
 
-    A zero result means no valid lot can be exited; callers must not mark the
-    target complete or submit an order in that case.
+    The result is lot-aligned and capped by remaining quantity. A zero result
+    means no valid lot can be exited; callers must not mark the target complete.
     """
-    if original_quantity < 0 or already_exited < 0 or already_exited > original_quantity:
+    if (isinstance(original_quantity, bool) or isinstance(already_exited, bool)
+            or not isinstance(original_quantity, int) or not isinstance(already_exited, int)
+            or original_quantity < 0 or already_exited < 0
+            or already_exited > original_quantity):
         raise ValueError("invalid original/already-exited quantity")
     if not math.isfinite(target_percent) or not 0 < target_percent <= 100:
         raise ValueError("target_percent must be in (0, 100]")
-    desired_total = floor_to_lot(math.floor(original_quantity * target_percent / 100), lot_size)
-    remaining = original_quantity - already_exited
-    return min(remaining, max(0, desired_total - already_exited)) // lot_size * lot_size
+    lot_aligned_original = floor_to_lot(original_quantity, lot_size)
+    remaining = floor_to_lot(original_quantity - already_exited, lot_size)
+    tranche = floor_to_lot(math.floor(lot_aligned_original * target_percent / 100), lot_size)
+    return min(remaining, tranche)
 
 
 def unrealized_pnl(entry_price: float, mark_price: float, quantity: int,
                    side: str) -> float:
     """Calculate mark-to-market P&L from the traded instrument's prices."""
     values = (entry_price, mark_price)
-    if any(not math.isfinite(v) or v <= 0 for v in values) or quantity < 0:
-        raise ValueError("prices must be finite/positive and quantity non-negative")
+    if (any(not math.isfinite(v) or v <= 0 for v in values)
+            or isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 0):
+        raise ValueError("prices must be finite/positive and quantity a non-negative integer")
     normalized_side = side.strip().upper()
     if normalized_side not in {"BUY", "SELL"}:
         raise ValueError("side must be BUY or SELL")
