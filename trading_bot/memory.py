@@ -2,6 +2,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +12,7 @@ class Memory:
         self.db_path = db_path
         self._lock = threading.Lock()
         Path(db_path).parent.mkdir(parents=True, exist_ok=True) if str(Path(db_path).parent) not in ('', '.') else None
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.executescript('''
             CREATE TABLE IF NOT EXISTS evaluations (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, payload TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS daily_metrics (date TEXT PRIMARY KEY, payload TEXT NOT NULL);
@@ -21,6 +22,14 @@ class Memory:
         conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
         return conn
+
+    @contextmanager
+    def _connection(self):
+        conn = self._connect()
+        try:
+            yield conn
+        finally:
+            conn.close()
 
     def save_evaluation(self, payload: dict[str, Any]) -> None:
         with self._lock, self._connect() as conn:
