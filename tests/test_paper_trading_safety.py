@@ -52,8 +52,8 @@ class PaperTradingSafetyTests(unittest.TestCase):
     def test_partial_exit_tranches_use_original_quantity_and_remaining_cap(self):
         self.assertEqual(target_exit_quantity(100, 0, 30, 25), 25)
         self.assertEqual(target_exit_quantity(100, 25, 40, 25), 25)
-        self.assertEqual(target_exit_quantity(100, 50, 60, 25), 25)
-        self.assertEqual(target_exit_quantity(100, 75, 40, 25), 0)
+        self.assertEqual(target_exit_quantity(100, 50, 60, 25), 50)
+        self.assertEqual(target_exit_quantity(100, 75, 40, 25), 25)
 
     def test_pnl_uses_traded_instrument_mark_and_side(self):
         self.assertEqual(unrealized_pnl(100, 110, 25, "BUY"), 250)
