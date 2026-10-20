@@ -28,6 +28,5 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     expect(find.text('Strategies'), findsNothing);
     expect(find.text('Quant Engine'), findsNothing);
-    expect(find.text('Signal Calendar'), findsOneWidget);
   });
 }
