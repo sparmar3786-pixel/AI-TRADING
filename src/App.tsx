@@ -10,7 +10,6 @@ import { DashboardPage } from './pages/DashboardPage';
 import { MarketPage } from './pages/MarketPage';
 import { OptionChainPage } from './pages/OptionChainPage';
 import { SignalsPage } from './pages/SignalsPage';
-import { QuantEngineLabPage } from './pages/QuantEngineLabPage';
 import { BrokerHomePage } from './pages/BrokerHomePage';
 import { IndicatorsPage } from './pages/IndicatorsPage';
 import { OILabPage } from './pages/OILabPage';
@@ -28,13 +27,11 @@ const MainContent: React.FC = () => {
       case 'Market': return <MarketPage />;
       case 'Option Chain': return <OptionChainPage />;
       case 'Signals': return <SignalsPage />;
-      case '5-Layer Quant': return <QuantEngineLabPage />;
       case 'Paper Trading': return <BrokerHomePage />;
       case 'Indicators': return <IndicatorsPage />;
       case 'OI Lab': return <OILabPage />;
       case 'Risk Calculator': return <RiskPage />;
-      case 'Backtesting':
-      case 'Strategy Library': return <BacktestingPage />;
+      case 'Backtesting': return <BacktestingPage />;
       case 'Data Health': return <DataHealthPage />;
       case 'Settings':
       case 'API Settings': return <SettingsPage />;
