@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   X, LayoutDashboard, TrendingUp, Table2, BarChart3, Sliders, Zap,
-  ShieldAlert, Activity, Cpu, Wallet, Settings, History, FileSpreadsheet,
+  ShieldAlert, Cpu, Wallet, Settings, History,
 } from 'lucide-react';
 import { useTrading } from '../context/TradingContext';
 
@@ -22,10 +22,8 @@ export const NavigationDrawer: React.FC = () => {
       { id: 'OI Lab', label: 'OI Lab & PCR Analysis', icon: BarChart3 },
       { id: 'Indicators', label: 'Technical Indicators', icon: Sliders },
     ]},
-    { title: 'ALGO SIGNALS & QUANT', items: [
+    { title: 'ALGO SIGNALS', items: [
       { id: 'Signals', label: 'Live Signals (10m Gate)', icon: Zap },
-      { id: '5-Layer Quant', label: '5-Layer Quant Engine', icon: Activity },
-      { id: 'Strategy Library', label: 'Strategy Library', icon: FileSpreadsheet },
     ]},
     { title: 'EXECUTION & SIMULATION', items: [
       { id: 'Paper Trading', label: 'Broker Home (Paper)', icon: Wallet },
