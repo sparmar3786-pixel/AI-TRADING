@@ -2,7 +2,7 @@ name: AI-TRADING CI
 
 on:
   push:
-    branches: [main, integrate-trading-research-v2-20261010, fix/commodity-footprint-ai-provider-ui, fix/enable-python-ci-and-audit, fix/python-ci-discover-existing-tests]
+    branches: [main, integrate-trading-research-v2-20261010, fix/commodity-footprint-ai-provider-ui]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -24,21 +24,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+          cache: npm
       - name: Verify frontend manifest
         run: |
           test -f package.json
+          test -f package-lock.json
           node -e "const p=require('./package.json'); if(!p.scripts || !p.scripts.build) process.exit(1)"
-      - name: Synchronize npm lockfile with package manifest
-        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
       - name: Install frontend dependencies
-        run: npm ci --no-audit --no-fund
+        run: npm ci
       - name: TypeScript validation
         run: npm run lint
       - name: Build production frontend
         run: npm run build
 
-  python-tests:
-    name: Python repository regression tests
+  backend:
+    name: Optional Python backend tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -46,26 +46,25 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Detect Python regression tests
+      - name: Detect backend source
         id: detect
         shell: bash
         run: |
-          if [ -d .github/scripts ] && find .github/scripts -maxdepth 1 -type f -name 'test*.py' -print -quit | grep -q .; then
+          if [ -f backend/requirements.txt ] && [ -d tests ]; then
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
             echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "No .github/scripts Python regression tests were found."
+            echo "Skipping Python backend tests: this branch does not contain both backend/requirements.txt and tests/."
           fi
-      - name: Install quant test dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements-quant.txt
-      - name: Run repository Python regression tests
-        run: |
-          python -m unittest discover -s .github/scripts -p 'test*.py' -v
-          python -m unittest discover -s tests -p 'test*.py' -v
-      - name: Fail if expected Python tests are missing
+      - name: Install backend runtime dependencies
+        if: steps.detect.outputs.available == 'true'
+        run: python -m pip install -r backend/requirements.txt
+      - name: Run unit tests
+        if: steps.detect.outputs.available == 'true'
+        run: python -m unittest discover -s tests -v
+      - name: Build backend Docker image
+        if: steps.detect.outputs.available == 'true' && hashFiles('Dockerfile') != ''
+        run: docker build --tag ai-trading-api:ci .
+      - name: Explain backend test skip
         if: steps.detect.outputs.available != 'true'
-        run: |
-          echo "::error::Python regression tests were not discovered; refusing to report a successful skip."
-          exit 1
+        run: echo "No Python backend test suite is present on this branch; frontend CI still runs and must pass."

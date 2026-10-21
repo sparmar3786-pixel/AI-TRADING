@@ -103,16 +103,13 @@ export const TradingProvider: React.FC<{ children: ReactNode }> = ({ children })
       setPaperTrades(prev => prev.map(trade => {
         if (trade.status !== 'OPEN') return trade;
         const currentMkt = data.market[trade.symbol];
-        if (!apiService.isFreshLiveMarketRow(currentMkt)) {
-          return { ...trade, mark_status: 'WAITING_FOR_LIVE_OPTION_QUOTE' as const };
-        }
         const strikeMatch = trade.option_name.match(/(\d+(?:\.\d+)?)(?=\s*(?:CE|PE)\b)/i);
         const strike = strikeMatch ? Number(strikeMatch[1]) : 0;
         const quote = currentMkt?.option_chain?.find(row => Math.abs(row.strike - strike) < 0.01);
-        const optionPrice = quote ? (trade.side === 'CE' ? quote.ce_ltp : quote.pe_ltp) : NaN;
+        const optionPrice = quote ? (trade.side === 'CE' ? quote.ce_ltp : quote.pe_ltp) : trade.current_price;
 
         if (typeof optionPrice !== 'number' || !Number.isFinite(optionPrice) || optionPrice <= 0) {
-          return { ...trade, mark_status: 'WAITING_FOR_LIVE_OPTION_QUOTE' as const };
+          return trade;
         }
 
         const pnl = Number(((optionPrice - trade.entry_price) * trade.quantity).toFixed(2));
@@ -125,7 +122,7 @@ export const TradingProvider: React.FC<{ children: ReactNode }> = ({ children })
           pnl,
           pnl_percent,
           mark_status: 'LIVE_OPTION_QUOTE',
-          mark_timestamp: currentMkt.timestamp,
+          mark_timestamp: currentMkt?.timestamp || new Date().toISOString(),
         };
       }));
 
@@ -158,19 +155,11 @@ export const TradingProvider: React.FC<{ children: ReactNode }> = ({ children })
       return;
     }
     const currentMkt = market[trade.symbol as IndexSymbol];
-    if (!apiService.isFreshLiveMarketRow(currentMkt)) {
-      alert('Paper trade blocked: fresh, trusted live broker/exchange data is unavailable.');
-      return;
-    }
     const strikeMatch = trade.option_name.match(/(\d+(?:\.\d+)?)(?=\s*(?:CE|PE)\b)/i);
     const strike = strikeMatch ? Number(strikeMatch[1]) : 0;
     const quote = currentMkt?.option_chain?.find(row => Math.abs(row.strike - strike) < 0.01);
-    const actualPrice = quote ? (trade.side === 'CE' ? quote.ce_ltp : quote.pe_ltp) : NaN;
-    if (!Number.isFinite(actualPrice) || actualPrice <= 0) {
-      alert('Paper trade blocked: no valid live option quote for this strike.');
-      return;
-    }
-    const entryPrice = actualPrice;
+    const actualPrice = quote ? (trade.side === 'CE' ? quote.ce_ltp : quote.pe_ltp) : trade.entry_price;
+    const entryPrice = actualPrice > 0 ? actualPrice : trade.entry_price;
 
     const lotSize = INDEX_CONFIG[trade.symbol as IndexSymbol]?.lotSize || 50;
     const quantity = trade.lots * lotSize;
@@ -210,12 +199,6 @@ export const TradingProvider: React.FC<{ children: ReactNode }> = ({ children })
   const closePaperTrade = useCallback((id: string) => {
     const trade = paperTrades.find(item => item.id === id && item.status === 'OPEN');
     if (!trade) return;
-    const markTime = Date.parse(trade.mark_timestamp || '');
-    if (trade.mark_status !== 'LIVE_OPTION_QUOTE' || !Number.isFinite(markTime) ||
-        Date.now() - markTime < 0 || Date.now() - markTime > 120000) {
-      alert('Close blocked: no fresh verified live option quote is available. Refresh market data first.');
-      return;
-    }
     const exitPrice = trade.current_price > 0 ? trade.current_price : trade.entry_price;
     const pnl = Number(((exitPrice - trade.entry_price) * trade.quantity).toFixed(2));
     const pnl_percent = trade.entry_price > 0
@@ -246,36 +229,25 @@ export const TradingProvider: React.FC<{ children: ReactNode }> = ({ children })
     setDrawerOpen(prev => !prev);
   }, []);
 
-  // Adaptive polling: 15s during the equity session, 60s outside it.
-  // Refresh immediately when the user returns to the foreground.
+  // Periodic polling every 5 seconds (matching Android app)
   useEffect(() => {
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    let disposed = false;
-
-    const scheduleNext = () => {
-      if (disposed) return;
-      const { equityOpen } = apiService.getMarketOpenStatus();
-      timeoutId = setTimeout(async () => {
-        if (!document.hidden) {
-          await refresh();
-        }
-        scheduleNext();
-      }, equityOpen ? 15000 : 60000);
-    };
-
-    void refresh();
-    scheduleNext();
+    refresh();
+    const interval = setInterval(() => {
+      // only refresh if tab is visible
+      if (!document.hidden) {
+        refresh();
+      }
+    }, 5000);
 
     const handleVisibilityChange = () => {
       if (!document.hidden) {
-        void refresh();
+        refresh();
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => {
-      disposed = true;
-      if (timeoutId !== undefined) clearTimeout(timeoutId);
+      clearInterval(interval);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [refresh]);

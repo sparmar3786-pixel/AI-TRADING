@@ -4,6 +4,7 @@ import {
   TrendingUp,
   Table2,
   Zap,
+  Layers,
   Wallet,
   Settings,
 } from 'lucide-react';
@@ -22,6 +23,7 @@ export const BottomNavBar: React.FC = () => {
     { id: 'Signals', label: 'Signals', icon: Zap, badge: activeSignalsCount },
     { id: 'Option Chain', label: 'Chain', icon: Table2 },
     { id: 'Paper Trading', label: 'Broker', icon: Wallet },
+    { id: '5-Layer Quant', label: 'Quant', icon: Layers },
     { id: 'Settings', label: 'Settings', icon: Settings },
   ];
 

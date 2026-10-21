@@ -73,13 +73,6 @@ export interface MarketRow {
   option_chain?: OptionChainRow[];
   timestamp: string;
   live: boolean;
-  /** Explicit upstream source; required for trading eligibility. */
-  source?: string;
-  data_source?: string;
-  day_move_pct?: number;
-  session_high?: number;
-  session_low?: number;
-  indicators?: { vwap?: number };
 }
 
 
@@ -100,9 +93,9 @@ export interface TechnicalIndicators {
 export interface QuantLayerResult {
   layer: number;
   name: string;
-  status: 'PASS' | 'WARN' | 'FAIL' | 'UNAVAILABLE';
-  score: number | null;
-  weight?: number;
+  status: 'PASS' | 'WARN' | 'FAIL';
+  score: number;
+  weight: number;
   detail: string;
 }
 
@@ -130,14 +123,14 @@ export interface PaperTrade {
 
 export interface SystemDiagnostics {
   backend_worker: {
-    cycle_age_seconds: number | null;
+    cycle_age_seconds: number;
     cycle_fresh: boolean;
-    uptime_hours: number | null;
+    uptime_hours: number;
   };
   angel_one: {
     authenticated: boolean;
     stream_open: boolean;
-    last_tick_age_seconds: number | null;
+    last_tick_age_seconds: number;
     client_code: string;
   };
   market_data: {

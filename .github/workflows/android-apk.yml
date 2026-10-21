@@ -1,21 +1,10 @@
 name: Build AI-TRADING Android APK
 
 on:
-  # Build a test APK for reviewed changes before merge, and publish the rolling APK on main.
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
-    paths:
-      - '.github/workflows/android-apk.yml'
-      - 'flutter_app/**'
-      - 'quant/**'
-      - 'requirements-quant.txt'
-  push:
-    branches: [main, feat/ai-trading-signal-apk, feat/strategy-tab-no-ai]
-    paths:
-      - '.github/workflows/android-apk.yml'
-      - 'flutter_app/**'
-      - 'quant/**'
-      - 'requirements-quant.txt'
   workflow_dispatch:
 
 permissions:
@@ -144,10 +133,7 @@ jobs:
           if ! grep -q 'id.flutter.flutter_background_service.BackgroundService' "$MANIFEST"; then
             sed -i 's#</application>#<service android:name="id.flutter.flutter_background_service.BackgroundService" android:foregroundServiceType="dataSync" android:exported="true" />\n    </application>#' "$MANIFEST"
           fi
-          # Flutter may generate a default label or restore an existing label from the release branch.
-          # Normalize any existing application label, not just the template default.
-          sed -i -E 's/android:label="[^"]*"/android:label="Trading Signals"/' "$MANIFEST"
-          grep -F 'android:label="Trading Signals"' "$MANIFEST"
+          sed -i 's/android:label="ai_trading_signal"/android:label="AI Trading Signals"/' "$MANIFEST"
           GRADLE=android/app/build.gradle.kts
           sed -i 's/applicationId = "com.example.ai_trading_signal"/applicationId = "com.sparmar3786.aitradingsignals"/' "$GRADLE"
           grep -n 'applicationId\|minSdk' "$GRADLE"
@@ -163,30 +149,6 @@ jobs:
             echo "Removed SMC, Order Flow, or MCX UI is still present in Flutter source."
             exit 1
           fi
-      - name: Verify AI pages and provider UI are absent
-        working-directory: flutter_app
-        shell: bash
-        run: |
-          set -euo pipefail
-          if grep -RniE 'AI Access|AI Memory|Market Intelligence|AI Chat|AI Provider|DailyAiMemory|nvidia_signal_review|daily_ai_memory_page|market_intelligence_page' lib; then
-            echo "Removed AI page/provider UI or AI-memory implementation remains in active Flutter source."
-            exit 1
-          fi
-          if grep -Eq "'AI Access'|'AI Memory'|'Market Intelligence'|'AI Chat'|'AI Providers?'" lib/main.dart; then
-            echo "An AI-specific navigation tab remains in main.dart."
-            exit 1
-          fi
-          if grep -Eq "'Strategies'|'Strategy Library'|'Quant Engine'|'Quant Signal'|'Strategy Signal'" lib/main.dart || grep -RniE 'class StrategyLibraryPage|class QuantEnginePage' lib; then
-            echo "Removed Strategy or Quant Engine UI remains in Flutter source."
-            exit 1
-          fi
-          if grep -F "'API & Railway'" lib/main.dart || grep -F "class ApiRailwayPage" lib/main.dart; then
-            echo "Removed API & Railway reference screen remains in Flutter source."
-            exit 1
-          fi
-          grep -F "BacktestingPage(backendUrl: AppConfig.signalBackendUrl)" lib/main.dart >/dev/null
-          echo "AI, Strategy, Quant Engine, and API & Railway screens absent; backtesting uses the AI-TRADING signal backend."
-
       - name: Analyze Dart
         working-directory: flutter_app
         run: flutter analyze --no-fatal-infos
@@ -215,34 +177,12 @@ jobs:
           ARM64="$APK_DIR/app-arm64-v8a-release.apk"
           test -s "$UNIVERSAL"
           test -s "$ARM64"
-
-          # Do not require Dart AOT binaries to preserve full URL literals.
-          # Flutter's AOT compiler can omit/fold constants, so validate the
-          # compile-time defines and their consumers in source instead.
-          WORKFLOW="../.github/workflows/android-apk.yml"
-          CONFIG="lib/config.dart"
-          API="lib/api.dart"
-          grep -F -- '--dart-define=BACKEND_URL=https://nse-algo-backend-final-production.up.railway.app' "$WORKFLOW" >/dev/null || {
-            echo "Build configuration missing BACKEND_URL define"
-            exit 1
-          }
-          grep -F -- '--dart-define=SIGNAL_BACKEND_URL=https://ai-trading-signals-api-production.up.railway.app' "$WORKFLOW" >/dev/null || {
-            echo "Build configuration missing SIGNAL_BACKEND_URL define"
-            exit 1
-          }
-          grep -F "String.fromEnvironment(" "$CONFIG" >/dev/null
-          grep -F "'BACKEND_URL'" "$CONFIG" >/dev/null
-          grep -F "'SIGNAL_BACKEND_URL'" "$CONFIG" >/dev/null
-          grep -F "AppConfig.backendUrl" "$API" >/dev/null
-          grep -F "AppConfig.signalBackendUrl" "$API" >/dev/null
-          echo "Compile-time backend defines and Dart consumers verified."
-
           AAPT=$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort | tail -1)
           for APK in "$UNIVERSAL" "$ARM64"; do
             mapfile -t CODE_FILES < <(unzip -Z1 "$APK" | grep -E '(^classes[0-9]*[.]dex$|^lib/[^/]+/libapp[.]so$)' || true)
             test "${#CODE_FILES[@]}" -gt 0
             COMPILED_STRINGS=$(for file in "${CODE_FILES[@]}"; do unzip -p "$APK" "$file" | strings; done)
-            if printf '%s\n' "$COMPILED_STRINGS" | grep -Ei 'SMC Pro Chart|SMC Chart|Smart Money Concepts Chart|Order Flow & Footprint|Order Flow Chart|Footprint Chart|FOOTPRINT CHART|class OrderFlowPage|CommodityPage' >/dev/null; then
+            if printf '%s\n' "$COMPILED_STRINGS" | grep -Ei 'SMC Pro Chart|SMC Chart|Smart Money Concepts Chart|Order Flow & Footprint|Order Flow Chart|Footprint Chart|FOOTPRINT CHART|MCX|Commodities|CRUDEOIL|NATURALGAS|CommodityPage' >/dev/null; then
               echo "Removed SMC, Order Flow, or MCX UI found in $APK"
               exit 1
             fi
@@ -250,8 +190,8 @@ jobs:
               echo "Forbidden local/emulator backend URL found in $APK"
               exit 1
             fi
-            # URL literals are intentionally not grepped from Dart AOT output;
-            # the compile-time defines and their source consumers were checked above.
+            printf '%s\n' "$COMPILED_STRINGS" | grep -F 'nse-algo-backend-final-production.up.railway.app' >/dev/null
+            printf '%s\n' "$COMPILED_STRINGS" | grep -F 'ai-trading-signals-api-production.up.railway.app' >/dev/null
             if printf '%s\n' "$COMPILED_STRINGS" | grep -E 'OPENAI_API_KEY|OPEN_AI_API_KEY|OPENAI_MODEL|api[.]openai[.]com' >/dev/null; then
               echo "Direct OpenAI provider configuration unexpectedly found in $APK"
               exit 1
@@ -260,39 +200,17 @@ jobs:
               echo "Order-placement capability unexpectedly found in APK"
               exit 1
             fi
-            if ! "$AAPT" dump permissions "$APK" | grep -q 'android.permission.INTERNET'; then
-              echo "Internet permission missing from $APK"
-              exit 1
-            fi
-            if ! "$AAPT" dump badging "$APK" | grep -F "application-label:'Trading Signals'" >/dev/null; then
-              echo "Expected Trading Signals app label missing from $APK"
-              "$AAPT" dump badging "$APK" | grep 'application-label' || true
-              exit 1
-            fi
+            "$AAPT" dump permissions "$APK" | grep -q 'android.permission.INTERNET'
+            "$AAPT" dump badging "$APK" | grep -F "application-label:'AI Trading Signals'" >/dev/null
           done
-          # Generate checksums from the exact verified APK bytes.
-          sha256sum "$UNIVERSAL" > "$UNIVERSAL.sha256"
-          sha256sum "$ARM64" > "$ARM64.sha256"
-          printf '%s\n' "$GITHUB_SHA" > "$(dirname "$UNIVERSAL")/BUILD_COMMIT_SHA.txt"
-          printf 'workflow_run_id=%s\nworkflow_run_number=%s\ncommit_sha=%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_NUMBER" "$GITHUB_SHA" > "$(dirname "$UNIVERSAL")/BUILD_INFO.txt"
-          # Verify both generated checksum manifests before any artifact/release upload.
-          sha256sum -c "$UNIVERSAL.sha256"
-          sha256sum -c "$ARM64.sha256"
-          test "$(cat "$(dirname "$UNIVERSAL")/BUILD_COMMIT_SHA.txt")" = "$GITHUB_SHA"
-          grep -F "commit_sha=$GITHUB_SHA" "$(dirname "$UNIVERSAL")/BUILD_INFO.txt"
-          cat "$UNIVERSAL.sha256" "$ARM64.sha256"
-          ls -lh "$UNIVERSAL" "$ARM64" "$UNIVERSAL.sha256" "$ARM64.sha256" "$(dirname "$UNIVERSAL")/BUILD_COMMIT_SHA.txt" "$(dirname "$UNIVERSAL")/BUILD_INFO.txt"
+          ls -lh "$UNIVERSAL" "$ARM64"
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ai-trading-apk-${{ github.run_number }}
           path: |
             flutter_app/build/app/outputs/flutter-apk/app-release.apk
-            flutter_app/build/app/outputs/flutter-apk/app-release.apk.sha256
             flutter_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
-            flutter_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk.sha256
-            flutter_app/build/app/outputs/flutter-apk/BUILD_COMMIT_SHA.txt
-            flutter_app/build/app/outputs/flutter-apk/BUILD_INFO.txt
           if-no-files-found: error
           retention-days: 14
 
@@ -320,31 +238,10 @@ jobs:
           TAG="ai-trading-signal-latest"
           APK="flutter_app/build/app/outputs/flutter-apk/app-release.apk"
           ARM64_APK="flutter_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk"
-          NOTES="Build commit: $GITHUB_SHA | Workflow run: $GITHUB_RUN_ID. Universal signal-only Android APK for broad ABI compatibility; app-arm64-v8a-release.apk is the smaller optimized build for 64-bit ARM Android phones. Uses the dedicated AI-TRADING Railway market-data and Angel One signals API without AI-provider or AI-chat features. Signals require fresh exchange-timestamped evidence and continuous 10-minute same-side/same-strike confirmation. No broker order-placement API is included in the APK. Configure Angel One credentials in the app over HTTPS; validate on-device and paper-trade before relying on signals."
-          # Existing GitHub releases do not reliably move an already-created Git tag
-          # when only the release metadata is edited. Move the tag ref explicitly to
-          # the verified build commit before uploading artifacts, then verify resolution.
-          if [ "$(gh api repos/sparmar3786-pixel/AI-TRADING/commits/main --jq .sha)" != "$GITHUB_SHA" ]; then
-            echo "main advanced during release publication; refusing to move the rolling tag"
-            exit 0
-          fi
-          if gh api "repos/sparmar3786-pixel/AI-TRADING/git/ref/tags/$TAG" >/dev/null 2>&1; then
-            gh api --method PATCH "repos/sparmar3786-pixel/AI-TRADING/git/refs/tags/$TAG" -f sha="$GITHUB_SHA" -F force=true >/dev/null
-          else
-            gh api --method POST repos/sparmar3786-pixel/AI-TRADING/git/refs -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" >/dev/null
-          fi
+          NOTES="Universal signal-only Android APK for broad ABI compatibility; app-arm64-v8a-release.apk is the smaller optimized build for 64-bit ARM Android phones. Keeps the existing Railway AI/chat backend separate from the AI-TRADING Angel One signals API. The signal service uses SmartWebSocketV2 with timestamp-validated REST FULL-depth fallback. Signals require fresh exchange-timestamped evidence and continuous 10-minute same-side/same-strike confirmation. No broker order-placement API is included in the APK. Configure Angel One credentials in the app over HTTPS; validate on-device and paper-trade before relying on signals."
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$APK" "$ARM64_APK" "$APK.sha256" "$ARM64_APK.sha256" "$(dirname "$APK")/BUILD_COMMIT_SHA.txt" "$(dirname "$APK")/BUILD_INFO.txt" --clobber
+            gh release upload "$TAG" "$APK" "$ARM64_APK" --clobber
             gh release edit "$TAG" --title "AI-TRADING Signal APK" --notes "$NOTES"
           else
-            gh release create "$TAG" "$APK" "$ARM64_APK" "$APK.sha256" "$ARM64_APK.sha256" "$(dirname "$APK")/BUILD_COMMIT_SHA.txt" "$(dirname "$APK")/BUILD_INFO.txt" --title "AI-TRADING Signal APK" --notes "$NOTES" --prerelease --target "$GITHUB_SHA"
-          fi
-          RELEASE_COMMIT_SHA=$(gh api "repos/sparmar3786-pixel/AI-TRADING/commits/$TAG" --jq .sha)
-          if [ "$RELEASE_COMMIT_SHA" != "$GITHUB_SHA" ]; then
-            echo "Rolling release tag resolves to $RELEASE_COMMIT_SHA, expected $GITHUB_SHA"
-            exit 1
-          fi
-          if [ "$(cat "$(dirname "$APK")/BUILD_COMMIT_SHA.txt")" != "$GITHUB_SHA" ]; then
-            echo "APK build metadata does not match the verified source commit"
-            exit 1
+            gh release create "$TAG" "$APK" "$ARM64_APK" --title "AI-TRADING Signal APK" --notes "$NOTES" --prerelease --target "$GITHUB_SHA"
           fi

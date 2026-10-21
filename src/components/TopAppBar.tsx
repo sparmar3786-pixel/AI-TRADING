@@ -1,5 +1,5 @@
 import React from 'react';
-import { Menu, RefreshCw, Zap, Settings, BrainCircuit } from 'lucide-react';
+import { Menu, RefreshCw, Zap, Settings } from 'lucide-react';
 import { useTrading } from '../context/TradingContext';
 
 export const TopAppBar: React.FC = () => {
@@ -66,19 +66,6 @@ export const TopAppBar: React.FC = () => {
           aria-label="Refresh"
         >
           <RefreshCw className="w-4 h-4" />
-        </button>
-
-        <button
-          onClick={() => setActiveTab('Market Intelligence')}
-          className={`p-2 rounded-xl transition-all active:scale-90 flex items-center justify-center ${
-            activeTab === 'Market Intelligence'
-              ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40 shadow-sm shadow-cyan-500/20'
-              : 'text-slate-400 hover:text-cyan-400 hover:bg-[#17223B]'
-          }`}
-          title="NVIDIA AI Market Intelligence (एआई सेक्शन)"
-          aria-label="AI Intelligence"
-        >
-          <BrainCircuit className="w-4 h-4" />
         </button>
 
         <button
