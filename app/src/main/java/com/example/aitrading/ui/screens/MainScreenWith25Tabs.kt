@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.aitrading.viewmodel.TradingViewModel
@@ -36,7 +35,7 @@ fun MainScreenWith25Tabs(viewModel: TradingViewModel) {
         "18. Calendar",
         "19. FII/DII",
         "20. Sector Heat",
-        "21. AI Assistant",
+        "21. 5 AI Agents",
         "22. Voice Alerts",
         "23. Cloud Watch",
         "24. P&L Journal",
@@ -73,9 +72,9 @@ fun MainScreenWith25Tabs(viewModel: TradingViewModel) {
                 1 -> TabAngelOneConnect(viewModel)
                 2 -> TabQuantEngine(viewModel)
                 3 -> TabOptionChain(viewModel)
-                4 -> TabOiLab(viewModel)
-                5 -> TabMarketIntelligence(viewModel)
-                6 -> TabStrategyMatrix(viewModel)
+                4 -> TabOiLab()
+                5 -> TabMarketIntelligence()
+                6 -> TabStrategyMatrix()
                 7 -> TabQuantEngine(viewModel) // Signals
                 8 -> TabGenericPlaceholder("Advanced Technical Indicators (RSI, MACD, ATR, ADX)")
                 9 -> TabGenericPlaceholder("Backtesting Simulation Lab & Historical Win-Rate")
@@ -89,7 +88,7 @@ fun MainScreenWith25Tabs(viewModel: TradingViewModel) {
                 17 -> TabGenericPlaceholder("Earnings, RBI Policy & Economic Calendar")
                 18 -> TabGenericPlaceholder("FII / DII Institutional Derivatives Activity Tracker")
                 19 -> TabGenericPlaceholder("Sector Performance Heatmap (Bank, IT, Auto, Pharma)")
-                20 -> TabGenericPlaceholder("Gemini AI Trading Assistant & Trade Critique")
+                20 -> TabAiAgentsTeam(viewModel) // 5 Free Autonomous AI Agents
                 21 -> TabGenericPlaceholder("Voice Alerts & Text-to-Speech Market Summaries")
                 22 -> TabGenericPlaceholder("Firebase Cloud Synced Watchlists & Custom Alerts")
                 23 -> TabGenericPlaceholder("Performance Analytics & P&L Trading Journal")
